@@ -24,7 +24,9 @@ class WhatsAppClient extends EventEmitter {
           creds: state.creds,
           keys: makeCacheableSignalKeyStore(state.keys, undefined),
         },
-        browser: ['D\'Black Chat', 'Chrome', '1.0.0'],
+        browser: ['Chrome (Linux)', '', ''],
+        connectTimeoutMs: 60000,
+        qrTimeout: 40000,
         generateHighQualityLinkPreview: false,
         syncFullHistory: false,
       });
