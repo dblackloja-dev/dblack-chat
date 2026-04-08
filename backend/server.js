@@ -6,6 +6,9 @@ const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const { queryAll, queryOne, queryRun, initDB } = require('./database');
 const WhatsAppClient = require('./whatsapp');
+const { createCanvas } = require('canvas');
+const bcrypt = require('bcryptjs');
+const erp = require('./erp');
 require('dotenv').config();
 
 const app = express();
@@ -145,64 +148,43 @@ wa.on('message', async (msg) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await queryOne("SELECT * FROM chat_users WHERE email = $1 AND active = true", [email]);
-    if (!user || user.password !== password) return res.status(401).json({ error: 'Credenciais inválidas' });
-    const token = jwt.sign({ id: user.id, name: user.name, role: user.role, avatar: user.avatar }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, id: user.id, name: user.name, role: user.role, avatar: user.avatar });
+    // Autentica no banco do ERP
+    const user = await erp.findUser(email);
+    if (!user) return res.status(401).json({ error: 'Usuário não encontrado' });
+
+    const validPass = await bcrypt.compare(password, user.password);
+    if (!validPass) return res.status(401).json({ error: 'Senha inválida' });
+
+    const avatar = user.avatar || user.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    // No chat: admin do ERP = admin, demais = atendente
+    const chatRole = user.role === 'admin' ? 'admin' : 'atendente';
+    const token = jwt.sign({ id: user.id, name: user.name, role: chatRole, erpRole: user.role, avatar }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token, id: user.id, name: user.name, role: chatRole, avatar });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/auth/me', auth, async (req, res) => {
-  const user = await queryOne("SELECT id, name, email, role, avatar, active FROM chat_users WHERE id = $1", [req.user.id]);
-  if (!user) return res.status(401).json({ error: 'Usuário não encontrado' });
-  res.json(user);
+  // Busca no ERP pra garantir que ainda está ativo
+  const user = await erp.findUser(req.user.name);
+  if (!user || !user.active) return res.status(401).json({ error: 'Usuário não encontrado' });
+  const avatar = user.avatar || user.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  const chatRole = user.role === 'admin' ? 'admin' : 'atendente';
+  res.json({ id: user.id, name: user.name, email: user.email, role: chatRole, avatar, active: user.active });
 });
 
 // ═══════════════════════════════════
 // ═══  USERS (admin only)         ═══
 // ═══════════════════════════════════
+// Lista usuários do ERP (somente leitura — gerenciar pelo ERP)
 app.get('/api/users', auth, async (req, res) => {
   try {
-    const users = await queryAll("SELECT id, name, email, role, active, avatar, created_at FROM chat_users ORDER BY name");
-    res.json(users);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/users', auth, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin pode criar usuários' });
-    const { name, email, password, role } = req.body;
-    const id = genId();
-    const avatar = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-    await queryRun(
-      "INSERT INTO chat_users (id, name, email, password, role, avatar) VALUES ($1, $2, $3, $4, $5, $6)",
-      [id, name, email, password, role || 'atendente', avatar]
-    );
-    res.json({ id, name, email, role: role || 'atendente', avatar, active: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.put('/api/users/:id', auth, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    const { name, email, password, role, active } = req.body;
-    const avatar = name ? name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) : undefined;
-    if (password) {
-      await queryRun("UPDATE chat_users SET name=$1, email=$2, password=$3, role=$4, active=$5, avatar=$6 WHERE id=$7",
-        [name, email, password, role, active !== false, avatar, req.params.id]);
-    } else {
-      await queryRun("UPDATE chat_users SET name=$1, email=$2, role=$3, active=$4, avatar=$5 WHERE id=$6",
-        [name, email, role, active !== false, avatar, req.params.id]);
-    }
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.delete('/api/users/:id', auth, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    await queryRun("DELETE FROM chat_users WHERE id = $1", [req.params.id]);
-    res.json({ success: true });
+    const users = await erp.listUsers();
+    // Mapeia role do ERP para o chat
+    res.json(users.map(u => ({
+      ...u,
+      role: u.role === 'admin' ? 'admin' : 'atendente',
+      avatar: u.avatar || u.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2),
+    })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -339,6 +321,252 @@ app.post('/api/whatsapp/pair', auth, async (req, res) => {
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ═══════════════════════════════════
+// ═══  ERP — VENDAS               ═══
+// ═══════════════════════════════════
+
+// Buscar produtos por SKU ou descrição
+app.get('/api/erp/products', auth, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.json([]);
+    const products = await erp.searchProducts(q);
+    // Monta URL da foto — se já for URL completa, usa direto; senão, adiciona prefixo
+    const uploadsUrl = process.env.ERP_UPLOADS_URL || '';
+    products.forEach(p => {
+      if (p.photo) {
+        p.photo_url = p.photo.startsWith('http') ? p.photo : `${uploadsUrl}/${p.photo}`;
+      }
+    });
+    res.json(products);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Estoque de um produto por loja
+app.get('/api/erp/products/:id/stock', auth, async (req, res) => {
+  try {
+    const stock = await erp.getProductStock(req.params.id);
+    res.json(stock);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Lojas do ERP
+app.get('/api/erp/stores', auth, async (req, res) => {
+  try {
+    const stores = await erp.getStores();
+    res.json(stores);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Buscar cliente por telefone
+app.get('/api/erp/customer/:phone', auth, async (req, res) => {
+  try {
+    const customer = await erp.findCustomerByPhone(req.params.phone);
+    res.json(customer || { not_found: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Finalizar venda e enviar cupom via WhatsApp
+app.post('/api/erp/sales', auth, async (req, res) => {
+  try {
+    const { store_id, customer_id, customer_phone, customer_name, items, payment_method, discount, discount_type } = req.body;
+    if (!items?.length) return res.status(400).json({ error: 'Carrinho vazio' });
+
+    // Usa o nome que veio do frontend (pushName do WhatsApp) ou busca no ERP
+    let customerDisplayName = customer_name || 'Cliente WhatsApp';
+    if (!customer_name && customer_phone) {
+      const cust = await erp.findCustomerByPhone(customer_phone);
+      if (cust) customerDisplayName = cust.name;
+    }
+
+    // Cria venda no ERP
+    const sale = await erp.createSale({
+      store_id: store_id || 'loja4',
+      customer_id,
+      customer_name: customerDisplayName,
+      customer_phone,
+      seller_name: req.user.name,
+      seller_id: req.user.id,
+      items,
+      payment_method: payment_method || 'pix',
+      discount: discount || 0,
+      discount_type: discount_type || 'fixed',
+    });
+
+    // Gera imagem do cupom não fiscal
+    const receiptBuffer = generateReceipt(sale, req.user.name, customerDisplayName);
+
+    // Busca a conversa ativa deste telefone
+    const conv = customer_phone ? await queryOne(
+      "SELECT * FROM conversations WHERE phone = $1 AND status != 'finalizado' ORDER BY last_message_at DESC LIMIT 1",
+      [customer_phone]
+    ) : null;
+
+    // Envia cupom via WhatsApp e registra no chat
+    if (customer_phone && wa.connected) {
+      try {
+        const captionText = `✅ Venda finalizada!\n🛍️ D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\n💳 ${sale.payment_method.toUpperCase()}\nObrigado pela compra! 🖤`;
+        await wa.sendImage(customer_phone, receiptBuffer, captionText);
+
+        // Registra a mensagem do cupom no chat pra aparecer na conversa
+        if (conv) {
+          const msgId = genId();
+          await queryRun(
+            "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, timestamp) VALUES ($1, $2, true, $3, $4, 'image', NOW())",
+            [msgId, conv.id, req.user.name, `🧾 Cupom de venda enviado — R$ ${sale.total.toFixed(2)} (${sale.payment_method.toUpperCase()})`]
+          );
+          await queryRun(
+            "UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2",
+            [`🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}`, conv.id]
+          );
+          // Notifica via WebSocket
+          broadcast('new_message', {
+            conversation: { ...conv, last_message: `🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}` },
+            message: { id: msgId, conversation_id: conv.id, from_me: true, sender: req.user.name, content: `🧾 Cupom de venda enviado — R$ ${sale.total.toFixed(2)} (${sale.payment_method.toUpperCase()})`, media_type: 'image', timestamp: new Date().toISOString() },
+          });
+        }
+      } catch (waErr) {
+        console.error('Erro ao enviar cupom via WhatsApp:', waErr.message);
+      }
+    }
+
+    res.json({ success: true, sale });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Gera imagem de cupom não fiscal usando Canvas
+function generateReceipt(sale, sellerName, customerName) {
+  const W = 400;
+  const lineH = 22;
+  const padding = 20;
+
+  // Calcula altura baseada nos itens
+  const headerLines = 8;
+  const itemLines = sale.items.length * 2;
+  const footerLines = 8;
+  const totalLines = headerLines + itemLines + footerLines;
+  const H = (totalLines * lineH) + (padding * 2) + 40;
+
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+
+  // Fundo branco
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, W, H);
+
+  let y = padding;
+  const left = padding;
+  const right = W - padding;
+  const center = W / 2;
+
+  // Funções auxiliares
+  const drawLine = () => {
+    ctx.strokeStyle = '#333';
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    y += 10;
+  };
+
+  const textCenter = (text, size, bold) => {
+    ctx.fillStyle = '#000';
+    ctx.font = `${bold ? 'bold ' : ''}${size}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText(text, center, y);
+    y += lineH;
+  };
+
+  const textLeft = (text, size) => {
+    ctx.fillStyle = '#000';
+    ctx.font = `${size}px Arial`;
+    ctx.textAlign = 'left';
+    ctx.fillText(text, left, y);
+  };
+
+  const textRight = (text, size) => {
+    ctx.fillStyle = '#000';
+    ctx.font = `${size}px Arial`;
+    ctx.textAlign = 'right';
+    ctx.fillText(text, right, y);
+  };
+
+  // ─── CABEÇALHO ───
+  textCenter("D'BLACK STORE", 18, true);
+  textCenter('CUPOM NÃO FISCAL', 11, false);
+  y += 4;
+  drawLine();
+
+  // Data e vendedor
+  const now = new Date();
+  const dataStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  textLeft(`Data: ${dataStr}`, 11); textRight(`Vendedor: ${sellerName}`, 11);
+  y += lineH;
+  if (customerName) {
+    textLeft(`Cliente: ${customerName}`, 11);
+    y += lineH;
+  }
+  drawLine();
+
+  // ─── ITENS ───
+  textLeft('ITEM', 10);
+  ctx.textAlign = 'right';
+  ctx.fillText('TOTAL', right, y);
+  y += lineH;
+  drawLine();
+
+  for (const item of sale.items) {
+    textLeft(`${item.quantity}x ${item.name}`, 11);
+    textRight(`R$ ${(item.price * item.quantity).toFixed(2)}`, 11);
+    y += lineH;
+    ctx.fillStyle = '#666';
+    ctx.font = '10px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`  SKU: ${item.sku || '-'} | Unit: R$ ${item.price.toFixed(2)}`, left, y);
+    y += lineH;
+  }
+
+  drawLine();
+
+  // ─── TOTAIS ───
+  textLeft('Subtotal:', 12);
+  textRight(`R$ ${sale.subtotal.toFixed(2)}`, 12);
+  y += lineH;
+
+  if (sale.discount > 0) {
+    ctx.fillStyle = '#CC0000';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('Desconto:', left, y);
+    ctx.textAlign = 'right';
+    ctx.fillText(`- R$ ${sale.discount.toFixed(2)}`, right, y);
+    y += lineH;
+  }
+
+  ctx.fillStyle = '#000';
+  textLeft('TOTAL:', 14);
+  ctx.font = 'bold 14px Arial';
+  ctx.textAlign = 'right';
+  ctx.fillText(`R$ ${sale.total.toFixed(2)}`, right, y);
+  y += lineH;
+
+  // Forma de pagamento
+  const payLabels = { pix: 'PIX', dinheiro: 'Dinheiro', credito: 'Cartão Crédito', debito: 'Cartão Débito', crediario: 'Crediário' };
+  textLeft(`Pagamento: ${payLabels[sale.payment_method] || sale.payment_method}`, 11);
+  y += lineH;
+
+  drawLine();
+
+  // ─── RODAPÉ ───
+  y += 4;
+  textCenter('Obrigado pela preferência!', 12, true);
+  textCenter("D'Black Store — @d_blackloja", 10, false);
+
+  return canvas.toBuffer('image/png');
+}
 
 // ═══════════════════════════════════
 // ═══  START                      ═══

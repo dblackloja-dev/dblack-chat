@@ -57,6 +57,13 @@ const api = {
   getWhatsAppStatus: () => request('/whatsapp/status'),
   reconnectWhatsApp: () => request('/whatsapp/reconnect', { method: 'POST' }),
   pairWhatsApp: (phone) => request('/whatsapp/pair', { method: 'POST', body: { phone } }),
+
+  // ERP — Vendas
+  searchProducts: (q) => request(`/erp/products?q=${encodeURIComponent(q)}`),
+  getProductStock: (id) => request(`/erp/products/${id}/stock`),
+  getStores: () => request('/erp/stores'),
+  findCustomer: (phone) => request(`/erp/customer/${phone}`),
+  createSale: (data) => request('/erp/sales', { method: 'POST', body: data }),
 };
 
 export default api;

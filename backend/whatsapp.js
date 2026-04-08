@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers } = require('@whiskeysockets/baileys');
 const path = require('path');
 const EventEmitter = require('events');
 
@@ -29,7 +29,9 @@ class WhatsAppClient extends EventEmitter {
           creds: state.creds,
           keys: makeCacheableSignalKeyStore(state.keys, undefined),
         },
-        browser: ['Chrome (Linux)', '', ''],
+        browser: Browsers.macOS('Chrome'),
+        version: [2, 3000, 1033893291],
+        printQRInTerminal: false,
         connectTimeoutMs: 60000,
         generateHighQualityLinkPreview: false,
         syncFullHistory: false,
@@ -37,18 +39,16 @@ class WhatsAppClient extends EventEmitter {
 
       this.socket.ev.on('creds.update', saveCreds);
 
+      // Solicita código de pareamento quando conectar ao servidor do WhatsApp
+      let pairingRequested = false;
       this.socket.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // QR Code gerado (fallback)
-        if (qr) {
-          this.qrCode = qr;
-          this.connected = false;
-          this.emit('qr', qr);
-          console.log('📱 QR Code gerado');
-
-          // Se tem número pra parear, gera código de pareamento
-          if (needsPairing && this.phoneForPairing && this.socket) {
+        // Quando está conectando e precisa parear, solicita o código
+        if (connection === 'connecting' && needsPairing && this.phoneForPairing && this.socket && !pairingRequested) {
+          pairingRequested = true;
+          // Pequeno delay para o socket estabilizar
+          setTimeout(async () => {
             try {
               const code = await this.socket.requestPairingCode(this.phoneForPairing);
               this.pairingCode = code;
@@ -56,8 +56,17 @@ class WhatsAppClient extends EventEmitter {
               console.log('🔢 Código de pareamento:', code);
             } catch (err) {
               console.error('Erro ao gerar código de pareamento:', err.message);
+              pairingRequested = false;
             }
-          }
+          }, 3000);
+        }
+
+        // QR Code gerado (fallback caso não use pairing)
+        if (qr) {
+          this.qrCode = qr;
+          this.connected = false;
+          this.emit('qr', qr);
+          console.log('📱 QR Code gerado');
         }
 
         if (connection === 'close') {

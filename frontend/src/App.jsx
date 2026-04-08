@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import api from './api';
+import SalesPanel from './SalesPanel';
 
 // ─── CORES E ESTILOS ───
 const C = { bg:"#0A0A0C", s1:"#111114", s2:"#18181C", s3:"#1F1F24", brd:"rgba(255,215,64,0.08)", brdH:"rgba(255,215,64,0.2)", gold:"#FFD740", goldD:"#FF8F00", txt:"#EEEEF0", dim:"rgba(255,255,255,0.75)", grn:"#00E676", red:"#FF5252", blu:"#40C4FF", pur:"#E040FB", wa:"#25D366" };
@@ -53,6 +54,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [spyConv, setSpyConv] = useState(null); // conversa sendo espiada
   const [spyMsgs, setSpyMsgs] = useState([]);
+  const [showSales, setShowSales] = useState(false); // painel de vendas
 
   // Refs
   const messagesEndRef = useRef(null);
@@ -220,20 +222,23 @@ export default function App() {
   const myAtendendo = atendendo.filter(c => c.agent_id === user?.id);
   const finalizados = conversations.filter(c => c.status === 'finalizado');
 
-  // ─── ADMIN: novo user ───
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'atendente' });
-  const createUser = async () => {
-    if (!newUser.name || !newUser.email || !newUser.password) return;
+  // ─── ADMIN: parear WhatsApp ───
+  const [pairPhone, setPairPhone] = useState('');
+  const [pairing, setPairing] = useState(false);
+
+  const doPair = async () => {
+    if (!pairPhone.trim() || pairing) return;
+    setPairing(true);
     try {
-      const u = await api.createUser(newUser);
-      setUsers(prev => [...prev, u]);
-      setNewUser({ name: '', email: '', password: '', role: 'atendente' });
-    } catch {}
+      const result = await api.pairWhatsApp(pairPhone.trim());
+      if (result.pairingCode) {
+        setWaStatus(prev => ({ ...prev, pairingCode: result.pairingCode }));
+      }
+    } catch (e) { console.error('Erro ao parear:', e); }
+    setPairing(false);
   };
-  const deleteUser = async (id) => {
-    if (!confirm('Excluir este usuário?')) return;
-    try { await api.deleteUser(id); setUsers(prev => prev.filter(u => u.id !== id)); } catch {}
-  };
+
+  // Usuários vêm do ERP (somente leitura)
 
   // ─── CHECKING ───
   if (checking) return <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.dim, fontFamily: "'Outfit',sans-serif" }}>Carregando...</div>;
@@ -245,7 +250,7 @@ export default function App() {
         <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: 6, background: `linear-gradient(135deg,${C.gold},#fff)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 4 }}>D'BLACK</div>
         <div style={{ fontSize: 11, letterSpacing: 4, color: C.wa, marginBottom: 32 }}>CHAT — ATENDIMENTO</div>
         <div style={{ background: C.s1, borderRadius: 16, padding: 28, border: `1px solid ${C.brd}` }}>
-          <input style={inputStyle} placeholder="E-mail" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && doLogin()} />
+          <input style={inputStyle} placeholder="Nome ou e-mail" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && doLogin()} />
           <input style={inputStyle} type="password" placeholder="Senha" value={loginPass} onChange={e => setLoginPass(e.target.value)} onKeyDown={e => e.key === 'Enter' && doLogin()} />
           {loginError && <div style={{ color: C.red, fontSize: 12, marginBottom: 8 }}>{loginError}</div>}
           <button style={btnGold} onClick={doLogin}>Entrar</button>
@@ -332,7 +337,7 @@ export default function App() {
       </div>
 
       {/* ═══ ÁREA PRINCIPAL — Chat ou Spy ou Admin ═══ */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: C.bg }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: C.bg, minHeight: 0, overflow: 'hidden' }}>
 
         {/* ADMIN PANEL */}
         {showAdmin && user.role === 'admin' && (
@@ -364,40 +369,26 @@ export default function App() {
               {!waStatus.connected && <div style={{ marginTop: 10 }}>
                 <p style={{ fontSize: 12, color: C.dim, marginBottom: 8 }}>Informe o número do WhatsApp da loja para parear:</p>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <input id="pair-phone" style={{ ...inputStyle, flex: 1, marginBottom: 0 }} placeholder="5531999999999 (com DDI+DDD)" />
-                  <button style={btnGold} onClick={async () => {
-                    const phone = document.getElementById('pair-phone').value;
-                    if (!phone) return;
-                    try {
-                      const result = await api.pairWhatsApp(phone);
-                      if (result.pairingCode) {
-                        setWaStatus(prev => ({ ...prev, pairingCode: result.pairingCode }));
-                      }
-                    } catch (e) { console.error(e); }
-                  }}>🔗 Parear</button>
+                  <input style={{ ...inputStyle, flex: 1, marginBottom: 0 }} placeholder="5533999999999 (com DDI+DDD)" value={pairPhone} onChange={e => setPairPhone(e.target.value)} onKeyDown={e => e.key === 'Enter' && doPair()} />
+                  <button style={{ ...btnGold, width: 'auto', opacity: pairing ? 0.6 : 1 }} onClick={doPair} disabled={pairing}>{pairing ? '⏳ Pareando...' : '🔗 Parear'}</button>
                 </div>
               </div>}
             </div>
 
-            {/* Users */}
+            {/* Users — do ERP */}
             <div style={cardStyle}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>👥 Atendentes</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 6, marginBottom: 10 }}>
-                <input style={inputStyle} placeholder="Nome" value={newUser.name} onChange={e => setNewUser(u => ({ ...u, name: e.target.value }))} />
-                <input style={inputStyle} placeholder="E-mail" value={newUser.email} onChange={e => setNewUser(u => ({ ...u, email: e.target.value }))} />
-                <input style={inputStyle} placeholder="Senha" value={newUser.password} onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))} />
-                <button style={btnGold} onClick={createUser}>+ Criar</button>
-              </div>
+              <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>👥 Atendentes</h3>
+              <p style={{ fontSize: 11, color: C.dim, marginBottom: 10 }}>Usuários sincronizados do ERP. Para adicionar ou editar, use o painel do ERP.</p>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr>
-                  <th style={thStyle}>Nome</th><th style={thStyle}>E-mail</th><th style={thStyle}>Cargo</th><th style={thStyle}>Ação</th>
+                  <th style={thStyle}>Nome</th><th style={thStyle}>E-mail</th><th style={thStyle}>Cargo</th><th style={thStyle}>Loja</th>
                 </tr></thead>
                 <tbody>{users.map(u => (
                   <tr key={u.id} style={{ borderBottom: `1px solid ${C.brd}` }}>
                     <td style={tdStyle}>{u.name}</td>
-                    <td style={{ ...tdStyle, fontSize: 11, color: C.dim }}>{u.email}</td>
+                    <td style={{ ...tdStyle, fontSize: 11, color: C.dim }}>{u.email || '-'}</td>
                     <td style={tdStyle}><span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: u.role === 'admin' ? 'rgba(255,215,64,.1)' : 'rgba(0,230,118,.1)', color: u.role === 'admin' ? C.gold : C.grn }}>{u.role}</span></td>
-                    <td style={tdStyle}>{u.role !== 'admin' && <button style={{ ...btnSmall, color: C.red }} onClick={() => deleteUser(u.id)}>Excluir</button>}</td>
+                    <td style={{ ...tdStyle, fontSize: 11, color: C.dim }}>{u.store_id || 'todas'}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -426,9 +417,18 @@ export default function App() {
           </div>
         )}
 
+        {/* PAINEL DE VENDAS */}
+        {showSales && activeConv && !showAdmin && (
+          <SalesPanel
+            customerPhone={activeConv.phone}
+            customerName={activeConv.customer_push_name || activeConv.customer_name}
+            onClose={() => setShowSales(false)}
+          />
+        )}
+
         {/* CHAT ATIVO */}
-        {activeConv && !showAdmin && !spyConv && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {activeConv && !showAdmin && !spyConv && !showSales && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             {/* Chat header */}
             <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.brd}`, background: C.s1, display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ ...avatarStyle, background: `linear-gradient(135deg,${C.wa},#128C7E)` }}>{(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}</div>
@@ -437,6 +437,7 @@ export default function App() {
                 <div style={{ fontSize: 11, color: C.dim }}>{fmtPhone(activeConv.phone)}{activeConv.agent_name ? ` — Atendente: ${activeConv.agent_name}` : ''}</div>
               </div>
               {activeConv.status === 'atendendo' && <>
+                <button style={{ ...btnSmall, background: 'rgba(255,215,64,.1)', color: C.gold, border: `1px solid ${C.gold}`, padding: '6px 14px' }} onClick={() => { setShowSales(true); setShowAdmin(false); }}>🛒 Vender</button>
                 <button style={btnSmall} onClick={() => transferConversation(activeConv.id)}>↩️ Devolver</button>
                 <button style={{ ...btnSmall, color: C.red }} onClick={() => finishConversation(activeConv.id)}>✓ Finalizar</button>
               </>}
@@ -450,16 +451,16 @@ export default function App() {
 
             {/* Input */}
             {activeConv.status === 'atendendo' && activeConv.agent_id === user.id && (
-              <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.brd}`, background: C.s1, display: 'flex', gap: 8 }}>
+              <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.brd}`, background: C.s1, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input
-                  style={{ ...inputStyle, flex: 1, marginBottom: 0 }}
+                  style={{ ...inputStyle, flex: 1, marginBottom: 0, padding: '12px 16px', fontSize: 14 }}
                   placeholder="Digite sua mensagem..."
                   value={msgInput}
                   onChange={e => setMsgInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
                   autoFocus
                 />
-                <button style={{ ...btnGold, padding: '10px 20px' }} onClick={sendMessage}>Enviar</button>
+                <button style={{ ...btnSmall, background: 'linear-gradient(135deg,#FFD740,#FF8F00)', color: C.bg, fontWeight: 800, padding: '12px 18px', fontSize: 13, border: 'none', borderRadius: 8, whiteSpace: 'nowrap' }} onClick={sendMessage}>Enviar</button>
               </div>
             )}
             {activeConv.status === 'finalizado' && (
