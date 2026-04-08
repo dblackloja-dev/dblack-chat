@@ -97,8 +97,11 @@ export default function App() {
 
     // Conecta WebSocket
     const token = api.getToken();
-    const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${wsProto}://${window.location.host}/ws?token=${token}`;
+    // Em produção, conecta direto no backend Railway; em dev, usa proxy local
+    const WS_HOST = window.location.hostname === 'localhost'
+      ? `ws://${window.location.host}`
+      : 'wss://dblack-chat-production.up.railway.app';
+    const wsUrl = `${WS_HOST}/ws?token=${token}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

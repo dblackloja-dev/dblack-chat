@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://dblack-chat-backend-production.up.railway.app/api/$1"
+      "destination": "https://dblack-chat-production.up.railway.app/api/$1"
     },
     {
       "source": "/ws",
-      "destination": "https://dblack-chat-backend-production.up.railway.app/ws"
+      "destination": "https://dblack-chat-production.up.railway.app/ws"
     },
     {
       "source": "/(.*)",
