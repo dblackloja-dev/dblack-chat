@@ -7,17 +7,22 @@ class WhatsAppClient extends EventEmitter {
     super();
     this.socket = null;
     this.qrCode = null;
+    this.pairingCode = null;
     this.connected = false;
     this.connecting = false;
     this.authDir = path.join(__dirname, 'auth_info');
+    this.phoneForPairing = null;
   }
 
-  async connect() {
+  async connect(phoneNumber) {
     if (this.connecting) return;
     this.connecting = true;
 
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+
+      // Se já tem credenciais, não precisa de pairing
+      const needsPairing = !state.creds.registered;
 
       this.socket = makeWASocket({
         auth: {
@@ -26,23 +31,33 @@ class WhatsAppClient extends EventEmitter {
         },
         browser: ['Chrome (Linux)', '', ''],
         connectTimeoutMs: 60000,
-        qrTimeout: 40000,
         generateHighQualityLinkPreview: false,
         syncFullHistory: false,
       });
 
-      // Salva credenciais quando atualizar
       this.socket.ev.on('creds.update', saveCreds);
 
-      // Evento de conexão
-      this.socket.ev.on('connection.update', (update) => {
+      this.socket.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
+        // QR Code gerado (fallback)
         if (qr) {
           this.qrCode = qr;
           this.connected = false;
           this.emit('qr', qr);
-          console.log('📱 QR Code gerado — escaneie com o WhatsApp');
+          console.log('📱 QR Code gerado');
+
+          // Se tem número pra parear, gera código de pareamento
+          if (needsPairing && this.phoneForPairing && this.socket) {
+            try {
+              const code = await this.socket.requestPairingCode(this.phoneForPairing);
+              this.pairingCode = code;
+              this.emit('pairing_code', code);
+              console.log('🔢 Código de pareamento:', code);
+            } catch (err) {
+              console.error('Erro ao gerar código de pareamento:', err.message);
+            }
+          }
         }
 
         if (connection === 'close') {
@@ -52,18 +67,17 @@ class WhatsAppClient extends EventEmitter {
           console.log('❌ Conexão fechada. Código:', statusCode);
 
           if (statusCode === DisconnectReason.loggedOut) {
-            console.log('🚪 WhatsApp deslogado. Escaneie o QR novamente.');
+            console.log('🚪 WhatsApp deslogado.');
             this.qrCode = null;
+            this.pairingCode = null;
             this.emit('disconnected');
-          } else if (statusCode === 405 || statusCode === DisconnectReason.connectionReplaced) {
-            // 405 = aguardando scan do QR, não reconectar imediatamente
-            console.log('⏳ Aguardando escaneamento do QR Code...');
-            if (!this.qrCode) {
-              setTimeout(() => this.connect(), 15000);
-            }
+          } else if (this.pairingCode || this.qrCode) {
+            // Tem código/QR ativo, aguarda scan sem reconectar rápido
+            console.log('⏳ Aguardando pareamento...');
+            setTimeout(() => this.connect(this.phoneForPairing), 20000);
           } else {
             console.log('🔄 Reconectando em 10s...');
-            setTimeout(() => this.connect(), 10000);
+            setTimeout(() => this.connect(this.phoneForPairing), 10000);
           }
         }
 
@@ -71,6 +85,7 @@ class WhatsAppClient extends EventEmitter {
           this.connected = true;
           this.connecting = false;
           this.qrCode = null;
+          this.pairingCode = null;
           console.log('✅ WhatsApp conectado!');
           this.emit('connected');
         }
@@ -134,8 +149,24 @@ class WhatsAppClient extends EventEmitter {
     } catch (err) {
       console.error('Erro ao conectar WhatsApp:', err);
       this.connecting = false;
-      setTimeout(() => this.connect(), 10000);
+      setTimeout(() => this.connect(this.phoneForPairing), 15000);
     }
+  }
+
+  // Inicia pareamento com número de telefone
+  async startPairing(phone) {
+    this.phoneForPairing = phone.replace(/\D/g, '');
+    this.pairingCode = null;
+    this.qrCode = null;
+
+    // Limpa auth anterior
+    const fs = require('fs');
+    if (fs.existsSync(this.authDir)) {
+      fs.rmSync(this.authDir, { recursive: true, force: true });
+    }
+
+    this.connecting = false;
+    await this.connect(this.phoneForPairing);
   }
 
   async sendMessage(phone, text) {
@@ -151,7 +182,11 @@ class WhatsAppClient extends EventEmitter {
   }
 
   getStatus() {
-    return { connected: this.connected, hasQR: !!this.qrCode };
+    return {
+      connected: this.connected,
+      hasQR: !!this.qrCode,
+      pairingCode: this.pairingCode,
+    };
   }
 }
 

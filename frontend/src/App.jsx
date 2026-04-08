@@ -147,7 +147,8 @@ export default function App() {
         }
 
         if (event === 'qr') setWaStatus(prev => ({ ...prev, qr: data.qr, connected: false }));
-        if (event === 'wa_status') setWaStatus(prev => ({ ...prev, connected: data.connected, qr: data.connected ? null : prev.qr }));
+        if (event === 'pairing_code') setWaStatus(prev => ({ ...prev, pairingCode: data.code }));
+        if (event === 'wa_status') setWaStatus(prev => ({ ...prev, connected: data.connected, qr: data.connected ? null : prev.qr, pairingCode: data.connected ? null : prev.pairingCode }));
       } catch {}
     };
 
@@ -345,11 +346,37 @@ export default function App() {
                 <span style={{ width: 10, height: 10, borderRadius: 5, background: waStatus.connected ? C.grn : C.red }} />
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{waStatus.connected ? 'Conectado' : 'Desconectado'}</span>
               </div>
-              {waStatus.qr && <div style={{ textAlign: 'center', marginBottom: 10 }}>
+
+              {/* Código de pareamento */}
+              {waStatus.pairingCode && <div style={{ textAlign: 'center', marginBottom: 10, padding: 20, background: 'rgba(37,211,102,.06)', border: '1px solid rgba(37,211,102,.2)', borderRadius: 12 }}>
+                <p style={{ fontSize: 12, color: C.dim, marginBottom: 8 }}>Digite este código no seu WhatsApp:</p>
+                <p style={{ fontSize: 11, color: C.dim, marginBottom: 12 }}>WhatsApp → ⋮ Menu → Dispositivos conectados → Conectar dispositivo → Conectar com número de telefone</p>
+                <div style={{ fontSize: 36, fontWeight: 900, letterSpacing: 8, color: C.wa }}>{waStatus.pairingCode}</div>
+              </div>}
+
+              {/* QR Code fallback */}
+              {waStatus.qr && !waStatus.pairingCode && <div style={{ textAlign: 'center', marginBottom: 10 }}>
                 <p style={{ fontSize: 12, color: C.dim, marginBottom: 8 }}>Escaneie o QR Code com seu WhatsApp:</p>
                 <img src={waStatus.qr} alt="QR Code" style={{ width: 256, height: 256, borderRadius: 12, border: `2px solid ${C.brd}` }} />
               </div>}
-              {!waStatus.connected && !waStatus.qr && <button style={btnGold} onClick={() => api.reconnectWhatsApp()}>Reconectar</button>}
+
+              {/* Parear com número */}
+              {!waStatus.connected && <div style={{ marginTop: 10 }}>
+                <p style={{ fontSize: 12, color: C.dim, marginBottom: 8 }}>Informe o número do WhatsApp da loja para parear:</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input id="pair-phone" style={{ ...inputStyle, flex: 1, marginBottom: 0 }} placeholder="5531999999999 (com DDI+DDD)" />
+                  <button style={btnGold} onClick={async () => {
+                    const phone = document.getElementById('pair-phone').value;
+                    if (!phone) return;
+                    try {
+                      const result = await api.pairWhatsApp(phone);
+                      if (result.pairingCode) {
+                        setWaStatus(prev => ({ ...prev, pairingCode: result.pairingCode }));
+                      }
+                    } catch (e) { console.error(e); }
+                  }}>🔗 Parear</button>
+                </div>
+              </div>}
             </div>
 
             {/* Users */}

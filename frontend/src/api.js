@@ -56,6 +56,7 @@ const api = {
   // WhatsApp
   getWhatsAppStatus: () => request('/whatsapp/status'),
   reconnectWhatsApp: () => request('/whatsapp/reconnect', { method: 'POST' }),
+  pairWhatsApp: (phone) => request('/whatsapp/pair', { method: 'POST', body: { phone } }),
 };
 
 export default api;

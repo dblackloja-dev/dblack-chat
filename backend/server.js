@@ -72,19 +72,28 @@ function broadcast(event, data) {
 // ═══════════════════════════════════
 const wa = new WhatsAppClient();
 let currentQR = null;
+let currentPairingCode = null;
 
 wa.on('qr', async (qr) => {
   currentQR = await QRCode.toDataURL(qr);
   broadcast('qr', { qr: currentQR });
 });
 
+wa.on('pairing_code', (code) => {
+  currentPairingCode = code;
+  broadcast('pairing_code', { code });
+  console.log('🔢 Código de pareamento enviado aos clientes:', code);
+});
+
 wa.on('connected', () => {
   currentQR = null;
+  currentPairingCode = null;
   broadcast('wa_status', { connected: true });
 });
 
 wa.on('disconnected', () => {
   currentQR = null;
+  currentPairingCode = null;
   broadcast('wa_status', { connected: false });
 });
 
@@ -294,7 +303,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
 // ═══  WHATSAPP STATUS            ═══
 // ═══════════════════════════════════
 app.get('/api/whatsapp/status', auth, async (req, res) => {
-  res.json({ ...wa.getStatus(), qr: currentQR });
+  res.json({ ...wa.getStatus(), qr: currentQR, pairingCode: currentPairingCode });
 });
 
 app.post('/api/whatsapp/reconnect', auth, async (req, res) => {
@@ -305,15 +314,49 @@ app.post('/api/whatsapp/reconnect', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/whatsapp/pair', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Informe o número do WhatsApp' });
+    await wa.startPairing(phone);
+    // Aguarda o código ser gerado (até 15s)
+    let attempts = 0;
+    const waitForCode = () => new Promise((resolve) => {
+      const check = setInterval(() => {
+        attempts++;
+        if (wa.pairingCode || attempts > 30) {
+          clearInterval(check);
+          resolve(wa.pairingCode);
+        }
+      }, 500);
+    });
+    const code = await waitForCode();
+    if (code) {
+      res.json({ success: true, pairingCode: code });
+    } else {
+      res.json({ success: true, message: 'Aguardando código... verifique o status.' });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══════════════════════════════════
 // ═══  START                      ═══
 // ═══════════════════════════════════
 async function start() {
   await initDB();
-  await wa.connect();
+  // Só conecta ao WhatsApp automaticamente se já tiver credenciais salvas
+  const fs = require('fs');
+  if (fs.existsSync(path.join(__dirname, 'auth_info', 'creds.json'))) {
+    console.log('🔑 Credenciais encontradas, conectando ao WhatsApp...');
+    await wa.connect();
+  } else {
+    console.log('📱 WhatsApp não configurado. Use o painel admin para parear.');
+  }
   server.listen(PORT, () => {
     console.log(`🚀 D'Black Chat rodando na porta ${PORT}`);
   });
 }
+const path = require('path');
 
 start().catch(console.error);
