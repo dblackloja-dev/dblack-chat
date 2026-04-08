@@ -368,9 +368,9 @@ export default function App() {
               {/* Parear com número */}
               {!waStatus.connected && <div style={{ marginTop: 10 }}>
                 <p style={{ fontSize: 12, color: C.dim, marginBottom: 8 }}>Informe o número do WhatsApp da loja para parear:</p>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input style={{ ...inputStyle, flex: 1, marginBottom: 0 }} placeholder="5533999999999 (com DDI+DDD)" value={pairPhone} onChange={e => setPairPhone(e.target.value)} onKeyDown={e => e.key === 'Enter' && doPair()} />
-                  <button style={{ ...btnGold, width: 'auto', opacity: pairing ? 0.6 : 1 }} onClick={doPair} disabled={pairing}>{pairing ? '⏳ Pareando...' : '🔗 Parear'}</button>
+                  <button style={{ ...btnSmall, background: 'linear-gradient(135deg,#FFD740,#FF8F00)', color: C.bg, fontWeight: 800, padding: '10px 16px', border: 'none', whiteSpace: 'nowrap', opacity: pairing ? 0.6 : 1 }} onClick={doPair} disabled={pairing}>{pairing ? '⏳...' : '🔗 Parear'}</button>
                 </div>
               </div>}
             </div>
