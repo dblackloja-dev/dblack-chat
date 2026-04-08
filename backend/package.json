@@ -1,0 +1,20 @@
+{
+  "name": "dblack-chat-backend",
+  "version": "1.0.0",
+  "description": "D'Black Chat - Plataforma de atendimento WhatsApp",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.16",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.3",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.1"
+  }
+}
