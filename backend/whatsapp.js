@@ -49,14 +49,19 @@ class WhatsAppClient extends EventEmitter {
           const statusCode = lastDisconnect?.error?.output?.statusCode;
           console.log('❌ Conexão fechada. Código:', statusCode);
 
-          // Reconectar se não for logout
-          if (statusCode !== DisconnectReason.loggedOut) {
-            console.log('🔄 Reconectando em 5s...');
-            setTimeout(() => this.connect(), 5000);
-          } else {
+          if (statusCode === DisconnectReason.loggedOut) {
             console.log('🚪 WhatsApp deslogado. Escaneie o QR novamente.');
             this.qrCode = null;
             this.emit('disconnected');
+          } else if (statusCode === 405 || statusCode === DisconnectReason.connectionReplaced) {
+            // 405 = aguardando scan do QR, não reconectar imediatamente
+            console.log('⏳ Aguardando escaneamento do QR Code...');
+            if (!this.qrCode) {
+              setTimeout(() => this.connect(), 15000);
+            }
+          } else {
+            console.log('🔄 Reconectando em 10s...');
+            setTimeout(() => this.connect(), 10000);
           }
         }
 
