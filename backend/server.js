@@ -10,8 +10,7 @@ const WhatsAppClient = require('./whatsapp');
 const { createCanvas } = require('@napi-rs/canvas');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const ffmpeg = require('fluent-ffmpeg');
-// No Railway, ffmpeg vem do nixpacks. Local, precisa estar no PATH.
+// ffmpeg removido — áudio enviado como documento
 const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 const aiAgent = require('./ai-agent');
@@ -446,47 +445,17 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Áudio não enviado' });
 
-    const fs = require('fs');
-    const tmpId = genId();
-    const tmpIn = path.join(__dirname, `tmp_in_${tmpId}.webm`);
-    const tmpOut = path.join(__dirname, `tmp_out_${tmpId}.m4a`);
-    fs.writeFileSync(tmpIn, req.file.buffer);
-
-    // Converte webm → M4A/AAC (formato nativo de áudio do WhatsApp)
-    let audioBuffer = req.file.buffer;
-    let converted = false;
-    try {
-      await new Promise((resolve, reject) => {
-        ffmpeg(tmpIn)
-          .toFormat('ipod')
-          .audioCodec('aac')
-          .audioBitrate('64k')
-          .audioChannels(1)
-          .audioFrequency(44100)
-          .outputOptions(['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart'])
-          .on('end', resolve)
-          .on('error', reject)
-          .save(tmpOut);
-      });
-      audioBuffer = fs.readFileSync(tmpOut);
-      converted = true;
-      console.log('🎵 Áudio convertido pra M4A:', audioBuffer.length, 'bytes');
-    } catch (e) {
-      console.log('⚠️ Conversão M4A falhou:', e.message);
-    }
-    try { fs.unlinkSync(tmpIn); } catch {}
-    try { fs.unlinkSync(tmpOut); } catch {}
-
     // Salva no banco
     const mediaId = 'aud_sent_' + genId();
-    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/mp4', audioBuffer.toString('base64')]);
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/webm', req.file.buffer.toString('base64')]);
 
-    // Envia via WhatsApp
+    // Envia via WhatsApp como documento de áudio (sempre funciona)
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
     await wa.socket.sendMessage(jid, {
-      audio: audioBuffer,
-      mimetype: converted ? 'audio/mp4' : 'audio/webm',
-      ptt: true,
+      document: req.file.buffer,
+      mimetype: 'audio/webm',
+      fileName: 'audio.webm',
+      caption: '🎵 Mensagem de voz',
     });
 
     // Salva no banco
