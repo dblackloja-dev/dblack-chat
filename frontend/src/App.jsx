@@ -312,61 +312,18 @@ export default function App() {
     e.target.value = '';
   };
 
-  // ─── GRAVAÇÃO DE ÁUDIO ───
-  const [recording, setRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recordingTimerRef = useRef(null);
+  // ─── ENVIAR ARQUIVO ───
+  const fileAttachRef = useRef(null);
+  const [sendingFile, setSendingFile] = useState(false);
 
-  const [sendingAudio, setSendingAudio] = useState(false);
-
-  const startRecording = async () => {
-    if (!activeConv || sendingAudio) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Tenta gravar em ogg opus (Firefox suporta), senão webm
-      let mimeType = 'audio/webm;codecs=opus';
-      if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) mimeType = 'audio/ogg;codecs=opus';
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
-      audioChunksRef.current = [];
-      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
-        if (blob.size > 500) {
-          setSendingAudio(true);
-          try { await api.sendAudio(activeConv.id, blob); } catch {}
-          setSendingAudio(false);
-        }
-      };
-      mediaRecorder.start(100);
-      mediaRecorderRef.current = mediaRecorder;
-      setRecording(true);
-      setRecordingTime(0);
-      recordingTimerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
-    } catch {}
+  const handleFileAttach = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeConv || sendingFile) return;
+    setSendingFile(true);
+    try { await api.sendFile(activeConv.id, file); } catch {}
+    setSendingFile(false);
+    e.target.value = '';
   };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && recording) {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
-      clearInterval(recordingTimerRef.current);
-    }
-  };
-
-  const cancelRecording = () => {
-    if (mediaRecorderRef.current && recording) {
-      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
-      mediaRecorderRef.current = null;
-      audioChunksRef.current = [];
-      setRecording(false);
-      clearInterval(recordingTimerRef.current);
-    }
-  };
-
-  const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   // ─── FILTROS ───
   const aguardando = conversations.filter(c => c.status === 'aguardando');
@@ -697,48 +654,26 @@ export default function App() {
 
               {/* Input */}
               {activeConv.status === 'atendendo' && activeConv.agent_id === user.id && (
-                recording ? (
-                  /* Barra de gravação */
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', background: W.bgHeader }}>
-                    <button style={{ ...iconBtn, color: W.red }} onClick={cancelRecording} title="Cancelar">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    </button>
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, background: W.bgInput, borderRadius: 8, padding: '8px 16px', border: `1px solid ${W.red}` }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 5, background: W.red, animation: 'pulse 1s infinite' }} />
-                      <span style={{ color: W.red, fontWeight: 600, fontSize: 14 }}>{fmtTime(recordingTime)}</span>
-                      <span style={{ flex: 1, color: W.txt2, fontSize: 13 }}>Gravando áudio...</span>
-                    </div>
-                    <button style={{ ...iconBtn, width: 42, height: 42, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={stopRecording} title="Enviar">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
-                    </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: W.bgHeader }}>
+                  <button style={iconBtn} onClick={() => setShowQuickReplies(!showQuickReplies)} title="Respostas rápidas">⚡</button>
+                  <button style={{ ...iconBtn, opacity: sendingMedia ? 0.4 : 1 }} onClick={() => !sendingMedia && fileInputRef.current?.click()} title="Enviar imagem">{sendingMedia ? '⏳' : '📷'}</button>
+                  <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
+                  <button style={{ ...iconBtn, opacity: sendingFile ? 0.4 : 1 }} onClick={() => !sendingFile && fileAttachRef.current?.click()} title="Anexar arquivo">{sendingFile ? '⏳' : '📎'}</button>
+                  <input ref={fileAttachRef} type="file" style={{ display: 'none' }} onChange={handleFileAttach} />
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 12px', border: `1px solid ${W.border}` }}>
+                    <input
+                      style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '10px 0', lineHeight: '20px' }}
+                      placeholder="Digite uma mensagem"
+                      value={msgInput}
+                      onChange={e => setMsgInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+                      autoFocus
+                    />
                   </div>
-                ) : (
-                  /* Input normal */
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: W.bgHeader }}>
-                    <button style={iconBtn} onClick={() => setShowQuickReplies(!showQuickReplies)} title="Respostas rápidas">⚡</button>
-                    <button style={{ ...iconBtn, opacity: sendingMedia ? 0.4 : 1 }} onClick={() => !sendingMedia && fileInputRef.current?.click()} title="Enviar imagem">{sendingMedia ? '⏳' : '📷'}</button>
-                    <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 12px', border: `1px solid ${W.border}` }}>
-                      <input
-                        style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '10px 0', lineHeight: '20px' }}
-                        placeholder="Digite uma mensagem"
-                        value={msgInput}
-                        onChange={e => setMsgInput(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                        autoFocus
-                      />
-                    </div>
-                    {msgInput.trim() ? (
-                      <button style={{ ...iconBtn, width: 42, height: 42, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={sendMessage}>
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
-                      </button>
-                    ) : (
-                      <button style={{ ...iconBtn, width: 42, height: 42, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={startRecording} title="Gravar áudio">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8696a0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-                      </button>
-                    )}
-                  </div>
-                )
+                  <button style={{ ...iconBtn, width: 42, height: 42, borderRadius: '50%', background: msgInput.trim() ? W.green : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={sendMessage}>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill={msgInput.trim() ? '#fff' : '#8696a0'}><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
+                  </button>
+                </div>
               )}
               {activeConv.status === 'finalizado' && (
                 <div style={{ padding: '12px 16px', background: 'rgba(234,0,56,.04)', textAlign: 'center', fontSize: 13, color: W.txt2 }}>

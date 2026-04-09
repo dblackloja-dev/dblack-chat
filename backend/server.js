@@ -10,7 +10,7 @@ const WhatsAppClient = require('./whatsapp');
 const { createCanvas } = require('@napi-rs/canvas');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const ffmpeg = require('fluent-ffmpeg');
+// ffmpeg removido — PTT não funciona no Baileys v7
 const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 const aiAgent = require('./ai-agent');
@@ -437,75 +437,40 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Enviar áudio (atendente → cliente via WhatsApp)
-app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, res) => {
+// Enviar arquivo (atendente → cliente via WhatsApp)
+app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res) => {
   try {
     const { conversation_id } = req.body;
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
-    if (!req.file) return res.status(400).json({ error: 'Áudio não enviado' });
+    if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
 
-    // Converte webm → ogg opus e envia como documento
-    const fs = require('fs');
-    const os = require('os');
-    const tmpDir = os.tmpdir();
-    const tmpId = genId();
-    const tmpIn = path.join(tmpDir, `in_${tmpId}.webm`);
-    const tmpOut = path.join(tmpDir, `out_${tmpId}.ogg`);
-
-    let finalBuffer;
-    let finalName = 'audio.ogg';
-    let finalMime = 'audio/ogg';
-
-    try {
-      fs.writeFileSync(tmpIn, req.file.buffer);
-      await new Promise((resolve, reject) => {
-        ffmpeg(tmpIn)
-          .toFormat('ogg')
-          .audioCodec('libopus')
-          .audioBitrate('48k')
-          .audioChannels(1)
-          .audioFrequency(48000)
-          .on('end', resolve)
-          .on('error', reject)
-          .save(tmpOut);
-      });
-      finalBuffer = fs.readFileSync(tmpOut);
-      console.log('🎵 Convertido OGG:', finalBuffer.length, 'bytes');
-    } catch (e) {
-      console.log('⚠️ ffmpeg falhou, enviando webm:', e.message);
-      finalBuffer = req.file.buffer;
-      finalName = 'audio.webm';
-      finalMime = 'audio/webm';
-    }
-    try { fs.unlinkSync(tmpIn); } catch {}
-    try { fs.unlinkSync(tmpOut); } catch {}
-
-    // Salva no banco
-    const mediaId = 'aud_sent_' + genId();
-    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, finalMime, finalBuffer.toString('base64')]);
-
-    // Tenta enviar como PTT primeiro, senão como documento
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
-    try {
-      await wa.socket.sendMessage(jid, { audio: finalBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
-      console.log('🎵 Áudio enviado como PTT');
-    } catch (e) {
-      console.log('⚠️ PTT falhou, enviando como documento:', e.message);
-      await wa.socket.sendMessage(jid, { document: finalBuffer, mimetype: finalMime, fileName: finalName });
-    }
+    const fileName = req.file.originalname || 'arquivo';
+    const mime = req.file.mimetype || 'application/octet-stream';
 
     // Salva no banco
-    const msgId = genId();
-    const audioUrl = `/media/${mediaId}`;
-    await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'audio', $5, NOW())",
-      [msgId, conversation_id, req.user.name, audioUrl, audioUrl]
-    );
-    await queryRun("UPDATE conversations SET last_message = '🎵 Áudio', last_message_at = NOW() WHERE id = $1", [conversation_id]);
+    const mediaId = 'file_' + genId();
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, mime, req.file.buffer.toString('base64')]);
 
-    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: audioUrl, media_type: 'audio', media_url: audioUrl, timestamp: new Date().toISOString() };
-    broadcast('new_message', { conversation: { ...conv, last_message: '🎵 Áudio' }, message });
+    // Envia via WhatsApp como documento
+    await wa.socket.sendMessage(jid, {
+      document: req.file.buffer,
+      mimetype: mime,
+      fileName: fileName,
+    });
+
+    const msgId = genId();
+    const displayText = `📎 ${fileName}`;
+    const fileUrl = `/media/${mediaId}`;
+    await queryRun(
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'document', $5, NOW())",
+      [msgId, conversation_id, req.user.name, displayText, fileUrl]
+    );
+    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, conversation_id]);
+
+    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: displayText, media_type: 'document', media_url: fileUrl, timestamp: new Date().toISOString() };
+    broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
