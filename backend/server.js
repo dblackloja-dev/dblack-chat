@@ -6,7 +6,7 @@ const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const { queryAll, queryOne, queryRun, initDB } = require('./database');
 const WhatsAppClient = require('./whatsapp');
-const { createCanvas } = require('canvas');
+const { createCanvas } = require('@napi-rs/canvas');
 const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 require('dotenv').config();
