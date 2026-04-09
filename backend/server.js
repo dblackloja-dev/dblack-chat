@@ -433,16 +433,25 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
     // Envia via WhatsApp
     await wa.sendImage(conv.phone, req.file.buffer, caption || '');
 
-    // Salva no banco
+    // Salva a imagem no banco para exibição no painel
     const msgId = genId();
+    const mediaId = 'img_' + msgId;
+    const base64 = req.file.buffer.toString('base64');
+    const mime = req.file.mimetype || 'image/jpeg';
+    await queryRun(
+      "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+      [mediaId, mime, base64]
+    );
+
+    const mediaUrl = `/media/${mediaId}`;
     const displayText = caption ? `📷 ${caption}` : '📷 Imagem';
     await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, timestamp) VALUES ($1, $2, true, $3, $4, 'image', NOW())",
-      [msgId, conversation_id, req.user.name, displayText]
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, NOW())",
+      [msgId, conversation_id, req.user.name, mediaUrl + (caption ? `|${caption}` : ''), mediaUrl]
     );
     await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, conversation_id]);
 
-    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: displayText, media_type: 'image', timestamp: new Date().toISOString() };
+    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: mediaUrl + (caption ? `|${caption}` : ''), media_type: 'image', media_url: mediaUrl, timestamp: new Date().toISOString() };
     broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
