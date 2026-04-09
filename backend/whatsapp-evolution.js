@@ -132,7 +132,7 @@ class WhatsAppEvolution extends EventEmitter {
   }
 
   // Processa webhook da Evolution
-  processWebhook(body) {
+  async processWebhook(body) {
     const event = (body.event || '').toLowerCase().replace(/_/g, '.');
     console.log('📩 Webhook Evolution:', event);
 
@@ -184,15 +184,15 @@ class WhatsAppEvolution extends EventEmitter {
       } else if (msgContent?.imageMessage) {
         content = msgContent.imageMessage.caption || '📷 Imagem';
         mediaType = 'image';
-        // Evolution pode mandar a URL da imagem no campo url ou base64 no campo media
-        mediaUrl = msgContent.imageMessage.url || msg.media || null;
+        // Baixa mídia pela API da Evolution
+        mediaUrl = await this.downloadMedia(msg.key?.id);
       } else if (msgContent?.videoMessage) {
         content = msgContent.videoMessage.caption || '🎥 Vídeo';
         mediaType = 'video';
       } else if (msgContent?.audioMessage) {
         content = '🎵 Áudio';
         mediaType = 'audio';
-        if (msg.data?.media) mediaUrl = msg.data.media;
+        mediaUrl = await this.downloadMedia(msg.key?.id);
       } else if (msgContent?.documentMessage) {
         content = '📄 ' + (msgContent.documentMessage.fileName || 'Documento');
         mediaType = 'document';
@@ -218,6 +218,31 @@ class WhatsAppEvolution extends EventEmitter {
         mediaUrl,
         timestamp: new Date((msg.messageTimestamp || Date.now() / 1000) * 1000),
       });
+    }
+  }
+
+  // Baixa mídia pela API da Evolution e salva no banco
+  async downloadMedia(messageId) {
+    if (!messageId) return null;
+    try {
+      const result = await this.api('POST', 'chat/getBase64FromMediaMessage', {
+        message: { key: { id: messageId } },
+      });
+      if (result?.base64) {
+        const { queryRun } = require('./database');
+        const mediaId = 'evo_' + messageId;
+        const mime = result.mimetype || 'application/octet-stream';
+        await queryRun(
+          "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+          [mediaId, mime, result.base64]
+        );
+        console.log('📥 Mídia baixada:', mediaId, mime);
+        return `/media/${mediaId}`;
+      }
+      return null;
+    } catch (e) {
+      console.error('Erro ao baixar mídia:', e.message);
+      return null;
     }
   }
 

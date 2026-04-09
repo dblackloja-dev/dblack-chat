@@ -141,11 +141,11 @@ let currentQR = null;
 let currentPairingCode = null;
 
 // Webhook da Evolution API
-app.post('/api/webhook/evolution', (req, res) => {
+app.post('/api/webhook/evolution', async (req, res) => {
+  res.json({ ok: true }); // responde rápido pra Evolution não dar timeout
   try {
-    wa.processWebhook(req.body);
+    await wa.processWebhook(req.body);
   } catch (e) { console.error('Webhook erro:', e.message); }
-  res.json({ ok: true });
 });
 
 wa.on('qr', async (qr) => {
