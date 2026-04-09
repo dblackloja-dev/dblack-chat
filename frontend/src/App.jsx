@@ -8,6 +8,7 @@ import Reports from './modules/Reports';
 import Settings from './modules/Settings';
 import AIAgents from './modules/AIAgents';
 import AIMetrics from './modules/AIMetrics';
+import { Sidebar as DBlackSidebar } from './components/layout/Sidebar';
 
 // ─── CORES WHATSAPP WEB (TEMA CLARO) ───
 const W = {
@@ -437,62 +438,34 @@ export default function App() {
 
   // ─── MAIN ───
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100%', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: W.bgApp, fontFamily: 'Segoe UI, Helvetica, Arial, sans-serif', color: W.txt, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100%', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0f1f1c', fontFamily: "-apple-system, 'Inter', 'SF Pro Display', sans-serif", color: W.txt, overflow: 'hidden' }}>
 
-      {/* ═══ SIDEBAR NAVEGAÇÃO ═══ */}
-      <div style={{
-        width: isMobile ? (sidebarOpen ? 260 : 0) : (sidebarOpen ? 200 : 56),
-        background: '#1f2c33', display: 'flex', flexDirection: 'column', transition: 'width .2s', flexShrink: 0, overflow: 'hidden',
-        position: isMobile ? 'fixed' : 'relative', top: 0, left: 0, bottom: 0, zIndex: isMobile ? 100 : 1,
-      }}>
-      {/* Overlay pra fechar sidebar no mobile */}
-      {isMobile && sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', top: 0, left: 260, right: 0, bottom: 0, background: 'rgba(0,0,0,.4)', zIndex: 99 }} />}
-        {/* Toggle */}
-        <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ background: 'none', border: 'none', color: '#aebac1', cursor: 'pointer', padding: '16px 16px 8px', textAlign: sidebarOpen ? 'right' : 'center', fontSize: 16 }}>
-          {sidebarOpen ? '◀' : '▶'}
-        </button>
-
-        {/* Logo */}
-        {sidebarOpen && <div style={{ padding: '4px 16px 16px', fontSize: 14, fontWeight: 700, color: '#e9edef', letterSpacing: 1 }}>D'BLACK</div>}
-
-        {/* Nav items */}
-        {navItems.map(item => (
-          <button key={item.id} onClick={() => { setCurrentModule(item.id); if (isMobile) setSidebarOpen(false); setMobileView('list'); }}
-            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: sidebarOpen ? '12px 16px' : '12px 0', background: currentModule === item.id ? 'rgba(0,168,132,.15)' : 'transparent', border: 'none', borderLeft: currentModule === item.id ? '3px solid #00a884' : '3px solid transparent', color: currentModule === item.id ? '#00a884' : '#aebac1', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', fontWeight: currentModule === item.id ? 600 : 400, width: '100%', textAlign: 'left', justifyContent: sidebarOpen ? 'flex-start' : 'center' }}>
-            <span style={{ flexShrink: 0, display: 'flex' }}>{item.icon}</span>
-            {sidebarOpen && <span>{item.label}</span>}
-          </button>
-        ))}
-
-        {/* Divider + Admin */}
-        {user.role === 'admin' && <>
-          <div style={{ borderTop: '1px solid #2a3942', margin: '12px 16px' }} />
-          {sidebarOpen && <div style={{ padding: '4px 16px 8px', fontSize: 10, fontWeight: 700, color: '#667781', letterSpacing: 2 }}>ADMINISTRAÇÃO</div>}
-          {adminItems.map(item => (
-            <button key={item.id} onClick={() => { setCurrentModule(item.id); if (isMobile) setSidebarOpen(false); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: sidebarOpen ? '12px 16px' : '12px 0', background: currentModule === item.id ? 'rgba(0,168,132,.15)' : 'transparent', border: 'none', borderLeft: currentModule === item.id ? '3px solid #00a884' : '3px solid transparent', color: currentModule === item.id ? '#00a884' : '#aebac1', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', fontWeight: currentModule === item.id ? 600 : 400, width: '100%', textAlign: 'left', justifyContent: sidebarOpen ? 'flex-start' : 'center' }}>
-              <span style={{ flexShrink: 0, display: 'flex' }}>{item.icon}</span>
-              {sidebarOpen && <span>{item.label}</span>}
-            </button>
-          ))}
-        </>}
-
-        {/* Logout */}
-        <div style={{ flex: 1 }} />
-        <button onClick={doLogout} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: sidebarOpen ? '12px 16px' : '12px 0', background: 'none', border: 'none', borderTop: '1px solid #2a3942', color: '#aebac1', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', width: '100%', justifyContent: sidebarOpen ? 'flex-start' : 'center' }}>
-          <span style={{ display: 'flex' }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
-          {sidebarOpen && <span>Sair ({user.name})</span>}
-        </button>
+      {/* ═══ SIDEBAR NAVEGAÇÃO (Design System D'Black) ═══ */}
+      {isMobile && sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 99 }} />}
+      <div style={{ position: isMobile ? 'fixed' : 'relative', top: 0, left: 0, bottom: 0, zIndex: isMobile ? 100 : 1, display: isMobile && !sidebarOpen ? 'none' : 'block' }}>
+        <DBlackSidebar
+          activeRoute={currentModule === 'chat' ? 'conversas' : currentModule === 'quick-replies' ? 'respostas' : currentModule === 'ai-agents' ? 'agentes' : currentModule === 'ai-metrics' ? 'relatorios' : currentModule === 'contacts' ? 'contatos' : currentModule}
+          onNavigate={(key) => {
+            const map = { dashboard: 'dashboard', conversas: 'chat', contatos: 'contacts', respostas: 'quick-replies', agentes: 'ai-agents', relatorios: 'reports', config: 'settings' };
+            setCurrentModule(map[key] || key);
+            if (isMobile) setSidebarOpen(false);
+            setMobileView('list');
+          }}
+          agentName={user.name}
+          agentStatus={waStatus?.connected ? 'online' : 'offline'}
+          queueCount={conversations.filter(c => c.status === 'aguardando').length}
+          onLogout={doLogout}
+        />
       </div>
 
       {/* ═══ MÓDULOS ═══ */}
-      {currentModule === 'dashboard' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><Dashboard /></div>}
-      {currentModule === 'contacts' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'hidden', width: '100%', minWidth: 0 }}><Contacts /></div>}
-      {currentModule === 'quick-replies' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><QuickRepliesModule /></div>}
-      {currentModule === 'ai-agents' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><AIAgents /></div>}
-      {currentModule === 'ai-metrics' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><AIMetrics /></div>}
-      {currentModule === 'reports' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><Reports /></div>}
-      {currentModule === 'settings' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><Settings /></div>}
+      {currentModule === 'dashboard' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><Dashboard /></div>}
+      {currentModule === 'contacts' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'hidden', width: '100%', minWidth: 0 }}><Contacts /></div>}
+      {currentModule === 'quick-replies' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><QuickRepliesModule /></div>}
+      {currentModule === 'ai-agents' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><AIAgents /></div>}
+      {currentModule === 'ai-metrics' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><AIMetrics /></div>}
+      {currentModule === 'reports' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><Reports /></div>}
+      {currentModule === 'settings' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><Settings /></div>}
 
       {/* ═══ CHAT (módulo principal) ═══ */}
       {currentModule === 'chat' && <>
