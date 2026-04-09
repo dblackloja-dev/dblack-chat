@@ -698,15 +698,15 @@ export default function App() {
                     </button>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: W.bgHeader }}>
-                    <button style={iconBtn} onClick={() => setShowQuickReplies(!showQuickReplies)} title="Respostas rápidas">⚡</button>
-                    <button style={{ ...iconBtn, opacity: sendingMedia ? 0.4 : 1 }} onClick={() => !sendingMedia && fileInputRef.current?.click()} title="Enviar imagem">{sendingMedia ? '⏳' : '📷'}</button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', background: W.bgHeader, flexShrink: 0 }}>
+                    <button style={{ ...iconBtn, padding: 6 }} onClick={() => setShowQuickReplies(!showQuickReplies)} title="Respostas rápidas">⚡</button>
+                    <button style={{ ...iconBtn, padding: 6, opacity: sendingMedia ? 0.4 : 1 }} onClick={() => !sendingMedia && fileInputRef.current?.click()} title="Enviar imagem">{sendingMedia ? '⏳' : '📷'}</button>
                     <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
-                    <button style={{ ...iconBtn, opacity: sendingFile ? 0.4 : 1 }} onClick={() => !sendingFile && fileAttachRef.current?.click()} title="Anexar arquivo">{sendingFile ? '⏳' : '📎'}</button>
+                    <button style={{ ...iconBtn, padding: 6, opacity: sendingFile ? 0.4 : 1 }} onClick={() => !sendingFile && fileAttachRef.current?.click()} title="Anexar arquivo">{sendingFile ? '⏳' : '📎'}</button>
                     <input ref={fileAttachRef} type="file" style={{ display: 'none' }} onChange={handleFileAttach} />
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 12px', border: `1px solid ${W.border}` }}>
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 8px', border: `1px solid ${W.border}` }}>
                       <input
-                        style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '10px 0', lineHeight: '20px' }}
+                        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '8px 0', lineHeight: '20px' }}
                         placeholder="Digite uma mensagem"
                         value={msgInput}
                         onChange={e => setMsgInput(e.target.value)}
@@ -715,12 +715,12 @@ export default function App() {
                       />
                     </div>
                     {msgInput.trim() ? (
-                      <button style={{ ...iconBtn, width: 42, height: 42, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={sendMessage}>
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
+                      <button style={{ ...iconBtn, width: 36, height: 36, flexShrink: 0, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={sendMessage}>
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
                       </button>
                     ) : (
-                      <button style={{ ...iconBtn, width: 42, height: 42, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: sendingAudio ? 0.4 : 1 }} onClick={startRecording} title="Gravar áudio">
-                        {sendingAudio ? <span>⏳</span> : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8696a0" strokeWidth="1.5"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>}
+                      <button style={{ ...iconBtn, width: 36, height: 36, flexShrink: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: sendingAudio ? 0.4 : 1 }} onClick={startRecording} title="Gravar áudio">
+                        {sendingAudio ? <span>⏳</span> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8696a0" strokeWidth="1.5"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>}
                       </button>
                     )}
                   </div>
