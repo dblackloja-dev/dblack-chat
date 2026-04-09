@@ -1008,20 +1008,28 @@ app.post('/api/erp/sales', auth, async (req, res) => {
         const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\nObrigado pela compra! 🖤`;
         await wa.sendImage(customer_phone, receiptBuffer, caption);
 
-        // Registra no chat
+        // Registra no chat (salva imagem no banco para exibição no painel)
         if (conv) {
           const msgId = genId();
+          const mediaId = 'img_' + msgId;
+          const base64 = receiptBuffer.toString('base64');
           await queryRun(
-            "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, timestamp) VALUES ($1, $2, true, $3, $4, 'image', NOW())",
-            [msgId, conv.id, req.user.name, `🧾 Cupom de venda — R$ ${sale.total.toFixed(2)}\n${receiptText}`]
+            "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+            [mediaId, 'image/png', base64]
+          );
+          const mediaUrl = `/media/${mediaId}`;
+          const displayText = `🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}`;
+          await queryRun(
+            "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, NOW())",
+            [msgId, conv.id, req.user.name, mediaUrl, mediaUrl]
           );
           await queryRun(
             "UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2",
-            [`🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}`, conv.id]
+            [displayText, conv.id]
           );
           broadcast('new_message', {
-            conversation: { ...conv, last_message: `🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}` },
-            message: { id: msgId, conversation_id: conv.id, from_me: true, sender: req.user.name, content: `🧾 Cupom de venda — R$ ${sale.total.toFixed(2)}`, media_type: 'image', timestamp: new Date().toISOString() },
+            conversation: { ...conv, last_message: displayText },
+            message: { id: msgId, conversation_id: conv.id, from_me: true, sender: req.user.name, content: mediaUrl, media_type: 'image', media_url: mediaUrl, timestamp: new Date().toISOString() },
           });
         }
       } catch (waErr) {
