@@ -517,6 +517,33 @@ app.get('/api/profile-pic/:phone', auth, async (req, res) => {
   } catch { res.json({ url: null }); }
 });
 
+// Apagar mensagem enviada (para todos)
+app.delete('/api/messages/:id', auth, async (req, res) => {
+  try {
+    const msg = await queryOne("SELECT * FROM messages WHERE id = $1", [req.params.id]);
+    if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+    if (!msg.from_me) return res.status(403).json({ error: 'Só pode apagar mensagens enviadas' });
+
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [msg.conversation_id]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+
+    // Apaga no WhatsApp via Evolution
+    try {
+      await wa.api('DELETE', 'chat/deleteMessageForEveryone', {
+        id: req.params.id,
+        fromMe: true,
+        remoteJid: conv.phone + '@s.whatsapp.net',
+      });
+    } catch (e) { console.log('Erro ao apagar no WhatsApp:', e.message); }
+
+    // Marca como apagada no banco
+    await queryRun("UPDATE messages SET content = '🚫 Mensagem apagada', media_type = NULL, media_url = NULL WHERE id = $1", [req.params.id]);
+
+    broadcast('message_deleted', { id: req.params.id, conversation_id: msg.conversation_id });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Buscar dados do cliente no ERP pelo telefone
 app.get('/api/erp/customer-details/:phone', auth, async (req, res) => {
   try {

@@ -52,6 +52,7 @@ const api = {
   // Messages
   getMessages: (convId) => request(`/messages/${convId}`),
   sendMessage: (data) => request('/messages/send', { method: 'POST', body: data }),
+  deleteMessage: (id) => request(`/messages/${id}`, { method: 'DELETE' }),
   sendAudio: async (conversationId, blob) => {
     const token = getToken();
     const form = new FormData();
