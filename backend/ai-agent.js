@@ -190,8 +190,9 @@ async function generateResponse(conversationId, customerMessage, customerName, m
       cleaned.push({ role: 'user', content: userContent });
     }
 
-    // Busca produtos se a mensagem mencionar roupas
-    const productCtx = await getProductContext(customerMessage);
+    // Busca de produtos desativada por enquanto (estrutura pronta pra ativar)
+    // const productCtx = await getProductContext(customerMessage);
+    const productCtx = '';
     const systemWithProducts = SYSTEM_PROMPT + productCtx;
 
     const startTime = Date.now();

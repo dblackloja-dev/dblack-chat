@@ -583,6 +583,8 @@ app.get('/api/messages/search', auth, async (req, res) => {
 // ═══════════════════════════════════
 app.post('/api/conversations/:id/auto-assign', auth, async (req, res) => {
   try {
+    // Fila inteligente desativada por enquanto (estrutura pronta)
+    return res.json({ disabled: true, message: 'Fila inteligente desativada. Ative nas configurações.' });
     // Pega o atendente com menos conversas ativas
     const agents = await queryAll(
       "SELECT agent_id, agent_name, COUNT(*) as active_count FROM conversations WHERE status = 'atendendo' AND agent_id IS NOT NULL GROUP BY agent_id, agent_name ORDER BY active_count ASC"
