@@ -876,10 +876,12 @@ function MessageBubble({ msg }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 240 }}>
             <AudioPlayer src={msg.media_url || msg.content} />
           </div>
-        ) : msg.media_type === 'image' && (msg.content?.startsWith('/media/') || msg.content?.startsWith('/uploads/images/')) ? (
+        ) : msg.media_type === 'image' ? (
           <div>
-            <img src={msg.content.split('|')[0]} alt="" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4 }} />
-            {msg.content.includes('|') && <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content.split('|')[1]}</div>}
+            {(msg.media_url || msg.content?.startsWith('/media/') || msg.content?.startsWith('http')) && (
+              <img src={msg.media_url || msg.content.split('|')[0]} alt="" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4 }} onError={e => { e.target.style.display = 'none'; }} />
+            )}
+            <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content?.includes('|') ? msg.content.split('|')[1] : (msg.content?.startsWith('http') || msg.content?.startsWith('/') ? '' : msg.content)}</div>
           </div>
         ) : (
           <div style={{ fontSize: 14.2, lineHeight: 1.45, wordBreak: 'break-word', overflowWrap: 'anywhere', color: '#111b21', whiteSpace: 'pre-wrap' }}>{msg.content}</div>

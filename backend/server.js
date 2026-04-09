@@ -213,17 +213,17 @@ wa.on('message', (msg) => {
         conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
       }
 
-      // Salva mensagem
+      // Salva mensagem (com media_url se tiver)
       const msgId = msg.id || genId();
       await queryRun(
-        "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, timestamp) VALUES ($1, $2, false, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING",
-        [msgId, conv.id, msg.pushName || msg.phone, msg.content, msg.mediaType || null, msg.timestamp]
+        "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, false, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING",
+        [msgId, conv.id, msg.pushName || msg.phone, msg.content, msg.mediaType || null, msg.mediaUrl || null, msg.timestamp]
       );
 
       // Notifica todos os atendentes em tempo real
       broadcast('new_message', {
         conversation: conv,
-        message: { id: msgId, conversation_id: conv.id, from_me: false, sender: msg.pushName || msg.phone, content: msg.content, media_type: msg.mediaType, timestamp: msg.timestamp },
+        message: { id: msgId, conversation_id: conv.id, from_me: false, sender: msg.pushName || msg.phone, content: msg.content, media_type: msg.mediaType, media_url: msg.mediaUrl, timestamp: msg.timestamp },
       });
 
       // ─── AGENTE DE IA "Lê" ───

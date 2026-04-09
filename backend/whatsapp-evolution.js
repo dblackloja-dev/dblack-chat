@@ -162,11 +162,14 @@ class WhatsAppEvolution extends EventEmitter {
     if (event === 'messages.upsert') {
       const msg = body.data;
       if (!msg || msg.key?.fromMe) return;
-      if (msg.key?.remoteJid === 'status@broadcast') return;
-      if (msg.key?.remoteJid?.endsWith('@g.us')) return;
+      const jid = msg.key?.remoteJidAlt || msg.key?.remoteJid || '';
+      if (jid === 'status@broadcast') return;
+      if (jid.endsWith('@g.us')) return;
+      if (jid.endsWith('@lid') && !msg.key?.remoteJidAlt) return;
 
-      const phone = msg.key?.remoteJid?.replace('@s.whatsapp.net', '');
-      if (!phone) return;
+      const phone = jid.replace('@s.whatsapp.net', '').replace('@lid', '');
+      if (!phone || phone.length < 8) return;
+      console.log('📨 Mensagem de:', phone, '| Nome:', msg.pushName);
 
       const pushName = msg.pushName || '';
       let content = '';
@@ -181,7 +184,8 @@ class WhatsAppEvolution extends EventEmitter {
       } else if (msgContent?.imageMessage) {
         content = msgContent.imageMessage.caption || '📷 Imagem';
         mediaType = 'image';
-        if (msg.data?.media) mediaUrl = msg.data.media;
+        // Evolution pode mandar a URL da imagem no campo url ou base64 no campo media
+        mediaUrl = msgContent.imageMessage.url || msg.media || null;
       } else if (msgContent?.videoMessage) {
         content = msgContent.videoMessage.caption || '🎥 Vídeo';
         mediaType = 'video';
