@@ -4,7 +4,26 @@ const { queryAll, queryOne, queryRun } = require('./database');
 const erp = require('./erp');
 require('dotenv').config();
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Tenta ler a key da env, senão busca da tabela chat_settings
+let client = null;
+
+async function getClient() {
+  if (client) return client;
+  let key = process.env.ANTHROPIC_API_KEY;
+  if (!key) {
+    try {
+      const row = await queryOne("SELECT value FROM chat_settings WHERE key = 'anthropic_api_key'");
+      if (row) key = row.value;
+    } catch {}
+  }
+  if (key) {
+    client = new Anthropic({ apiKey: key });
+    console.log('🔑 Claude API Key carregada:', key.slice(0, 15) + '...');
+  } else {
+    console.log('❌ Claude API Key NÃO encontrada! Defina ANTHROPIC_API_KEY ou salve em chat_settings');
+  }
+  return client;
+}
 
 const SYSTEM_PROMPT = `Vc é a Lê. Atendente da D'Black. Vc é uma pessoa real de carne e osso. Vc trabalha na loja.
 
@@ -196,7 +215,9 @@ async function generateResponse(conversationId, customerMessage, customerName, m
     const systemWithProducts = SYSTEM_PROMPT + productCtx;
 
     const startTime = Date.now();
-    const response = await client.messages.create({
+    const ai = await getClient();
+    if (!ai) return { text: null, shouldTransfer: true };
+    const response = await ai.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 200,
       temperature: 0.9,
