@@ -1,7 +1,7 @@
-// Salva credenciais do WhatsApp no banco de dados em vez de arquivos
-// Isso permite que o Railway (ou qualquer plataforma sem disco persistente) mantenha a sessão
-const { proto } = require('@whiskeysockets/baileys');
-const { queryOne, queryRun, queryAll } = require('./database');
+// Salva credenciais do WhatsApp no banco de dados (PostgreSQL)
+// Usa BufferJSON do Baileys para serialização correta de chaves criptográficas
+const { proto, initAuthCreds, BufferJSON } = require('@whiskeysockets/baileys');
+const { queryOne, queryRun } = require('./database');
 
 async function initAuthTable() {
   await queryRun(`
@@ -15,26 +15,16 @@ async function initAuthTable() {
 async function useDBAuthState() {
   await initAuthTable();
 
-  // Lê credenciais salvas
   const readData = async (key) => {
     const row = await queryOne("SELECT value FROM wa_auth WHERE key = $1", [key]);
     if (!row) return null;
     try {
-      const parsed = JSON.parse(row.value, (k, v) => {
-        if (typeof v === 'object' && v !== null && v.type === 'Buffer' && Array.isArray(v.data)) {
-          return Buffer.from(v.data);
-        }
-        return v;
-      });
-      return parsed;
+      return JSON.parse(row.value, BufferJSON.reviver);
     } catch { return null; }
   };
 
   const writeData = async (key, data) => {
-    const value = JSON.stringify(data, (k, v) => {
-      if (Buffer.isBuffer(v)) return { type: 'Buffer', data: Array.from(v) };
-      return v;
-    });
+    const value = JSON.stringify(data, BufferJSON.replacer);
     await queryRun(
       "INSERT INTO wa_auth (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
       [key, value]
@@ -45,8 +35,8 @@ async function useDBAuthState() {
     await queryRun("DELETE FROM wa_auth WHERE key = $1", [key]);
   };
 
-  // Carrega creds
-  const creds = await readData('creds') || {};
+  // Carrega credenciais existentes ou cria novas
+  const creds = (await readData('creds')) || initAuthCreds();
 
   return {
     state: {
@@ -67,15 +57,17 @@ async function useDBAuthState() {
           return result;
         },
         set: async (data) => {
+          const tasks = [];
           for (const [type, entries] of Object.entries(data)) {
             for (const [id, value] of Object.entries(entries)) {
               if (value) {
-                await writeData(`${type}-${id}`, value);
+                tasks.push(writeData(`${type}-${id}`, value));
               } else {
-                await removeData(`${type}-${id}`);
+                tasks.push(removeData(`${type}-${id}`));
               }
             }
           }
+          await Promise.all(tasks);
         },
       },
     },

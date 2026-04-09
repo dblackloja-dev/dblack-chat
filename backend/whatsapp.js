@@ -1,7 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers } = require('@whiskeysockets/baileys');
 const path = require('path');
+const fs = require('fs');
 const EventEmitter = require('events');
-const { useDBAuthState } = require('./auth-db');
 
 class WhatsAppClient extends EventEmitter {
   constructor() {
@@ -20,7 +20,7 @@ class WhatsAppClient extends EventEmitter {
     this.connecting = true;
 
     try {
-      const { state, saveCreds } = await useDBAuthState();
+      const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
       // Se já tem credenciais, não precisa de pairing
       const needsPairing = !state.creds.registered;
@@ -38,7 +38,11 @@ class WhatsAppClient extends EventEmitter {
         syncFullHistory: false,
       });
 
-      this.socket.ev.on('creds.update', saveCreds);
+      this.socket.ev.on('creds.update', async () => {
+        await saveCreds();
+        // Faz backup dos arquivos de auth no banco
+        this.backupAuthToDB().catch(() => {});
+      });
 
       // Solicita código de pareamento quando conectar ao servidor do WhatsApp
       let pairingRequested = false;
@@ -169,10 +173,11 @@ class WhatsAppClient extends EventEmitter {
     this.pairingCode = null;
     this.qrCode = null;
 
-    // Limpa credenciais anteriores do banco
-    const { queryRun } = require('./database');
-    await queryRun("DELETE FROM wa_auth");
-    console.log('🗑️ Credenciais anteriores removidas do banco');
+    // Limpa auth anterior
+    if (fs.existsSync(this.authDir)) {
+      fs.rmSync(this.authDir, { recursive: true, force: true });
+    }
+    console.log('🗑️ Credenciais anteriores removidas');
 
     this.connecting = false;
     await this.connect(this.phoneForPairing);
@@ -188,6 +193,45 @@ class WhatsAppClient extends EventEmitter {
     if (!this.connected || !this.socket) throw new Error('WhatsApp não conectado');
     const jid = phone.includes('@') ? phone : phone + '@s.whatsapp.net';
     await this.socket.sendMessage(jid, { image: imageBuffer, caption });
+  }
+
+  // Salva todos os arquivos de auth no banco como backup
+  async backupAuthToDB() {
+    try {
+      const { queryRun } = require('./database');
+      await queryRun("CREATE TABLE IF NOT EXISTS wa_auth (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+      if (!fs.existsSync(this.authDir)) return;
+      const files = fs.readdirSync(this.authDir);
+      for (const file of files) {
+        const content = fs.readFileSync(path.join(this.authDir, file), 'utf8');
+        await queryRun(
+          "INSERT INTO wa_auth (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
+          [file, content]
+        );
+      }
+      console.log(`💾 Auth backup: ${files.length} arquivos salvos no banco`);
+    } catch (e) {
+      console.error('Erro ao fazer backup auth:', e.message);
+    }
+  }
+
+  // Restaura arquivos de auth do banco
+  async restoreAuthFromDB() {
+    try {
+      const { queryAll, queryRun } = require('./database');
+      await queryRun("CREATE TABLE IF NOT EXISTS wa_auth (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+      const rows = await queryAll("SELECT key, value FROM wa_auth");
+      if (rows.length === 0) return false;
+      if (!fs.existsSync(this.authDir)) fs.mkdirSync(this.authDir, { recursive: true });
+      for (const row of rows) {
+        fs.writeFileSync(path.join(this.authDir, row.key), row.value, 'utf8');
+      }
+      console.log(`📥 Auth restaurado do banco: ${rows.length} arquivos`);
+      return true;
+    } catch (e) {
+      console.error('Erro ao restaurar auth:', e.message);
+      return false;
+    }
   }
 
   getStatus() {

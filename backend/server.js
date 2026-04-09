@@ -479,12 +479,15 @@ function generateReceiptText(sale, sellerName, customerName) {
 // ═══════════════════════════════════
 async function start() {
   await initDB();
-  // Cria tabela de auth do WhatsApp se não existir
-  await queryRun("CREATE TABLE IF NOT EXISTS wa_auth (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-  // Verifica se tem credenciais salvas no banco
-  const authRow = await queryOne("SELECT key FROM wa_auth WHERE key = 'creds' LIMIT 1");
-  if (authRow) {
-    console.log('🔑 Credenciais encontradas no banco, conectando ao WhatsApp...');
+  // Tenta restaurar credenciais do WhatsApp do banco (para Railway que não persiste arquivos)
+  const fs = require('fs');
+  if (!fs.existsSync(path.join(__dirname, 'auth_info', 'creds.json'))) {
+    console.log('📥 Tentando restaurar credenciais do banco...');
+    await wa.restoreAuthFromDB();
+  }
+  // Conecta se tem credenciais
+  if (fs.existsSync(path.join(__dirname, 'auth_info', 'creds.json'))) {
+    console.log('🔑 Credenciais encontradas, conectando ao WhatsApp...');
     await wa.connect();
   } else {
     console.log('📱 WhatsApp não configurado. Use o painel admin para parear.');
