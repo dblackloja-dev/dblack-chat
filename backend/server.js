@@ -6,7 +6,8 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const { queryAll, queryOne, queryRun, initDB } = require('./database');
-const WhatsAppClient = require('./whatsapp');
+// const WhatsAppClient = require('./whatsapp'); // Baileys (desativado)
+const WhatsAppEvolution = require('./whatsapp-evolution');
 const { createCanvas } = require('@napi-rs/canvas');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -135,9 +136,17 @@ function broadcast(event, data) {
 // ═══════════════════════════════════
 // ═══  WHATSAPP                   ═══
 // ═══════════════════════════════════
-const wa = new WhatsAppClient();
+const wa = new WhatsAppEvolution();
 let currentQR = null;
 let currentPairingCode = null;
+
+// Webhook da Evolution API
+app.post('/api/webhook/evolution', (req, res) => {
+  try {
+    wa.processWebhook(req.body);
+  } catch (e) { console.error('Webhook erro:', e.message); }
+  res.json({ ok: true });
+});
 
 wa.on('qr', async (qr) => {
   currentQR = await QRCode.toDataURL(qr);
@@ -453,12 +462,8 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
     const mediaId = 'file_' + genId();
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, mime, req.file.buffer.toString('base64')]);
 
-    // Envia via WhatsApp como documento
-    await wa.socket.sendMessage(jid, {
-      document: req.file.buffer,
-      mimetype: mime,
-      fileName: fileName,
-    });
+    // Envia via WhatsApp (Evolution API)
+    await wa.sendDocument(conv.phone, req.file.buffer, fileName, mime);
 
     const msgId = genId();
     const displayText = `📎 ${fileName}`;
@@ -512,25 +517,14 @@ app.post('/api/whatsapp/pair', auth, async (req, res) => {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ error: 'Informe o número do WhatsApp' });
 
-    // Inicia pareamento (não bloqueia)
-    wa.startPairing(phone).catch(e => console.error('Erro startPairing:', e));
-
-    // Aguarda o código ser gerado (até 30s)
-    let attempts = 0;
-    const waitForCode = () => new Promise((resolve) => {
-      const check = setInterval(() => {
-        attempts++;
-        if (wa.pairingCode || attempts > 60) {
-          clearInterval(check);
-          resolve(wa.pairingCode);
-        }
-      }, 500);
-    });
-    const code = await waitForCode();
+    // Evolution API — solicita pareamento
+    const code = await wa.startPairing(phone);
     if (code) {
       res.json({ success: true, pairingCode: code });
+    } else if (wa.qrCode) {
+      res.json({ success: true, qr: wa.qrCode });
     } else {
-      res.json({ success: true, message: 'Aguardando código... O código chegará via WebSocket.' });
+      res.json({ success: true, message: 'Aguardando... verifique o status.' });
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1103,19 +1097,8 @@ function generateReceiptText(sale, sellerName, customerName) {
 // ═══════════════════════════════════
 async function start() {
   await initDB();
-  // Tenta restaurar credenciais do WhatsApp do banco (para Railway que não persiste arquivos)
-  const fs = require('fs');
-  if (!fs.existsSync(path.join(__dirname, 'auth_info', 'creds.json'))) {
-    console.log('📥 Tentando restaurar credenciais do banco...');
-    await wa.restoreAuthFromDB();
-  }
-  // Conecta se tem credenciais
-  if (fs.existsSync(path.join(__dirname, 'auth_info', 'creds.json'))) {
-    console.log('🔑 Credenciais encontradas, conectando ao WhatsApp...');
-    await wa.connect();
-  } else {
-    console.log('📱 WhatsApp não configurado. Use o painel admin para parear.');
-  }
+  // Verifica conexão da Evolution API
+  await wa.connect();
   server.listen(PORT, () => {
     console.log(`🚀 D'Black Chat rodando na porta ${PORT}`);
   });
