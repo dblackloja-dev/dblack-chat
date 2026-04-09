@@ -196,6 +196,7 @@ class WhatsAppEvolution extends EventEmitter {
       } else if (msgContent?.documentMessage) {
         content = '📄 ' + (msgContent.documentMessage.fileName || 'Documento');
         mediaType = 'document';
+        mediaUrl = await this.downloadMedia(msg.key?.id);
       } else if (msgContent?.stickerMessage) {
         content = '🏷️ Figurinha';
         mediaType = 'sticker';
