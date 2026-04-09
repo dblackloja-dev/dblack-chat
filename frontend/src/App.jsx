@@ -382,6 +382,11 @@ export default function App() {
 
   const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+  // ─── EMOJIS ───
+  const [showEmojis, setShowEmojis] = useState(false);
+  const emojiList = ['😊','😂','❤️','🥰','😍','🤣','😁','👍','🙏','🔥','💪','😎','🤔','😅','😢','😘','🖤','💜','✅','👏','🎉','💰','📦','🛒','📱','⏳','👋','🏷️','💳','📍'];
+  const insertEmoji = (emoji) => { setMsgInput(prev => prev + emoji); setShowEmojis(false); };
+
   // ─── FILTROS ───
   const aguardando = conversations.filter(c => c.status === 'aguardando');
   const atendendo = conversations.filter(c => c.status === 'atendendo');
@@ -704,7 +709,13 @@ export default function App() {
                     <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
                     <button style={{ ...iconBtn, padding: 6, opacity: sendingFile ? 0.4 : 1 }} onClick={() => !sendingFile && fileAttachRef.current?.click()} title="Anexar arquivo">{sendingFile ? '⏳' : '📎'}</button>
                     <input ref={fileAttachRef} type="file" style={{ display: 'none' }} onChange={handleFileAttach} />
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 8px', border: `1px solid ${W.border}` }}>
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 8px', border: `1px solid ${W.border}`, position: 'relative' }}>
+                      <button style={{ ...iconBtn, padding: 4, flexShrink: 0 }} onClick={() => setShowEmojis(!showEmojis)} title="Emojis">😊</button>
+                      {showEmojis && (
+                        <div style={{ position: 'absolute', bottom: '100%', left: 0, background: W.bgHeader, border: `1px solid ${W.border}`, borderRadius: 12, padding: 8, display: 'flex', flexWrap: 'wrap', gap: 2, width: 260, maxHeight: 180, overflowY: 'auto', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,.2)' }}>
+                          {emojiList.map(e => <button key={e} onClick={() => insertEmoji(e)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', padding: 4, borderRadius: 6 }}>{e}</button>)}
+                        </div>
+                      )}
                       <input
                         style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '8px 0', lineHeight: '20px' }}
                         placeholder="Digite uma mensagem"
