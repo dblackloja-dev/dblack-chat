@@ -148,27 +148,33 @@ async function generateResponse(conversationId, customerMessage, customerName, m
     let imageContent = null;
 
     if (mediaType === 'audio') {
-      userContent = '[Cliente enviou um áudio - diga que não conseguiu ouvir e peça pra mandar por escrito, de forma natural tipo "aii não consegui ouvir seu audio aqui, pode mandar por escrito?"]';
+      userContent = '[Cliente enviou um áudio - diga que não conseguiu ouvir e peça pra mandar por escrito, de forma natural tipo "aii desculpa não consegui ouvir seu audio, pode mandar por escrito?"]';
     }
-    if (mediaType === 'image' && customerMessage.startsWith('/uploads/images/')) {
-      // Tenta carregar a imagem pra enviar pro Claude
-      const fs = require('fs');
-      const path = require('path');
-      const imgPath = path.join(__dirname, customerMessage.split('|')[0]);
+    if (mediaType === 'image') {
+      // Busca a imagem do banco pra enviar pro Claude analisar
       const caption = customerMessage.includes('|') ? customerMessage.split('|')[1] : '';
-      if (fs.existsSync(imgPath)) {
+      const mediaPath = customerMessage.split('|')[0];
+
+      if (mediaPath.startsWith('/media/')) {
         try {
-          const imgBuffer = fs.readFileSync(imgPath);
-          imageContent = {
-            type: 'image',
-            source: { type: 'base64', media_type: 'image/jpeg', data: imgBuffer.toString('base64') },
-          };
-          userContent = caption || 'Cliente enviou esta foto';
-        } catch {
-          userContent = '[Cliente enviou uma foto que não consegui carregar]' + (caption ? ` com legenda: ${caption}` : '');
+          const mediaId = mediaPath.replace('/media/', '');
+          const mediaRow = await queryOne("SELECT data, mime_type FROM media_files WHERE id = $1", [mediaId]);
+          if (mediaRow?.data) {
+            imageContent = {
+              type: 'image',
+              source: { type: 'base64', media_type: mediaRow.mime_type || 'image/jpeg', data: mediaRow.data },
+            };
+            userContent = caption || 'Cliente enviou esta foto. Analise o que tem na foto e responda sobre isso.';
+            console.log('🖼️ Imagem carregada do banco pra IA analisar');
+          } else {
+            userContent = caption || '[Cliente enviou uma foto que não consegui ver. Peça pra descrever o que quer.]';
+          }
+        } catch (e) {
+          console.error('Erro ao carregar imagem pra IA:', e.message);
+          userContent = caption || '[Cliente enviou uma foto. Peça pra descrever o que quer.]';
         }
       } else {
-        userContent = '[Cliente enviou uma foto]' + (caption ? ` com legenda: ${caption}` : '');
+        userContent = caption || '[Cliente enviou uma foto. Peça pra descrever o que quer.]';
       }
     }
 
