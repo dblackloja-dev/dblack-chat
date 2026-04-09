@@ -228,7 +228,7 @@ wa.on('message', (msg) => {
 
       // ─── AGENTE DE IA "Lê" ───
       // Responde automaticamente se: IA ativa + conversa aguardando (sem atendente humano)
-      if (conv.status === 'aguardando' && wa.connected) {
+      if (conv.status === 'aguardando') {
         const aiEnabled = await aiAgent.isAgentEnabled();
         if (aiEnabled) {
           try {

@@ -28,12 +28,17 @@ class WhatsAppEvolution extends EventEmitter {
   async connect() {
     try {
       const status = await this.api('GET', 'instance/connectionState');
-      this.connected = status?.instance?.state === 'open';
+      const state = status?.instance?.state;
+      this.connected = state === 'open';
       if (this.connected) {
         console.log('✅ WhatsApp (Evolution) conectado!');
         this.emit('connected');
       } else {
-        console.log('📱 WhatsApp (Evolution) não conectado. Estado:', status?.instance?.state);
+        console.log('📱 WhatsApp (Evolution) estado:', state);
+        // Se está connecting, tenta de novo em 10s
+        if (state === 'connecting') {
+          setTimeout(() => this.connect(), 10000);
+        }
       }
       return status;
     } catch (e) {
@@ -128,15 +133,17 @@ class WhatsAppEvolution extends EventEmitter {
 
   // Processa webhook da Evolution
   processWebhook(body) {
-    const event = body.event;
+    const event = (body.event || '').toLowerCase().replace(/_/g, '.');
+    console.log('📩 Webhook Evolution:', event);
 
     if (event === 'connection.update') {
-      const state = body.data?.state;
+      const state = body.data?.state || body.data?.instance?.state;
       this.connected = state === 'open';
       if (this.connected) {
         this.emit('connected');
         console.log('✅ WhatsApp (Evolution) conectado!');
       } else {
+        console.log('📱 WhatsApp estado:', state);
         this.emit('disconnected');
       }
     }
