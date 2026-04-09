@@ -921,14 +921,18 @@ function MessageBubble({ msg, onImageClick }) {
             )}
             <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content?.includes('|') ? msg.content.split('|')[1] : (msg.content?.startsWith('http') || msg.content?.startsWith('/') ? '' : msg.content)}</div>
           </div>
-        ) : msg.media_type === 'document' && msg.media_url ? (
+        ) : msg.media_type === 'document' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
-            <div style={{ width: 40, height: 40, borderRadius: 6, background: '#ea4335', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 6, background: msg.content?.includes('.pdf') ? '#ea4335' : '#4285f4', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
               {msg.content?.includes('.pdf') ? 'PDF' : 'DOC'}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{msg.content?.replace('📄 ', '') || 'Documento'}</div>
-              <a href={msg.media_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#1eba8a', textDecoration: 'none' }}>Abrir arquivo</a>
+              {msg.media_url ? (
+                <a href={msg.media_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#1eba8a', textDecoration: 'none' }}>Abrir arquivo</a>
+              ) : (
+                <span style={{ fontSize: 12, color: '#667781' }}>Documento recebido</span>
+              )}
             </div>
           </div>
         ) : (
@@ -957,15 +961,15 @@ function AudioPlayer({ src }) {
   };
 
   const fmtSec = (s) => {
-    if (!s || isNaN(s)) return '0:00';
+    if (!s || !isFinite(s) || isNaN(s)) return '0:00';
     return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   };
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 200 }}>
       <audio ref={audioRef} src={src} preload="metadata"
-        onLoadedMetadata={(e) => setDuration(e.target.duration)}
-        onTimeUpdate={(e) => setProgress(e.target.duration ? (e.target.currentTime / e.target.duration) * 100 : 0)}
+        onLoadedMetadata={(e) => { const d = e.target.duration; if (isFinite(d) && d > 0) setDuration(d); }}
+        onTimeUpdate={(e) => { const d = e.target.duration; setProgress(isFinite(d) && d > 0 ? (e.target.currentTime / d) * 100 : 0); }}
         onEnded={() => { setPlaying(false); setProgress(0); }}
       />
       <button onClick={toggle} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: '#00a884', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>

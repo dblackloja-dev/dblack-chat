@@ -194,9 +194,15 @@ class WhatsAppEvolution extends EventEmitter {
         mediaType = 'audio';
         mediaUrl = await this.downloadMedia(msg.key?.id);
       } else if (msgContent?.documentMessage) {
-        content = '📄 ' + (msgContent.documentMessage.fileName || 'Documento');
+        const fileName = msgContent.documentMessage.fileName || 'Documento';
+        content = '📄 ' + fileName;
         mediaType = 'document';
-        mediaUrl = await this.downloadMedia(msg.key?.id);
+        try {
+          mediaUrl = await this.downloadMedia(msg.key?.id);
+          console.log('📄 Documento baixado:', fileName, mediaUrl ? 'OK' : 'FALHOU');
+        } catch (e) {
+          console.error('Erro ao baixar documento:', e.message);
+        }
       } else if (msgContent?.stickerMessage) {
         content = '🏷️ Figurinha';
         mediaType = 'sticker';
@@ -226,20 +232,24 @@ class WhatsAppEvolution extends EventEmitter {
   async downloadMedia(messageId) {
     if (!messageId) return null;
     try {
+      // Tenta o formato da Evolution v2
       const result = await this.api('POST', 'chat/getBase64FromMediaMessage', {
         message: { key: { id: messageId } },
       });
-      if (result?.base64) {
+
+      const base64 = result?.base64 || result?.data;
+      if (base64) {
         const { queryRun } = require('./database');
         const mediaId = 'evo_' + messageId;
-        const mime = result.mimetype || 'application/octet-stream';
+        const mime = result.mimetype || result.mimeType || 'application/octet-stream';
         await queryRun(
           "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
-          [mediaId, mime, result.base64]
+          [mediaId, mime, base64]
         );
-        console.log('📥 Mídia baixada:', mediaId, mime);
+        console.log('📥 Mídia baixada:', mediaId, mime, Math.round(base64.length/1024) + 'KB');
         return `/media/${mediaId}`;
       }
+      console.log('⚠️ Mídia sem base64:', messageId, JSON.stringify(result).slice(0, 200));
       return null;
     } catch (e) {
       console.error('Erro ao baixar mídia:', e.message);
