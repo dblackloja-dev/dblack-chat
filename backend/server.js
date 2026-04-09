@@ -692,22 +692,44 @@ app.get('/api/ai-metrics', auth, async (req, res) => {
 // ═══  RESPOSTAS RÁPIDAS          ═══
 // ═══════════════════════════════════
 app.get('/api/quick-replies', auth, async (req, res) => {
-  try { res.json(await queryAll("SELECT * FROM quick_replies WHERE active = true ORDER BY sort_order ASC")); } catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const replies = await queryAll("SELECT id, label, text, category, sort_order, active, image_mime, CASE WHEN image_data IS NOT NULL THEN true ELSE false END as has_image FROM quick_replies WHERE active = true ORDER BY sort_order ASC");
+    res.json(replies);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/api/quick-replies', auth, async (req, res) => {
+// Imagem da resposta rápida
+app.get('/api/quick-replies/:id/image', auth, async (req, res) => {
+  try {
+    const qr = await queryOne("SELECT image_data, image_mime FROM quick_replies WHERE id = $1", [req.params.id]);
+    if (!qr?.image_data) return res.status(404).send('Sem imagem');
+    const buffer = Buffer.from(qr.image_data, 'base64');
+    res.set('Content-Type', qr.image_mime || 'image/jpeg');
+    res.set('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (e) { res.status(500).send('Erro'); }
+});
+app.post('/api/quick-replies', auth, upload.single('image'), async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
     const { label, text, category } = req.body;
     const id = genId();
-    await queryRun("INSERT INTO quick_replies (id, label, text, category) VALUES ($1,$2,$3,$4)", [id, label, text, category || 'geral']);
-    res.json({ id, label, text, category: category || 'geral', active: true });
+    const imageData = req.file ? req.file.buffer.toString('base64') : null;
+    const imageMime = req.file ? req.file.mimetype : null;
+    await queryRun("INSERT INTO quick_replies (id, label, text, category, image_data, image_mime) VALUES ($1,$2,$3,$4,$5,$6)", [id, label, text, category || 'geral', imageData, imageMime]);
+    res.json({ id, label, text, category: category || 'geral', has_image: !!imageData, active: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.put('/api/quick-replies/:id', auth, async (req, res) => {
+app.put('/api/quick-replies/:id', auth, upload.single('image'), async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    const { label, text, category } = req.body;
-    await queryRun("UPDATE quick_replies SET label=$1, text=$2, category=$3 WHERE id=$4", [label, text, category, req.params.id]);
+    const { label, text, category, remove_image } = req.body;
+    if (req.file) {
+      await queryRun("UPDATE quick_replies SET label=$1, text=$2, category=$3, image_data=$4, image_mime=$5 WHERE id=$6", [label, text, category, req.file.buffer.toString('base64'), req.file.mimetype, req.params.id]);
+    } else if (remove_image === 'true') {
+      await queryRun("UPDATE quick_replies SET label=$1, text=$2, category=$3, image_data=NULL, image_mime=NULL WHERE id=$4", [label, text, category, req.params.id]);
+    } else {
+      await queryRun("UPDATE quick_replies SET label=$1, text=$2, category=$3 WHERE id=$4", [label, text, category, req.params.id]);
+    }
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

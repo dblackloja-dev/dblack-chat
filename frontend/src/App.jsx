@@ -181,17 +181,11 @@ export default function App() {
     try { setConvHistory(await api.getConvHistory(phone)); setShowHistory(true); } catch {}
   };
 
-  // ─── RESPOSTAS RÁPIDAS ───
-  const quickReplies = [
-    { label: '👋 Saudação', text: 'Olá! Tudo bem? Como posso te ajudar?' },
-    { label: '⏰ Horário', text: '⏰ Nosso horário de atendimento:\nSeg a Sex: 9h às 18h\nSábado: 9h às 13h' },
-    { label: '📍 Endereço', text: '📍 Nossas lojas:\n\n🏪 D\'Black Divino-MG\n🏪 D\'Black São João-MG\n🏪 D\'Black Matriz - Ribeirão de São Domingos-MG' },
-    { label: '💳 Pagamento', text: '💳 Formas de pagamento:\n\n✅ PIX\n✅ Cartão de Crédito (até 6x)\n✅ Cartão de Débito\n✅ Dinheiro\n✅ Crediário (clientes cadastrados)' },
-    { label: '📦 Frete', text: '📦 Enviamos para todo o Brasil!\nFrete calculado no momento da compra.\nEntrega expressa disponível para a região.' },
-    { label: '🔄 Troca', text: '🔄 Política de troca:\nVocê tem até 7 dias para trocar.\nProduto deve estar com etiqueta e sem uso.\nTraga na loja mais próxima ou entre em contato.' },
-    { label: '✅ Obrigado', text: 'Muito obrigado pela preferência! 🖤\nQualquer dúvida, estamos à disposição.\nSiga @d_blackloja no Instagram! 📱' },
-    { label: '⏳ Aguarde', text: 'Um momento, por favor! Já estou verificando para você. ⏳' },
-  ];
+  // ─── RESPOSTAS RÁPIDAS (carregadas do banco) ───
+  const [quickReplies, setQuickReplies] = useState([]);
+  useEffect(() => {
+    if (user) api.getQuickReplies().then(setQuickReplies).catch(() => {});
+  }, [user?.id]);
 
   // ─── ADMIN: parear WhatsApp ───
   const [pairPhone, setPairPhone] = useState('');
@@ -304,7 +298,22 @@ export default function App() {
   const finishConversation = async (convId) => { if (!confirm('Finalizar este atendimento?')) return; try { await api.finishConversation(convId); if (activeConv?.id === convId) { setActiveConv(null); setMessages([]); } await loadConversations(); } catch {} };
   const transferConversation = async (convId) => { if (!confirm('Devolver para a fila?')) return; try { await api.transferConversation(convId); if (activeConv?.id === convId) { setActiveConv(null); setMessages([]); } await loadConversations(); } catch {} };
   const sendMessage = async () => { if (!msgInput.trim() || !activeConv) return; const text = msgInput.trim(); setMsgInput(''); try { await api.sendMessage({ conversation_id: activeConv.id, content: text }); } catch { setMsgInput(text); } };
-  const sendQuickReply = async (text) => { if (!activeConv) return; setShowQuickReplies(false); try { await api.sendMessage({ conversation_id: activeConv.id, content: text }); } catch {} };
+  const sendQuickReply = async (qr) => {
+    if (!activeConv) return; setShowQuickReplies(false);
+    try {
+      // Envia texto
+      await api.sendMessage({ conversation_id: activeConv.id, content: qr.text });
+      // Se tem imagem, busca e envia
+      if (qr.has_image) {
+        const res = await fetch(`/api/quick-replies/${qr.id}/image`, { headers: { Authorization: `Bearer ${api.getToken()}` } });
+        if (res.ok) {
+          const blob = await res.blob();
+          const file = new File([blob], 'resposta.jpg', { type: blob.type });
+          await api.sendImage(activeConv.id, file, '');
+        }
+      }
+    } catch {}
+  };
   const [sendingMedia, setSendingMedia] = useState(false);
 
   const handleImageUpload = async (e) => {
@@ -678,8 +687,9 @@ export default function App() {
               {showQuickReplies && activeConv.status === 'atendendo' && activeConv.agent_id === user.id && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '8px 16px', background: W.bgHeader, borderTop: `1px solid ${W.border}` }}>
                   {quickReplies.map((qr, i) => (
-                    <button key={i} onClick={() => sendQuickReply(qr.text)}
-                      style={{ padding: '5px 10px', borderRadius: 16, border: `1px solid ${W.border}`, background: '#fff', color: W.txt, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>
+                    <button key={qr.id || i} onClick={() => sendQuickReply(qr)}
+                      style={{ padding: '5px 10px', borderRadius: 16, border: `1px solid ${W.border}`, background: '#fff', color: W.txt, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {qr.has_image && <span>📷</span>}
                       {qr.label}
                     </button>
                   ))}

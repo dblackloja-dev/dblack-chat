@@ -7,6 +7,8 @@ export default function QuickReplies() {
   const [replies, setReplies] = useState([]);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ label: '', text: '', category: 'geral' });
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -16,13 +18,15 @@ export default function QuickReplies() {
   const save = async () => {
     if (!form.label || !form.text) return;
     if (editing) {
-      await api.updateQuickReply(editing, form);
-      setReplies(prev => prev.map(r => r.id === editing ? { ...r, ...form } : r));
+      await api.updateQuickReply(editing, form, imageFile);
+      setReplies(prev => prev.map(r => r.id === editing ? { ...r, ...form, has_image: imageFile ? true : (form.remove_image ? false : r.has_image) } : r));
     } else {
-      const r = await api.createQuickReply(form);
+      const r = await api.createQuickReply(form, imageFile);
       setReplies(prev => [...prev, r]);
     }
     setForm({ label: '', text: '', category: 'geral' });
+    setImageFile(null);
+    setImagePreview(null);
     setEditing(null);
   };
 
@@ -53,9 +57,24 @@ export default function QuickReplies() {
           </select>
         </div>
         <textarea style={{ ...inputStyle, height: 100, resize: 'vertical' }} placeholder="Texto da mensagem..." value={form.text} onChange={e => setForm(f => ({ ...f, text: e.target.value }))} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, border: '1px solid #e9edef', background: '#fff', cursor: 'pointer', fontSize: 13 }}>
+            📎 {imageFile ? imageFile.name : 'Anexar imagem'}
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) { setImageFile(f); setImagePreview(URL.createObjectURL(f)); }
+            }} />
+          </label>
+          {(imagePreview || (editing && replies.find(r => r.id === editing)?.has_image)) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <img src={imagePreview || `/api/quick-replies/${editing}/image`} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} />
+              <button style={{ ...btnSmall, color: '#ea0038' }} onClick={() => { setImageFile(null); setImagePreview(null); setForm(f => ({ ...f, remove_image: true })); }}>✕</button>
+            </div>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button style={btnGreen} onClick={save}>{editing ? 'Salvar' : 'Criar'}</button>
-          {editing && <button style={btnOutline} onClick={() => { setEditing(null); setForm({ label: '', text: '', category: 'geral' }); }}>Cancelar</button>}
+          {editing && <button style={btnOutline} onClick={() => { setEditing(null); setForm({ label: '', text: '', category: 'geral' }); setImageFile(null); setImagePreview(null); }}>Cancelar</button>}
         </div>
       </div>
 
@@ -68,6 +87,7 @@ export default function QuickReplies() {
                 <span style={{ fontWeight: 700, fontSize: 15 }}>{r.label}</span>
                 <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: W.bgHeader, color: W.txt2 }}>{r.category}</span>
               </div>
+              {r.has_image && <img src={`/api/quick-replies/${r.id}/image`} alt="" style={{ width: '100%', maxHeight: 100, objectFit: 'cover', borderRadius: 6, marginBottom: 6 }} />}
               <div style={{ fontSize: 13, color: W.txt2, whiteSpace: 'pre-wrap', lineHeight: 1.5, marginBottom: 10, maxHeight: 80, overflow: 'hidden' }}>{r.text}</div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button style={btnSmall} onClick={() => startEdit(r)}>✏️ Editar</button>

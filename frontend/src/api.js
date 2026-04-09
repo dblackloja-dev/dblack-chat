@@ -100,8 +100,29 @@ const api = {
 
   // Quick Replies
   getQuickReplies: () => request('/quick-replies'),
-  createQuickReply: (data) => request('/quick-replies', { method: 'POST', body: data }),
-  updateQuickReply: (id, data) => request(`/quick-replies/${id}`, { method: 'PUT', body: data }),
+  createQuickReply: async (data, imageFile) => {
+    if (!imageFile) return request('/quick-replies', { method: 'POST', body: data });
+    const token = getToken();
+    const form = new FormData();
+    form.append('label', data.label);
+    form.append('text', data.text);
+    form.append('category', data.category || 'geral');
+    form.append('image', imageFile);
+    const res = await fetch(`${BASE}/quick-replies`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+    return res.json();
+  },
+  updateQuickReply: async (id, data, imageFile) => {
+    if (!imageFile && !data.remove_image) return request(`/quick-replies/${id}`, { method: 'PUT', body: data });
+    const token = getToken();
+    const form = new FormData();
+    form.append('label', data.label);
+    form.append('text', data.text);
+    form.append('category', data.category || 'geral');
+    if (data.remove_image) form.append('remove_image', 'true');
+    if (imageFile) form.append('image', imageFile);
+    const res = await fetch(`${BASE}/quick-replies/${id}`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: form });
+    return res.json();
+  },
   deleteQuickReply: (id) => request(`/quick-replies/${id}`, { method: 'DELETE' }),
 
   // Settings
