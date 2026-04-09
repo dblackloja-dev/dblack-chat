@@ -476,6 +476,8 @@ function generateReceiptText(sale, sellerName, customerName) {
 // ═══════════════════════════════════
 async function start() {
   await initDB();
+  // Cria tabela de auth do WhatsApp se não existir
+  await queryRun("CREATE TABLE IF NOT EXISTS wa_auth (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   // Verifica se tem credenciais salvas no banco
   const authRow = await queryOne("SELECT key FROM wa_auth WHERE key = 'creds' LIMIT 1");
   if (authRow) {
