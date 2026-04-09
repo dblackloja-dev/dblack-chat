@@ -32,6 +32,7 @@ export default function Settings() {
     try {
       const result = await api.pairWhatsApp(pairPhone.trim());
       if (result.pairingCode) setWaStatus(prev => ({ ...prev, pairingCode: result.pairingCode }));
+      if (result.qr) setWaStatus(prev => ({ ...prev, qr: result.qr }));
     } catch {}
     setPairing(false);
   };

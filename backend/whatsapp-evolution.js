@@ -64,17 +64,18 @@ class WhatsAppEvolution extends EventEmitter {
     try {
       this.pairingCode = null;
       this.qrCode = null;
-      // Solicita código de pareamento
-      const result = await this.api('POST', 'instance/connect', { number: phone });
+      // Evolution v2: GET /instance/connect retorna QR
+      const result = await this.api('GET', 'instance/connect');
+      if (result?.base64) {
+        this.qrCode = result.base64;
+        this.emit('qr', result.base64);
+        console.log('📱 QR Code gerado pela Evolution');
+      }
       if (result?.pairingCode) {
         this.pairingCode = result.pairingCode;
         this.emit('pairing_code', result.pairingCode);
         console.log('🔢 Código de pareamento:', result.pairingCode);
         return result.pairingCode;
-      }
-      if (result?.base64) {
-        this.qrCode = result.base64;
-        this.emit('qr', result.base64);
       }
       return null;
     } catch (e) {

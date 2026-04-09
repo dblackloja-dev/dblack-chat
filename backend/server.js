@@ -517,12 +517,14 @@ app.post('/api/whatsapp/pair', auth, async (req, res) => {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ error: 'Informe o número do WhatsApp' });
 
-    // Evolution API — solicita pareamento
-    const code = await wa.startPairing(phone);
-    if (code) {
-      res.json({ success: true, pairingCode: code });
+    // Evolution API — solicita conexão
+    await wa.startPairing(phone);
+    // Retorna QR code ou pairing code
+    if (wa.pairingCode) {
+      res.json({ success: true, pairingCode: wa.pairingCode });
     } else if (wa.qrCode) {
-      res.json({ success: true, qr: wa.qrCode });
+      currentQR = wa.qrCode;
+      res.json({ success: true, qr: wa.qrCode, message: 'Escaneie o QR Code no WhatsApp' });
     } else {
       res.json({ success: true, message: 'Aguardando... verifique o status.' });
     }
