@@ -947,7 +947,7 @@ function MessageBubble({ msg, onImageClick, onDelete }) {
             </div>
           </div>
         ) : (
-          <div style={{ fontSize: 14.2, lineHeight: 1.45, wordBreak: 'break-word', overflowWrap: 'anywhere', color: '#111b21', whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+          <div style={{ fontSize: 14.2, lineHeight: 1.45, wordBreak: 'break-word', overflowWrap: 'anywhere', color: '#111b21', whiteSpace: 'pre-wrap' }}>{linkify(msg.content)}</div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 2 }}>
           <span style={{ fontSize: 11, color: '#667781' }}>{fmt(msg.timestamp)}</span>
@@ -955,6 +955,16 @@ function MessageBubble({ msg, onImageClick, onDelete }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function linkify(text) {
+  if (!text) return text;
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, i) => urlRegex.test(part)
+    ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" style={{ color: '#1eba8a', textDecoration: 'underline' }}>{part}</a>
+    : part
   );
 }
 
