@@ -215,18 +215,38 @@ async function generateResponse(conversationId, customerMessage, customerName, m
     const systemWithProducts = SYSTEM_PROMPT + productCtx;
 
     const startTime = Date.now();
-    const ai = await getClient();
-    if (!ai) return { text: null, shouldTransfer: true };
-    const response = await ai.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 200,
-      temperature: 0.9,
-      system: systemWithProducts,
-      messages: cleaned,
+
+    // Busca key
+    let apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      try {
+        const row = await queryOne("SELECT value FROM chat_settings WHERE key = 'anthropic_api_key'");
+        if (row) apiKey = row.value;
+      } catch {}
+    }
+    if (!apiKey) return { text: null, shouldTransfer: true };
+
+    // Chama API direto via fetch (mais confiável que SDK)
+    const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey.trim(),
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 200,
+        temperature: 0.9,
+        system: systemWithProducts,
+        messages: cleaned,
+      }),
     });
+    const response = await apiRes.json();
+    if (response.error) throw new Error(JSON.stringify(response.error));
     const responseTime = Date.now() - startTime;
 
-    const text = response.content[0]?.text || '';
+    const text = (response.content?.[0]?.text) || '';
     const shouldTransfer = text.includes('[TRANSFERIR]');
     const cleanText = text.replace('[TRANSFERIR]', '').trim();
 
