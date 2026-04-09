@@ -152,13 +152,16 @@ async function generateResponse(conversationId, customerMessage, customerName, m
     }
 
     const messages = [...history];
+    const newMsg = imageContent
+      ? { role: 'user', content: [imageContent, { type: 'text', text: userContent }] }
+      : { role: 'user', content: userContent };
+
     if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
-      const lastContent = typeof messages[messages.length - 1].content === 'string' ? messages[messages.length - 1].content : '';
-      if (lastContent !== userContent) {
-        messages.push(imageContent ? { role: 'user', content: [imageContent, { type: 'text', text: userContent }] } : { role: 'user', content: userContent });
-      }
+      // Substitui a última mensagem do usuário (que pode ser o placeholder "[Cliente enviou uma foto]")
+      // pela versão com a imagem real, para não ser descartada pela limpeza de roles consecutivos
+      messages[messages.length - 1] = newMsg;
     } else {
-      messages.push(imageContent ? { role: 'user', content: [imageContent, { type: 'text', text: userContent }] } : { role: 'user', content: userContent });
+      messages.push(newMsg);
     }
 
     while (messages.length > 0 && messages[0].role !== 'user') messages.shift();
