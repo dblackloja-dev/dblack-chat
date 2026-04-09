@@ -117,6 +117,9 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // ─── IMAGEM EXPANDIDA ───
+  const [expandedImage, setExpandedImage] = useState(null);
+
   // ─── NOTIFICAÇÃO PUSH ───
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -627,7 +630,7 @@ export default function App() {
                   <div style={{ fontSize: 11, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtPhone(activeConv.phone)}</div>
                 </div>
                 {activeConv.status === 'atendendo' && <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => { setShowSales(true); setShowAdmin(false); }} title="Vender">🛒</button>
+                  <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(30,186,138,.1)', color: '#1eba8a', border: '1px solid rgba(30,186,138,.3)', fontWeight: 600 }} onClick={() => { setShowSales(true); setShowAdmin(false); }} title="Vender">🛒 Vender</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowCustomerPanel(!showCustomerPanel)} title="Cliente">👤</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowTagMenu(!showTagMenu)} title="Tags">🏷️</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowMsgSearch(!showMsgSearch)} title="Buscar">🔍</button>
@@ -804,6 +807,22 @@ export default function App() {
       </div>
 
       </>}
+
+      {/* Imagem expandida (overlay fullscreen) */}
+      {expandedImage && (
+        <div onClick={() => setExpandedImage(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,.9)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer',
+        }}>
+          <button onClick={() => setExpandedImage(null)} style={{
+            position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,.15)',
+            border: 'none', color: '#fff', fontSize: 24, width: 40, height: 40, borderRadius: '50%',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>✕</button>
+          <img src={expandedImage} alt="" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8, objectFit: 'contain' }} onClick={e => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   );
 }
@@ -852,7 +871,10 @@ function MessageBubble({ msg }) {
         ) : msg.media_type === 'image' ? (
           <div>
             {(msg.media_url || msg.content?.startsWith('/media/') || msg.content?.startsWith('http')) && (
-              <img src={msg.media_url || msg.content.split('|')[0]} alt="" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4 }} onError={e => { e.target.style.display = 'none'; }} />
+              <img src={msg.media_url || msg.content.split('|')[0]} alt=""
+                style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4, cursor: 'pointer' }}
+                onClick={() => setExpandedImage(msg.media_url || msg.content.split('|')[0])}
+                onError={e => { e.target.style.display = 'none'; }} />
             )}
             <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content?.includes('|') ? msg.content.split('|')[1] : (msg.content?.startsWith('http') || msg.content?.startsWith('/') ? '' : msg.content)}</div>
           </div>

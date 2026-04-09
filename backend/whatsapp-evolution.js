@@ -246,6 +246,15 @@ class WhatsAppEvolution extends EventEmitter {
     }
   }
 
+  // Busca foto de perfil do contato
+  async getProfilePic(phone) {
+    try {
+      const number = phone.replace(/\D/g, '');
+      const result = await this.api('POST', 'chat/fetchProfilePictureUrl', { number });
+      return result?.profilePictureUrl || result?.url || null;
+    } catch { return null; }
+  }
+
   getStatus() {
     return {
       connected: this.connected,

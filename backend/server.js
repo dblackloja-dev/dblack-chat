@@ -509,6 +509,14 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Foto de perfil do WhatsApp
+app.get('/api/profile-pic/:phone', auth, async (req, res) => {
+  try {
+    const url = await wa.getProfilePic(req.params.phone);
+    res.json({ url });
+  } catch { res.json({ url: null }); }
+});
+
 // Buscar dados do cliente no ERP pelo telefone
 app.get('/api/erp/customer-details/:phone', auth, async (req, res) => {
   try {
