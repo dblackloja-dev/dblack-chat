@@ -105,6 +105,7 @@ export default function App() {
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
 
   // Detecta mobile
   useEffect(() => {
@@ -277,6 +278,14 @@ export default function App() {
   }, [user?.id]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  // Auto-resize do textarea quando msgInput muda
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + 'px';
+    }
+  }, [msgInput]);
 
   // ─── ACTIONS ───
   const openConversation = async (conv) => {
@@ -738,11 +747,12 @@ export default function App() {
                         </div>
                       )}
                       <textarea
+                        ref={textareaRef}
                         rows={1}
                         style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '8px 0', lineHeight: '20px', resize: 'none', maxHeight: 120, overflowY: 'auto' }}
                         placeholder="Digite uma mensagem"
                         value={msgInput}
-                        onChange={e => { setMsgInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }}
+                        onChange={e => setMsgInput(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                         autoFocus
                       />
