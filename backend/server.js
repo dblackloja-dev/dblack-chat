@@ -171,6 +171,14 @@ wa.on('disconnected', () => {
   broadcast('wa_status', { connected: false });
 });
 
+// Atualiza status de entrega das mensagens (enviado/entregue/lido)
+wa.on('message_ack', async ({ id, ack }) => {
+  try {
+    await queryRun("UPDATE messages SET ack = $1 WHERE id = $2 AND ack < $1", [ack, id]);
+    broadcast('message_ack', { id, ack });
+  } catch (e) { console.error('Erro ao atualizar ack:', e.message); }
+});
+
 // Quando recebe mensagem do WhatsApp — entra na fila pra processar sequencialmente
 wa.on('message', (msg) => {
   msgQueue.add(async () => {
@@ -392,6 +400,19 @@ app.get('/api/messages/:conversationId', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Marcar conversa como não lida
+app.post('/api/conversations/:conversationId/mark-unread', auth, async (req, res) => {
+  try {
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [req.params.conversationId]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const count = conv.unread_count > 0 ? conv.unread_count : 1;
+    await queryRun("UPDATE conversations SET unread_count = $1 WHERE id = $2", [count, conv.id]);
+    const updated = { ...conv, unread_count: count };
+    broadcast('conversation_updated', updated);
+    res.json(updated);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Enviar mensagem (atendente → cliente via WhatsApp)
 app.post('/api/messages/send', auth, async (req, res) => {
   try {
@@ -416,7 +437,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
       [content, conversation_id]
     );
 
-    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content, timestamp: new Date().toISOString() };
+    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content, ack: 1, timestamp: new Date().toISOString() };
     broadcast('new_message', { conversation: { ...conv, last_message: content }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }

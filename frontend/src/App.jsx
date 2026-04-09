@@ -58,7 +58,9 @@ const Icons = {
   search: <svg viewBox="0 0 24 24" width="20" height="20" fill="#667781"><path d="M15.009 13.805h-.636l-.22-.219a5.184 5.184 0 0 0 1.256-3.386 5.207 5.207 0 1 0-5.207 5.208 5.183 5.183 0 0 0 3.385-1.255l.221.22v.635l4.004 3.999 1.194-1.195-3.997-4.007zm-4.808 0a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/></svg>,
   back: <svg viewBox="0 0 24 24" width="24" height="24" fill={W.txt2}><path d="M12 4l1.4 1.4L7.8 11H20v2H7.8l5.6 5.6L12 20l-8-8 8-8z"/></svg>,
   menu: <svg viewBox="0 0 24 24" width="24" height="24" fill={W.txt2}><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>,
-  check: <svg viewBox="0 0 16 15" width="16" height="15" fill={W.blue}><path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.88a.32.32 0 0 1-.484.032l-.358-.325a.32.32 0 0 0-.484.032l-.378.48a.418.418 0 0 0 .036.54l1.32 1.267a.32.32 0 0 0 .484-.034l6.272-8.048a.366.366 0 0 0-.064-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.88a.32.32 0 0 1-.484.032L1.892 7.77a.366.366 0 0 0-.516.005l-.423.433a.364.364 0 0 0 .006.514l3.255 3.185a.32.32 0 0 0 .484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z"/></svg>,
+  check: <svg viewBox="0 0 16 15" width="16" height="15" fill="#667781"><path d="M10.91 3.316l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.88a.32.32 0 0 1-.484.032L1.892 7.77a.366.366 0 0 0-.516.005l-.423.433a.364.364 0 0 0 .006.514l3.255 3.185a.32.32 0 0 0 .484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z"/></svg>,
+  dblcheck: <svg viewBox="0 0 16 15" width="16" height="15" fill="#667781"><path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.88a.32.32 0 0 1-.484.032l-.358-.325a.32.32 0 0 0-.484.032l-.378.48a.418.418 0 0 0 .036.54l1.32 1.267a.32.32 0 0 0 .484-.034l6.272-8.048a.366.366 0 0 0-.064-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.88a.32.32 0 0 1-.484.032L1.892 7.77a.366.366 0 0 0-.516.005l-.423.433a.364.364 0 0 0 .006.514l3.255 3.185a.32.32 0 0 0 .484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z"/></svg>,
+  dblcheckBlue: <svg viewBox="0 0 16 15" width="16" height="15" fill={W.blue}><path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.88a.32.32 0 0 1-.484.032l-.358-.325a.32.32 0 0 0-.484.032l-.378.48a.418.418 0 0 0 .036.54l1.32 1.267a.32.32 0 0 0 .484-.034l6.272-8.048a.366.366 0 0 0-.064-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.88a.32.32 0 0 1-.484.032L1.892 7.77a.366.366 0 0 0-.516.005l-.423.433a.364.364 0 0 0 .006.514l3.255 3.185a.32.32 0 0 0 .484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z"/></svg>,
   attach: <svg viewBox="0 0 24 24" width="24" height="24" fill={W.txt2}><path d="M1.816 15.556v.002c0 1.502.584 2.912 1.646 3.972s2.472 1.647 3.974 1.647a5.58 5.58 0 0 0 3.972-1.645l9.547-9.548c.769-.768 1.147-1.767 1.058-2.817-.079-.968-.548-1.927-1.319-2.698-1.594-1.592-4.068-1.711-5.517-.262l-7.916 7.915c-.881.881-.792 2.25.214 3.261.501.501 1.134.809 1.751.853.605.043 1.198-.17 1.638-.611l5.845-5.845c.195-.195.195-.512 0-.707a.5.5 0 0 0-.707 0l-5.845 5.845a.909.909 0 0 1-.667.252 1.462 1.462 0 0 1-1.048-.567c-.574-.574-.61-1.277-.112-1.773l7.916-7.916c.987-.987 2.694-.884 3.811.234.545.544.896 1.234.951 1.896.063.712-.185 1.397-.697 1.909l-9.548 9.548a3.585 3.585 0 0 1-2.559 1.06A3.59 3.59 0 0 1 4.17 18.12a3.585 3.585 0 0 1-1.06-2.559v-.003c0-.97.379-1.881 1.06-2.563l7.589-7.588a.5.5 0 0 0-.707-.707l-7.59 7.588a4.57 4.57 0 0 0-1.346 3.26z"/></svg>,
 };
 
@@ -265,6 +267,10 @@ export default function App() {
         }
         if (event === 'message_deleted') {
           setMessages(prev => prev.map(m => m.id === data.id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m));
+        }
+        if (event === 'message_ack') {
+          setMessages(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack } : m));
+          setSpyMsgs(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack } : m));
         }
         if (event === 'conversation_updated') {
           setConversations(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c));
@@ -672,6 +678,7 @@ export default function App() {
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowMsgSearch(!showMsgSearch)} title="Buscar">🔍</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => loadHistory(activeConv.phone)} title="Histórico">📋</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => transferConversation(activeConv.id)} title="Devolver">↩️</button>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={async () => { try { await api.markUnread(activeConv.id); } catch {} }} title="Marcar como não lida">✉️</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11, color: W.red }} onClick={() => finishConversation(activeConv.id)} title="Finalizar">✓</button>
                 </div>}
               </div>
@@ -951,7 +958,7 @@ function MessageBubble({ msg, onImageClick, onDelete }) {
         )}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 2 }}>
           <span style={{ fontSize: 11, color: '#667781' }}>{fmt(msg.timestamp)}</span>
-          {isMe && Icons.check}
+          {isMe && (msg.ack >= 3 ? Icons.dblcheckBlue : msg.ack >= 2 ? Icons.dblcheck : Icons.check)}
         </div>
       </div>
     </div>

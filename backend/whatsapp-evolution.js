@@ -159,6 +159,23 @@ class WhatsAppEvolution extends EventEmitter {
       }
     }
 
+    // Status de entrega das mensagens (enviado/entregue/lido)
+    if (event === 'messages.update') {
+      const updates = Array.isArray(body.data) ? body.data : [body.data];
+      for (const upd of updates) {
+        const msgId = upd?.key?.id || upd?.keyId;
+        const status = upd?.update?.status || upd?.status;
+        if (msgId && status != null) {
+          // Evolution: 1=enviado, 2=entregue(servidor), 3=entregue(dispositivo), 4=lido
+          // Nosso ack: 1=enviado, 2=entregue, 3=lido
+          const ack = status >= 4 ? 3 : status >= 3 ? 2 : status >= 2 ? 2 : 1;
+          this.emit('message_ack', { id: msgId, ack });
+          console.log(`✓ Status msg ${msgId}: ${['','enviado','entregue','lido'][ack]}`);
+        }
+      }
+      return;
+    }
+
     if (event === 'messages.upsert') {
       const msg = body.data;
       if (!msg || msg.key?.fromMe) return;

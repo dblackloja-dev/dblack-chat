@@ -48,6 +48,7 @@ const api = {
   acceptConversation: (id) => request(`/conversations/${id}/accept`, { method: 'POST' }),
   finishConversation: (id) => request(`/conversations/${id}/finish`, { method: 'POST' }),
   transferConversation: (id) => request(`/conversations/${id}/transfer`, { method: 'POST' }),
+  markUnread: (id) => request(`/conversations/${id}/mark-unread`, { method: 'POST' }),
 
   // Messages
   getMessages: (convId) => request(`/messages/${convId}`),
