@@ -519,6 +519,124 @@ app.post('/api/whatsapp/pair', auth, async (req, res) => {
 });
 
 // ═══════════════════════════════════
+// ═══  TAGS DE CONVERSAS          ═══
+// ═══════════════════════════════════
+app.post('/api/conversations/:id/tags', auth, async (req, res) => {
+  try {
+    const { tag, color } = req.body;
+    const id = genId();
+    await queryRun("INSERT INTO conversation_tags (id, conversation_id, tag, color) VALUES ($1,$2,$3,$4)", [id, req.params.id, tag, color || '#00a884']);
+    // Atualiza campo tags na conversa
+    const tags = await queryAll("SELECT tag, color FROM conversation_tags WHERE conversation_id = $1", [req.params.id]);
+    await queryRun("UPDATE conversations SET tags = $1 WHERE id = $2", [tags.map(t => t.tag).join(','), req.params.id]);
+    res.json({ id, tag, color });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/conversations/:id/tags/:tagId', auth, async (req, res) => {
+  try {
+    await queryRun("DELETE FROM conversation_tags WHERE id = $1", [req.params.tagId]);
+    const tags = await queryAll("SELECT tag FROM conversation_tags WHERE conversation_id = $1", [req.params.id]);
+    await queryRun("UPDATE conversations SET tags = $1 WHERE id = $2", [tags.map(t => t.tag).join(','), req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/conversations/:id/tags', auth, async (req, res) => {
+  try { res.json(await queryAll("SELECT * FROM conversation_tags WHERE conversation_id = $1", [req.params.id])); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════
+// ═══  HISTÓRICO POR CLIENTE      ═══
+// ═══════════════════════════════════
+app.get('/api/conversations/history/:phone', auth, async (req, res) => {
+  try {
+    const convs = await queryAll(
+      "SELECT * FROM conversations WHERE phone = $1 ORDER BY started_at DESC LIMIT 50",
+      [req.params.phone]
+    );
+    res.json(convs);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════
+// ═══  BUSCA DE MENSAGENS         ═══
+// ═══════════════════════════════════
+app.get('/api/messages/search', auth, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.json([]);
+    const msgs = await queryAll(
+      `SELECT m.*, c.customer_push_name, c.phone FROM messages m
+       JOIN conversations c ON m.conversation_id = c.id
+       WHERE m.content ILIKE $1
+       ORDER BY m.timestamp DESC LIMIT 50`,
+      [`%${q}%`]
+    );
+    res.json(msgs);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════
+// ═══  FILA INTELIGENTE           ═══
+// ═══════════════════════════════════
+app.post('/api/conversations/:id/auto-assign', auth, async (req, res) => {
+  try {
+    // Pega o atendente com menos conversas ativas
+    const agents = await queryAll(
+      "SELECT agent_id, agent_name, COUNT(*) as active_count FROM conversations WHERE status = 'atendendo' AND agent_id IS NOT NULL GROUP BY agent_id, agent_name ORDER BY active_count ASC"
+    );
+    const allUsers = await erp.listUsers();
+    const atendentes = allUsers.filter(u => u.role !== 'admin' && u.active);
+
+    let assigned = null;
+    if (agents.length > 0) {
+      // Atendente com menos carga
+      assigned = agents[0];
+    } else if (atendentes.length > 0) {
+      // Nenhum tem conversa, pega o primeiro
+      assigned = { agent_id: atendentes[0].id, agent_name: atendentes[0].name };
+    }
+
+    if (assigned) {
+      await queryRun(
+        "UPDATE conversations SET status = 'atendendo', agent_id = $1, agent_name = $2, accepted_at = NOW() WHERE id = $3",
+        [assigned.agent_id, assigned.agent_name, req.params.id]
+      );
+      const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [req.params.id]);
+      broadcast('conversation_updated', conv);
+      res.json(conv);
+    } else {
+      res.json({ error: 'Nenhum atendente disponível' });
+    }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════
+// ═══  MÉTRICAS DA IA             ═══
+// ═══════════════════════════════════
+app.get('/api/ai-metrics', auth, async (req, res) => {
+  try {
+    const total = await queryOne("SELECT COUNT(*) as c FROM ai_metrics");
+    const resolved = await queryOne("SELECT COUNT(*) as c FROM ai_metrics WHERE resolved_by_ai = true");
+    const transferred = await queryOne("SELECT COUNT(*) as c FROM ai_metrics WHERE transferred = true");
+    const avgTime = await queryOne("SELECT AVG(response_time_ms) as avg FROM ai_metrics WHERE response_time_ms > 0");
+    const daily = await queryAll(
+      "SELECT created_at::date as day, COUNT(*) as total, SUM(CASE WHEN resolved_by_ai THEN 1 ELSE 0 END) as resolved, SUM(CASE WHEN transferred THEN 1 ELSE 0 END) as transferred FROM ai_metrics GROUP BY day ORDER BY day DESC LIMIT 30"
+    );
+    res.json({
+      total: parseInt(total.c),
+      resolved: parseInt(resolved.c),
+      transferred: parseInt(transferred.c),
+      avg_response_ms: Math.round(parseFloat(avgTime.avg) || 0),
+      resolution_rate: parseInt(total.c) > 0 ? Math.round(parseInt(resolved.c) / parseInt(total.c) * 100) : 0,
+      daily,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════
 // ═══  RESPOSTAS RÁPIDAS          ═══
 // ═══════════════════════════════════
 app.get('/api/quick-replies', auth, async (req, res) => {

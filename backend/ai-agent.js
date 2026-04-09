@@ -1,6 +1,7 @@
 // Agente de IA "Lê" — D'Black Store
 const Anthropic = require('@anthropic-ai/sdk');
 const { queryAll, queryOne, queryRun } = require('./database');
+const erp = require('./erp');
 require('dotenv').config();
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -189,23 +190,72 @@ async function generateResponse(conversationId, customerMessage, customerName, m
       cleaned.push({ role: 'user', content: userContent });
     }
 
+    // Busca produtos se a mensagem mencionar roupas
+    const productCtx = await getProductContext(customerMessage);
+    const systemWithProducts = SYSTEM_PROMPT + productCtx;
+
+    const startTime = Date.now();
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 200,
       temperature: 0.9,
-      system: SYSTEM_PROMPT,
+      system: systemWithProducts,
       messages: cleaned,
     });
+    const responseTime = Date.now() - startTime;
 
     const text = response.content[0]?.text || '';
     const shouldTransfer = text.includes('[TRANSFERIR]');
     const cleanText = text.replace('[TRANSFERIR]', '').trim();
+
+    // Registra métrica
+    await recordMetric(conversationId, responseTime, shouldTransfer);
 
     return { text: cleanText, shouldTransfer };
   } catch (e) {
     console.error('❌ Erro IA:', e.message);
     return { text: null, shouldTransfer: true };
   }
+}
+
+// Busca produtos no ERP pra dar contexto à IA
+async function getProductContext(message) {
+  try {
+    // Extrai possíveis termos de busca da mensagem
+    const terms = message.toLowerCase();
+    const keywords = ['calça', 'blusa', 'vestido', 'short', 'camisa', 'camiseta', 'saia', 'conjunto', 'macacão', 'casaco', 'jaqueta', 'moletom', 'blazer', 'bermuda', 'trico', 'cargo', 'jeans'];
+    const found = keywords.filter(k => terms.includes(k));
+    if (found.length === 0) return '';
+
+    const products = await erp.searchProducts(found[0]);
+    if (products.length === 0) return '';
+
+    const top5 = products.slice(0, 5);
+    let ctx = '\n\n[PRODUTOS ENCONTRADOS NO ESTOQUE - use pra responder sobre preço/disponibilidade]:\n';
+    top5.forEach(p => {
+      ctx += `- ${p.name} | R$ ${parseFloat(p.price).toFixed(2)} | Tam: ${p.size || 'variados'} | Estoque: ${p.total_stock} un.\n`;
+    });
+    return ctx;
+  } catch { return ''; }
+}
+
+// Registra métrica da IA
+async function recordMetric(conversationId, responseTimeMs, transferred) {
+  try {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const existing = await queryOne("SELECT id, messages_by_ai FROM ai_metrics WHERE conversation_id = $1", [conversationId]);
+    if (existing) {
+      await queryRun(
+        "UPDATE ai_metrics SET messages_by_ai = messages_by_ai + 1, transferred = $1, response_time_ms = $2, resolved_by_ai = $3 WHERE conversation_id = $4",
+        [transferred, responseTimeMs, !transferred, conversationId]
+      );
+    } else {
+      await queryRun(
+        "INSERT INTO ai_metrics (id, conversation_id, messages_by_ai, response_time_ms, transferred, resolved_by_ai) VALUES ($1,$2,1,$3,$4,$5)",
+        [id, conversationId, responseTimeMs, transferred, !transferred]
+      );
+    }
+  } catch (e) { console.error('Erro ao registrar métrica IA:', e.message); }
 }
 
 // Verifica se o agente de IA está ativo
@@ -216,4 +266,4 @@ async function isAgentEnabled() {
   } catch { return false; }
 }
 
-module.exports = { generateResponse, isAgentEnabled };
+module.exports = { generateResponse, isAgentEnabled, recordMetric };

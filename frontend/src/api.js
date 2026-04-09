@@ -110,6 +110,21 @@ const api = {
   // Customers (do ERP)
   getCustomers: (q) => request(`/erp/customers${q ? `?q=${encodeURIComponent(q)}` : ''}`),
 
+  // Tags
+  getConvTags: (convId) => request(`/conversations/${convId}/tags`),
+  addConvTag: (convId, data) => request(`/conversations/${convId}/tags`, { method: 'POST', body: data }),
+  removeConvTag: (convId, tagId) => request(`/conversations/${convId}/tags/${tagId}`, { method: 'DELETE' }),
+
+  // Histórico e busca
+  getConvHistory: (phone) => request(`/conversations/history/${phone}`),
+  searchMessages: (q) => request(`/messages/search?q=${encodeURIComponent(q)}`),
+
+  // Fila inteligente
+  autoAssign: (convId) => request(`/conversations/${convId}/auto-assign`, { method: 'POST' }),
+
+  // Métricas IA
+  getAIMetrics: () => request('/ai-metrics'),
+
   // ERP — Vendas
   searchProducts: (q) => request(`/erp/products?q=${encodeURIComponent(q)}`),
   getProductStock: (id) => request(`/erp/products/${id}/stock`),

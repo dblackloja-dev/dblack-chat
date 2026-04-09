@@ -100,18 +100,42 @@ async function initDB() {
       media_url TEXT,
       timestamp TIMESTAMP DEFAULT NOW()
     );
+
+    -- Tags de conversas
+    CREATE TABLE IF NOT EXISTS conversation_tags (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      color TEXT DEFAULT '#00a884',
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Métricas da IA
+    CREATE TABLE IF NOT EXISTS ai_metrics (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      resolved_by_ai BOOLEAN DEFAULT false,
+      transferred BOOLEAN DEFAULT false,
+      messages_by_ai INTEGER DEFAULT 0,
+      response_time_ms INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Conexões WhatsApp (multi-número)
+    CREATE TABLE IF NOT EXISTS wa_connections (
+      id TEXT PRIMARY KEY,
+      phone TEXT NOT NULL,
+      name TEXT DEFAULT '',
+      active BOOLEAN DEFAULT true,
+      is_primary BOOLEAN DEFAULT false,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
 
-  // Cria admin padrão se não existir
-  const admin = await queryOne("SELECT id FROM chat_users WHERE role = 'admin' LIMIT 1");
-  if (!admin) {
-    const id = 'adm_' + Date.now().toString(36);
-    await queryRun(
-      "INSERT INTO chat_users (id, name, email, password, role, avatar) VALUES ($1, $2, $3, $4, $5, $6)",
-      [id, 'Denilson', 'admin@dblack.com', 'admin123', 'admin', 'DN']
-    );
-    console.log('👤 Admin padrão criado: admin@dblack.com / admin123');
-  }
+  // Adiciona colunas novas se não existirem
+  try { await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''"); } catch {}
+  try { await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_to TEXT"); } catch {}
+  try { await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS ai_handled BOOLEAN DEFAULT false"); } catch {}
 
   // Insere respostas rápidas padrão se tabela vazia
   const qrCount = await queryOne("SELECT COUNT(*) as c FROM quick_replies");

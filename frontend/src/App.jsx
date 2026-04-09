@@ -7,6 +7,7 @@ import QuickRepliesModule from './modules/QuickReplies';
 import Reports from './modules/Reports';
 import Settings from './modules/Settings';
 import AIAgents from './modules/AIAgents';
+import AIMetrics from './modules/AIMetrics';
 
 // ─── CORES WHATSAPP WEB (TEMA CLARO) ───
 const W = {
@@ -115,6 +116,67 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // ─── NOTIFICAÇÃO PUSH ───
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  const sendPushNotif = (title, body) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, { body, icon: '/manifest.json', tag: 'dblack-chat' });
+    }
+  };
+
+  // ─── TAGS ───
+  const tagOptions = [
+    { tag: 'urgente', color: '#ea0038' },
+    { tag: 'compra', color: '#00a884' },
+    { tag: 'troca', color: '#ff9800' },
+    { tag: 'suporte', color: '#2196f3' },
+    { tag: 'vip', color: '#9c27b0' },
+  ];
+  const [convTags, setConvTags] = useState([]);
+  const [showTagMenu, setShowTagMenu] = useState(false);
+
+  const loadTags = async (convId) => {
+    try { setConvTags(await api.getConvTags(convId)); } catch { setConvTags([]); }
+  };
+
+  const addTag = async (tag, color) => {
+    if (!activeConv) return;
+    try {
+      await api.addConvTag(activeConv.id, { tag, color });
+      loadTags(activeConv.id);
+      setShowTagMenu(false);
+    } catch {}
+  };
+
+  const removeTag = async (tagId) => {
+    if (!activeConv) return;
+    try { await api.removeConvTag(activeConv.id, tagId); loadTags(activeConv.id); } catch {}
+  };
+
+  // ─── BUSCA DE MENSAGENS ───
+  const [msgSearch, setMsgSearch] = useState('');
+  const [msgSearchResults, setMsgSearchResults] = useState([]);
+  const [showMsgSearch, setShowMsgSearch] = useState(false);
+
+  const doMsgSearch = async (q) => {
+    setMsgSearch(q);
+    if (q.length < 2) { setMsgSearchResults([]); return; }
+    try { setMsgSearchResults(await api.searchMessages(q)); } catch { setMsgSearchResults([]); }
+  };
+
+  // ─── HISTÓRICO DO CLIENTE ───
+  const [convHistory, setConvHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const loadHistory = async (phone) => {
+    try { setConvHistory(await api.getConvHistory(phone)); setShowHistory(true); } catch {}
+  };
+
   // ─── RESPOSTAS RÁPIDAS ───
   const quickReplies = [
     { label: '👋 Saudação', text: 'Olá! Tudo bem? Como posso te ajudar?' },
@@ -197,7 +259,10 @@ export default function App() {
             if (cur?.id === data.conversation.id) setSpyMsgs(prev => prev.find(m => m.id === data.message.id) ? prev : [...prev, data.message]);
             return cur;
           });
-          if (!data.message.from_me) playNotif();
+          if (!data.message.from_me) {
+            playNotif();
+            if (document.hidden) sendPushNotif(data.message.sender || 'Nova mensagem', data.message.content?.slice(0, 100) || 'Nova mensagem');
+          }
         }
         if (event === 'conversation_updated') {
           setConversations(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c));
@@ -217,9 +282,10 @@ export default function App() {
 
   // ─── ACTIONS ───
   const openConversation = async (conv) => {
-    setActiveConv(conv); setSpyConv(null); setShowSales(false); setShowAdmin(false);
+    setActiveConv(conv); setSpyConv(null); setShowSales(false); setShowAdmin(false); setShowHistory(false); setShowMsgSearch(false);
     if (isMobile) setMobileView('chat');
     await loadMessages(conv.id);
+    loadTags(conv.id);
     if (conv.phone) {
       api.getCustomerDetails(conv.phone).then(c => {
         if (c && !c.not_found) setCustomerInfo(c);
@@ -344,6 +410,7 @@ export default function App() {
   ];
   const adminItems = [
     { id: 'ai-agents', icon: SI.aiAgents, label: 'Agentes de IA' },
+    { id: 'ai-metrics', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>, label: 'Métricas IA' },
     { id: 'reports', icon: SI.reports, label: 'Relatórios' },
     { id: 'settings', icon: SI.settings, label: 'Configurações' },
   ];
@@ -403,6 +470,7 @@ export default function App() {
       {currentModule === 'contacts' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'hidden', width: '100%', minWidth: 0 }}><Contacts /></div>}
       {currentModule === 'quick-replies' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><QuickRepliesModule /></div>}
       {currentModule === 'ai-agents' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><AIAgents /></div>}
+      {currentModule === 'ai-metrics' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><AIMetrics /></div>}
       {currentModule === 'reports' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><Reports /></div>}
       {currentModule === 'settings' && <div style={{ flex: 1, background: '#f0f2f5', overflow: 'auto', width: '100%', minWidth: 0 }}><Settings /></div>}
 
@@ -565,13 +633,39 @@ export default function App() {
                   <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeConv.customer_push_name || fmtPhone(activeConv.phone)}</div>
                   <div style={{ fontSize: 11, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtPhone(activeConv.phone)}</div>
                 </div>
-                {activeConv.status === 'atendendo' && <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                  <button style={{ ...smallBtn, padding: '4px 8px', fontSize: 11 }} onClick={() => { setShowSales(true); setShowAdmin(false); }}>🛒</button>
-                  <button style={{ ...smallBtn, padding: '4px 8px', fontSize: 11 }} onClick={() => setShowCustomerPanel(!showCustomerPanel)}>👤</button>
-                  <button style={{ ...smallBtn, padding: '4px 8px', fontSize: 11 }} onClick={() => transferConversation(activeConv.id)}>↩️</button>
-                  <button style={{ ...smallBtn, padding: '4px 8px', fontSize: 11, color: W.red }} onClick={() => finishConversation(activeConv.id)}>✓</button>
+                {activeConv.status === 'atendendo' && <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => { setShowSales(true); setShowAdmin(false); }} title="Vender">🛒</button>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowCustomerPanel(!showCustomerPanel)} title="Cliente">👤</button>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowTagMenu(!showTagMenu)} title="Tags">🏷️</button>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowMsgSearch(!showMsgSearch)} title="Buscar">🔍</button>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => loadHistory(activeConv.phone)} title="Histórico">📋</button>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => transferConversation(activeConv.id)} title="Devolver">↩️</button>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11, color: W.red }} onClick={() => finishConversation(activeConv.id)} title="Finalizar">✓</button>
                 </div>}
               </div>
+
+              {/* Tags da conversa */}
+              {convTags.length > 0 && <div style={{ display: 'flex', gap: 4, padding: '4px 12px', background: W.bgHeader, flexWrap: 'wrap', flexShrink: 0 }}>
+                {convTags.map(t => <span key={t.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, background: t.color + '20', color: t.color }}>{t.tag} <span style={{ cursor: 'pointer', opacity: 0.6 }} onClick={() => removeTag(t.id)}>✕</span></span>)}
+              </div>}
+
+              {/* Menu de tags */}
+              {showTagMenu && <div style={{ display: 'flex', gap: 4, padding: '6px 12px', background: W.bgHeader, borderBottom: `1px solid ${W.border}`, flexWrap: 'wrap', flexShrink: 0 }}>
+                {tagOptions.map(t => <button key={t.tag} onClick={() => addTag(t.tag, t.color)} style={{ padding: '3px 10px', borderRadius: 12, fontSize: 11, border: `1px solid ${t.color}`, background: t.color + '15', color: t.color, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>+ {t.tag}</button>)}
+                <button onClick={() => setShowTagMenu(false)} style={{ ...smallBtn, padding: '3px 8px', fontSize: 11 }}>✕</button>
+              </div>}
+
+              {/* Busca de mensagens */}
+              {showMsgSearch && <div style={{ padding: '6px 12px', background: W.bgHeader, borderBottom: `1px solid ${W.border}`, flexShrink: 0 }}>
+                <input style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: `1px solid ${W.border}`, background: '#fff', fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }} placeholder="Buscar nas mensagens..." value={msgSearch} onChange={e => doMsgSearch(e.target.value)} autoFocus />
+                {msgSearchResults.length > 0 && <div style={{ maxHeight: 150, overflowY: 'auto', marginTop: 4 }}>{msgSearchResults.map(m => <div key={m.id} style={{ padding: '4px 8px', fontSize: 12, borderBottom: `1px solid ${W.border}`, color: W.txt2 }}><strong>{m.sender}</strong>: {m.content?.slice(0, 80)}</div>)}</div>}
+              </div>}
+
+              {/* Histórico */}
+              {showHistory && <div style={{ padding: '6px 12px', background: W.bgHeader, borderBottom: `1px solid ${W.border}`, maxHeight: 180, overflowY: 'auto', flexShrink: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ fontSize: 12, fontWeight: 600 }}>Histórico ({convHistory.length})</span><button onClick={() => setShowHistory(false)} style={{ ...smallBtn, padding: '2px 6px', fontSize: 10 }}>✕</button></div>
+                {convHistory.map(c => <div key={c.id} onClick={() => { openConversation(c); setShowHistory(false); }} style={{ padding: '4px 8px', fontSize: 12, borderBottom: `1px solid ${W.border}`, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ color: c.status === 'finalizado' ? W.txt2 : W.green, flexShrink: 0 }}>{c.status}</span><span style={{ color: W.txt2, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.last_message?.slice(0, 40)}</span><span style={{ color: W.txt2, fontSize: 10, flexShrink: 0 }}>{c.started_at ? new Date(c.started_at).toLocaleDateString('pt-BR') : ''}</span></div>)}
+              </div>}
 
               {/* Messages */}
               <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat }}>
