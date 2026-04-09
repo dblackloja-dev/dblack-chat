@@ -737,12 +737,13 @@ export default function App() {
                           {emojiList.map(e => <button key={e} onClick={() => insertEmoji(e)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', padding: 4, borderRadius: 6 }}>{e}</button>)}
                         </div>
                       )}
-                      <input
-                        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '8px 0', lineHeight: '20px' }}
+                      <textarea
+                        rows={1}
+                        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '8px 0', lineHeight: '20px', resize: 'none', maxHeight: 120, overflowY: 'auto' }}
                         placeholder="Digite uma mensagem"
                         value={msgInput}
-                        onChange={e => setMsgInput(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+                        onChange={e => { setMsgInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                         autoFocus
                       />
                     </div>
