@@ -1,6 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers } = require('@whiskeysockets/baileys');
 const path = require('path');
 const EventEmitter = require('events');
+const { useDBAuthState } = require('./auth-db');
 
 class WhatsAppClient extends EventEmitter {
   constructor() {
@@ -19,7 +20,7 @@ class WhatsAppClient extends EventEmitter {
     this.connecting = true;
 
     try {
-      const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+      const { state, saveCreds } = await useDBAuthState();
 
       // Se já tem credenciais, não precisa de pairing
       const needsPairing = !state.creds.registered;
@@ -168,11 +169,10 @@ class WhatsAppClient extends EventEmitter {
     this.pairingCode = null;
     this.qrCode = null;
 
-    // Limpa auth anterior
-    const fs = require('fs');
-    if (fs.existsSync(this.authDir)) {
-      fs.rmSync(this.authDir, { recursive: true, force: true });
-    }
+    // Limpa credenciais anteriores do banco
+    const { queryRun } = require('./database');
+    await queryRun("DELETE FROM wa_auth");
+    console.log('🗑️ Credenciais anteriores removidas do banco');
 
     this.connecting = false;
     await this.connect(this.phoneForPairing);

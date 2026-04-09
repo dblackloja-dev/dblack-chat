@@ -476,10 +476,10 @@ function generateReceiptText(sale, sellerName, customerName) {
 // ═══════════════════════════════════
 async function start() {
   await initDB();
-  // Só conecta ao WhatsApp automaticamente se já tiver credenciais salvas
-  const fs = require('fs');
-  if (fs.existsSync(path.join(__dirname, 'auth_info', 'creds.json'))) {
-    console.log('🔑 Credenciais encontradas, conectando ao WhatsApp...');
+  // Verifica se tem credenciais salvas no banco
+  const authRow = await queryOne("SELECT key FROM wa_auth WHERE key = 'creds' LIMIT 1");
+  if (authRow) {
+    console.log('🔑 Credenciais encontradas no banco, conectando ao WhatsApp...');
     await wa.connect();
   } else {
     console.log('📱 WhatsApp não configurado. Use o painel admin para parear.');
