@@ -418,7 +418,7 @@ export default function App() {
   // ─── FILTROS ───
   const aguardando = conversations.filter(c => c.status === 'aguardando');
   const atendendo = conversations.filter(c => c.status === 'atendendo');
-  const myAtendendo = atendendo.filter(c => c.agent_id === user?.id);
+  const myAtendendo = user?.role === 'admin' ? atendendo : atendendo.filter(c => c.agent_id === user?.id);
   const finalizados = conversations.filter(c => c.status === 'finalizado');
 
   const filteredConvs = (list) => {
