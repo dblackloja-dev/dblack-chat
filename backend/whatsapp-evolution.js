@@ -12,6 +12,52 @@ class WhatsAppEvolution extends EventEmitter {
     this.connected = false;
     this.qrCode = null;
     this.pairingCode = null;
+
+    // Proteções anti-restrição
+    this.msgCount = { hour: 0, day: 0, hourReset: Date.now(), dayReset: Date.now() };
+    this.MSG_LIMIT_HOUR = 30;   // máximo 30 msgs por hora
+    this.MSG_LIMIT_DAY = 200;   // máximo 200 msgs por dia
+  }
+
+  // Verifica se pode enviar (rate limit)
+  canSend() {
+    const now = Date.now();
+    if (now - this.msgCount.hourReset > 3600000) { this.msgCount.hour = 0; this.msgCount.hourReset = now; }
+    if (now - this.msgCount.dayReset > 86400000) { this.msgCount.day = 0; this.msgCount.dayReset = now; }
+    if (this.msgCount.hour >= this.MSG_LIMIT_HOUR) { console.log('⚠️ Limite de msgs/hora atingido'); return false; }
+    if (this.msgCount.day >= this.MSG_LIMIT_DAY) { console.log('⚠️ Limite de msgs/dia atingido'); return false; }
+    return true;
+  }
+
+  // Registra envio
+  trackSend() {
+    this.msgCount.hour++;
+    this.msgCount.day++;
+    console.log(`📊 Msgs: ${this.msgCount.hour}/h | ${this.msgCount.day}/dia`);
+  }
+
+  // Delay humanizado (2-5 segundos)
+  async humanDelay() {
+    const delay = 2000 + Math.random() * 3000;
+    await new Promise(r => setTimeout(r, delay));
+  }
+
+  // Simula "digitando..." antes de enviar
+  async sendPresence(phone, type = 'composing') {
+    try {
+      const number = phone.replace(/\D/g, '');
+      await this.api('POST', 'chat/sendPresence', { number, presence: type });
+    } catch {}
+  }
+
+  // Marca mensagem como lida (read receipt)
+  async markAsRead(msgId, phone) {
+    try {
+      await this.api('POST', 'chat/markMessageAsRead', {
+        readMessages: [{ remoteJid: phone.includes('@') ? phone : phone + '@s.whatsapp.net', id: msgId }],
+      });
+      console.log('👁️ Marcado como lido:', msgId);
+    } catch (e) { console.error('Erro ao marcar como lido:', e.message); }
   }
 
   async api(method, endpoint, body) {
@@ -90,44 +136,46 @@ class WhatsAppEvolution extends EventEmitter {
   }
 
   async sendMessage(phone, text) {
+    if (!this.canSend()) throw new Error('Limite de mensagens atingido. Tente novamente mais tarde.');
     const number = phone.replace(/\D/g, '');
-    return this.api('POST', 'message/sendText', {
-      number,
-      text,
-    });
+    // Simula comportamento humano: digitando... + delay
+    await this.sendPresence(phone, 'composing');
+    await this.humanDelay();
+    this.trackSend();
+    return this.api('POST', 'message/sendText', { number, text });
   }
 
   async sendImage(phone, imageBuffer, caption = '') {
+    if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     const number = phone.replace(/\D/g, '');
     const base64 = imageBuffer.toString('base64');
+    await this.sendPresence(phone, 'composing');
+    await this.humanDelay();
+    this.trackSend();
     return this.api('POST', 'message/sendMedia', {
-      number,
-      mediatype: 'image',
-      mimetype: 'image/jpeg',
-      caption,
-      media: base64,
-      fileName: 'imagem.jpg',
+      number, mediatype: 'image', mimetype: 'image/jpeg', caption, media: base64, fileName: 'imagem.jpg',
     });
   }
 
   async sendAudio(phone, audioBuffer) {
+    if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     const number = phone.replace(/\D/g, '');
     const base64 = audioBuffer.toString('base64');
-    return this.api('POST', 'message/sendWhatsAppAudio', {
-      number,
-      audio: base64,
-    });
+    await this.sendPresence(phone, 'recording');
+    await this.humanDelay();
+    this.trackSend();
+    return this.api('POST', 'message/sendWhatsAppAudio', { number, audio: base64 });
   }
 
   async sendDocument(phone, buffer, fileName, mimetype) {
+    if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     const number = phone.replace(/\D/g, '');
     const base64 = buffer.toString('base64');
+    await this.sendPresence(phone, 'composing');
+    await this.humanDelay();
+    this.trackSend();
     return this.api('POST', 'message/sendMedia', {
-      number,
-      mediatype: 'document',
-      mimetype: mimetype || 'application/octet-stream',
-      media: base64,
-      fileName,
+      number, mediatype: 'document', mimetype: mimetype || 'application/octet-stream', media: base64, fileName,
     });
   }
 

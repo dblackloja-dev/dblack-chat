@@ -183,6 +183,9 @@ wa.on('message_ack', async ({ id, ack }) => {
 wa.on('message', (msg) => {
   msgQueue.add(async () => {
     try {
+      // Marca como lido (simula comportamento humano)
+      if (msg.id) await wa.markAsRead(msg.id, msg.phone);
+
       // Busca ou cria conversa para este telefone
       let conv = await queryOne("SELECT * FROM conversations WHERE phone = $1 AND status != 'finalizado' ORDER BY started_at DESC LIMIT 1", [msg.phone]);
 
