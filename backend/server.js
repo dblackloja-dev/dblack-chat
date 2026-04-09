@@ -10,9 +10,7 @@ const WhatsAppClient = require('./whatsapp');
 const { createCanvas } = require('@napi-rs/canvas');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
-ffmpeg.setFfmpegPath(ffmpegPath);
+// ffmpeg removido — não funciona no Railway
 const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 const aiAgent = require('./ai-agent');
@@ -447,41 +445,17 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Áudio não enviado' });
 
-    // Converte webm pra ogg opus (WhatsApp exige esse formato)
-    const fs = require('fs');
-    const tmpIn = path.join(__dirname, `tmp_${genId()}.webm`);
-    const tmpOut = path.join(__dirname, `tmp_${genId()}.ogg`);
-    fs.writeFileSync(tmpIn, req.file.buffer);
-
-    const oggBuffer = await new Promise((resolve, reject) => {
-      ffmpeg(tmpIn)
-        .toFormat('ogg')
-        .audioCodec('libopus')
-        .audioBitrate('64k')
-        .audioChannels(1)
-        .audioFrequency(48000)
-        .on('end', () => {
-          const buf = fs.readFileSync(tmpOut);
-          fs.unlinkSync(tmpIn);
-          fs.unlinkSync(tmpOut);
-          resolve(buf);
-        })
-        .on('error', (err) => {
-          try { fs.unlinkSync(tmpIn); } catch {}
-          try { fs.unlinkSync(tmpOut); } catch {}
-          reject(err);
-        })
-        .save(tmpOut);
-    });
+    // Envia áudio direto pro WhatsApp (webm com opus funciona)
+    const audioBuffer = req.file.buffer;
 
     // Salva no banco de mídia
     const mediaId = 'aud_sent_' + genId();
-    const base64 = oggBuffer.toString('base64');
+    const base64 = audioBuffer.toString('base64');
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/ogg', base64]);
 
     // Envia via WhatsApp como PTT
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
-    await wa.socket.sendMessage(jid, { audio: oggBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+    await wa.socket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
 
     // Salva no banco
     const msgId = genId();
