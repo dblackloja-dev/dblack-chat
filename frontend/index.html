@@ -31,12 +31,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <style>
     *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
+    html, body, #root { margin: 0; padding: 0; width: 100vw; height: 100dvh; overflow: hidden; position: fixed; inset: 0; }
     body { background: #0d1b18; color: rgba(255,255,255,0.92); }
     input, textarea, select, button { font-size: 16px !important; }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
     @media (max-width: 768px) {
-      html, body, #root { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; }
+      html, body, #root { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100dvh !important; max-width: 100vw !important; }
     }
   </style>
 </head>

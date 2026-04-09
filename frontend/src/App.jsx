@@ -441,7 +441,7 @@ export default function App() {
 
   // ─── MAIN ───
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100%', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: '#0f1f1c', fontFamily: "-apple-system, 'Inter', 'SF Pro Display', sans-serif", color: W.txt, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', width: '100vw', height: '100dvh', position: 'fixed', inset: 0, background: '#0f1f1c', fontFamily: "-apple-system, 'Inter', 'SF Pro Display', sans-serif", color: W.txt, overflow: 'hidden' }}>
 
       {/* ═══ SIDEBAR NAVEGAÇÃO (Design System D'Black) ═══ */}
       {isMobile && sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 99 }} />}
@@ -596,8 +596,8 @@ export default function App() {
 
         {/* SPY MODE */}
         {spyConv && !showAdmin && !showSales && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ height: 59, background: W.bgHeader, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ height: 56, flexShrink: 0, background: W.bgHeader, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8 }}>
               {isMobile && <button style={iconBtn} onClick={goBackToList}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg></button>}
               <div style={{ ...avatarStyle(40), background: '#6B7175' }}>{(spyConv.customer_push_name || spyConv.phone)?.[0]?.toUpperCase()}</div>
               <div style={{ flex: 1 }}>
@@ -607,10 +607,10 @@ export default function App() {
               <button style={{ ...smallBtn, background: W.green, color: '#fff', border: 'none', padding: '8px 16px' }} onClick={() => acceptConversation(spyConv.id)}>Aceitar</button>
               <button style={iconBtn} onClick={() => setSpyConv(null)}>✕</button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat }}>
-              {spyMsgs.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+            <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
+              {spyMsgs.map(msg => <MessageBubble key={msg.id} msg={msg} onImageClick={setExpandedImage} />)}
             </div>
-            <div style={{ padding: '10px 16px', background: 'rgba(0,168,132,.04)', textAlign: 'center', fontSize: 13, color: W.green }}>
+            <div style={{ padding: '10px 16px', flexShrink: 0, background: 'rgba(0,168,132,.04)', textAlign: 'center', fontSize: 13, color: W.green }}>
               Aceite o atendimento para responder
             </div>
           </div>
@@ -664,8 +664,8 @@ export default function App() {
               </div>}
 
               {/* Messages */}
-              <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat }}>
-                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
+              <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
+                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} onImageClick={setExpandedImage} />)}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -853,7 +853,7 @@ function ConvItem({ conv, active, onClick, finished }) {
   );
 }
 
-function MessageBubble({ msg }) {
+function MessageBubble({ msg, onImageClick }) {
   const isMe = msg.from_me;
   return (
     <div style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 2 }}>
@@ -873,7 +873,7 @@ function MessageBubble({ msg }) {
             {(msg.media_url || msg.content?.startsWith('/media/') || msg.content?.startsWith('http')) && (
               <img src={msg.media_url || msg.content.split('|')[0]} alt=""
                 style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4, cursor: 'pointer' }}
-                onClick={() => setExpandedImage(msg.media_url || msg.content.split('|')[0])}
+                onClick={() => onImageClick?.(msg.media_url || msg.content.split('|')[0])}
                 onError={e => { e.target.style.display = 'none'; }} />
             )}
             <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content?.includes('|') ? msg.content.split('|')[1] : (msg.content?.startsWith('http') || msg.content?.startsWith('/') ? '' : msg.content)}</div>
