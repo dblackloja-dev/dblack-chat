@@ -48,7 +48,7 @@ class WhatsAppClient extends EventEmitter {
         // Quando está conectando e precisa parear, solicita o código
         if (connection === 'connecting' && needsPairing && this.phoneForPairing && this.socket && !pairingRequested) {
           pairingRequested = true;
-          // Pequeno delay para o socket estabilizar
+          // Delay para o socket estabilizar (maior em produção)
           setTimeout(async () => {
             try {
               const code = await this.socket.requestPairingCode(this.phoneForPairing);
@@ -59,7 +59,7 @@ class WhatsAppClient extends EventEmitter {
               console.error('Erro ao gerar código de pareamento:', err.message);
               pairingRequested = false;
             }
-          }, 3000);
+          }, 5000);
         }
 
         // QR Code gerado (fallback caso não use pairing)

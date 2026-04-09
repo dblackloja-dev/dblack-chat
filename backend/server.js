@@ -302,13 +302,16 @@ app.post('/api/whatsapp/pair', auth, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ error: 'Informe o número do WhatsApp' });
-    await wa.startPairing(phone);
-    // Aguarda o código ser gerado (até 15s)
+
+    // Inicia pareamento (não bloqueia)
+    wa.startPairing(phone).catch(e => console.error('Erro startPairing:', e));
+
+    // Aguarda o código ser gerado (até 30s)
     let attempts = 0;
     const waitForCode = () => new Promise((resolve) => {
       const check = setInterval(() => {
         attempts++;
-        if (wa.pairingCode || attempts > 30) {
+        if (wa.pairingCode || attempts > 60) {
           clearInterval(check);
           resolve(wa.pairingCode);
         }
@@ -318,7 +321,7 @@ app.post('/api/whatsapp/pair', auth, async (req, res) => {
     if (code) {
       res.json({ success: true, pairingCode: code });
     } else {
-      res.json({ success: true, message: 'Aguardando código... verifique o status.' });
+      res.json({ success: true, message: 'Aguardando código... O código chegará via WebSocket.' });
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
