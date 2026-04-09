@@ -445,40 +445,55 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Áudio não enviado' });
 
-    // Converte webm → mp3
+    // Converte webm → ogg opus e envia como documento
     const fs = require('fs');
+    const os = require('os');
+    const tmpDir = os.tmpdir();
     const tmpId = genId();
-    const tmpIn = path.join(__dirname, `tmp_${tmpId}.webm`);
-    const tmpOut = path.join(__dirname, `tmp_${tmpId}.mp3`);
-    fs.writeFileSync(tmpIn, req.file.buffer);
+    const tmpIn = path.join(tmpDir, `in_${tmpId}.webm`);
+    const tmpOut = path.join(tmpDir, `out_${tmpId}.ogg`);
 
-    let mp3Buffer;
+    let finalBuffer;
+    let finalName = 'audio.ogg';
+    let finalMime = 'audio/ogg';
+
     try {
+      fs.writeFileSync(tmpIn, req.file.buffer);
       await new Promise((resolve, reject) => {
-        ffmpeg(tmpIn).toFormat('mp3').audioCodec('libmp3lame').audioBitrate('128k').audioChannels(1).audioFrequency(44100)
-          .on('end', resolve).on('error', reject).save(tmpOut);
+        ffmpeg(tmpIn)
+          .toFormat('ogg')
+          .audioCodec('libopus')
+          .audioBitrate('48k')
+          .audioChannels(1)
+          .audioFrequency(48000)
+          .on('end', resolve)
+          .on('error', reject)
+          .save(tmpOut);
       });
-      mp3Buffer = fs.readFileSync(tmpOut);
+      finalBuffer = fs.readFileSync(tmpOut);
+      console.log('🎵 Convertido OGG:', finalBuffer.length, 'bytes');
     } catch (e) {
-      console.log('⚠️ ffmpeg erro:', e.message);
-      mp3Buffer = null;
+      console.log('⚠️ ffmpeg falhou, enviando webm:', e.message);
+      finalBuffer = req.file.buffer;
+      finalName = 'audio.webm';
+      finalMime = 'audio/webm';
     }
     try { fs.unlinkSync(tmpIn); } catch {}
     try { fs.unlinkSync(tmpOut); } catch {}
 
-    if (!mp3Buffer) return res.status(500).json({ error: 'Erro ao converter áudio' });
-
     // Salva no banco
     const mediaId = 'aud_sent_' + genId();
-    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/mpeg', mp3Buffer.toString('base64')]);
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, finalMime, finalBuffer.toString('base64')]);
 
-    // Envia MP3 como documento de áudio (reproduzível no WhatsApp)
+    // Tenta enviar como PTT primeiro, senão como documento
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
-    await wa.socket.sendMessage(jid, {
-      document: mp3Buffer,
-      mimetype: 'audio/mpeg',
-      fileName: 'mensagem-de-voz.mp3',
-    });
+    try {
+      await wa.socket.sendMessage(jid, { audio: finalBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+      console.log('🎵 Áudio enviado como PTT');
+    } catch (e) {
+      console.log('⚠️ PTT falhou, enviando como documento:', e.message);
+      await wa.socket.sendMessage(jid, { document: finalBuffer, mimetype: finalMime, fileName: finalName });
+    }
 
     // Salva no banco
     const msgId = genId();
