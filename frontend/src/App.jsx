@@ -301,11 +301,14 @@ export default function App() {
   const transferConversation = async (convId) => { if (!confirm('Devolver para a fila?')) return; try { await api.transferConversation(convId); if (activeConv?.id === convId) { setActiveConv(null); setMessages([]); } await loadConversations(); } catch {} };
   const sendMessage = async () => { if (!msgInput.trim() || !activeConv) return; const text = msgInput.trim(); setMsgInput(''); try { await api.sendMessage({ conversation_id: activeConv.id, content: text }); } catch { setMsgInput(text); } };
   const sendQuickReply = async (text) => { if (!activeConv) return; setShowQuickReplies(false); try { await api.sendMessage({ conversation_id: activeConv.id, content: text }); } catch {} };
+  const [sendingMedia, setSendingMedia] = useState(false);
+
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (!file || !activeConv) return;
-    const caption = prompt('Legenda da imagem (opcional):') || '';
-    try { await api.sendImage(activeConv.id, file, caption); } catch (err) { alert('Erro ao enviar imagem: ' + err.message); }
+    if (!file || !activeConv || sendingMedia) return;
+    setSendingMedia(true);
+    try { await api.sendImage(activeConv.id, file, ''); } catch {}
+    setSendingMedia(false);
     e.target.value = '';
   };
 
@@ -316,18 +319,23 @@ export default function App() {
   const audioChunksRef = useRef([]);
   const recordingTimerRef = useRef(null);
 
+  const [sendingAudio, setSendingAudio] = useState(false);
+
   const startRecording = async () => {
-    if (!activeConv) return;
+    if (!activeConv || sendingAudio) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       audioChunksRef.current = [];
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         const blob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
-        if (blob.size > 1000) {
-          try { await api.sendAudio(activeConv.id, blob); } catch (err) { alert('Erro ao enviar áudio: ' + err.message); }
+        if (blob.size > 500) {
+          setSendingAudio(true);
+          try { await api.sendAudio(activeConv.id, blob); } catch {}
+          setSendingAudio(false);
         }
       };
       mediaRecorder.start(100);
@@ -335,7 +343,7 @@ export default function App() {
       setRecording(true);
       setRecordingTime(0);
       recordingTimerRef.current = setInterval(() => setRecordingTime(t => t + 1), 1000);
-    } catch { alert('Não foi possível acessar o microfone'); }
+    } catch {}
   };
 
   const stopRecording = () => {
@@ -706,8 +714,8 @@ export default function App() {
                   /* Input normal */
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: W.bgHeader }}>
                     <button style={iconBtn} onClick={() => setShowQuickReplies(!showQuickReplies)} title="Respostas rápidas">⚡</button>
-                    <button style={iconBtn} onClick={() => fileInputRef.current?.click()} title="Enviar imagem">📷</button>
-                    <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
+                    <button style={{ ...iconBtn, opacity: sendingMedia ? 0.4 : 1 }} onClick={() => !sendingMedia && fileInputRef.current?.click()} title="Enviar imagem">{sendingMedia ? '⏳' : '📷'}</button>
+                    <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 12px', border: `1px solid ${W.border}` }}>
                       <input
                         style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '10px 0', lineHeight: '20px' }}
