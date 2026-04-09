@@ -452,22 +452,41 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     fs.writeFileSync(tmpIn, req.file.buffer);
 
     // Converte webm pra ogg opus (formato que WhatsApp aceita como PTT)
+    // Flags essenciais: -avoid_negative_ts make_zero (corrige timestamp negativo que causa "0:00"),
+    // -map_metadata -1 (remove metadados que confundem o WhatsApp),
+    // -application voip (otimiza opus pra voz)
     let audioBuffer;
+    let audioDuration = 0; // duração em segundos para o campo seconds do Baileys
     try {
       audioBuffer = await new Promise((resolve, reject) => {
         ffmpeg(tmpIn)
+          .inputOptions(['-err_detect', 'ignore_err'])
+          .outputOptions([
+            '-avoid_negative_ts', 'make_zero',
+            '-map_metadata', '-1',
+            '-application', 'voip'
+          ])
           .toFormat('ogg')
           .audioCodec('libopus')
-          .audioBitrate('64k')
+          .audioBitrate('48k')
           .audioChannels(1)
           .audioFrequency(48000)
           .on('end', () => { resolve(fs.readFileSync(tmpOut)); })
           .on('error', (err) => { reject(err); })
           .save(tmpOut);
       });
+      // Obtém duração do áudio convertido
+      try {
+        audioDuration = await new Promise((resolve) => {
+          ffmpeg.ffprobe(tmpOut, (err, metadata) => {
+            resolve(!err && metadata ? Math.ceil(metadata.format.duration || 5) : 5);
+          });
+        });
+      } catch { audioDuration = 5; }
     } catch (e) {
       console.log('⚠️ ffmpeg falhou, enviando webm direto:', e.message);
       audioBuffer = req.file.buffer;
+      audioDuration = 5;
     }
     try { fs.unlinkSync(tmpIn); } catch {}
     try { fs.unlinkSync(tmpOut); } catch {}
@@ -476,9 +495,14 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     const mediaId = 'aud_sent_' + genId();
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/ogg', audioBuffer.toString('base64')]);
 
-    // Envia via WhatsApp como PTT
+    // Envia via WhatsApp como PTT com duração explícita
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
-    await wa.socket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+    await wa.socket.sendMessage(jid, {
+      audio: audioBuffer,
+      mimetype: 'audio/ogg; codecs=opus',
+      ptt: true,
+      seconds: audioDuration || 5,
+    });
 
     // Salva no banco
     const msgId = genId();
