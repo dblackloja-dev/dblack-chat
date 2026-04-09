@@ -384,8 +384,10 @@ app.get('/api/messages/:conversationId', auth, async (req, res) => {
       "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY timestamp ASC",
       [req.params.conversationId]
     );
-    // Marca como lido
-    await queryRun("UPDATE conversations SET unread_count = 0 WHERE id = $1", [req.params.conversationId]);
+    // Marca como lido — mas NÃO se for admin (admin só monitora)
+    if (req.user.role !== 'admin') {
+      await queryRun("UPDATE conversations SET unread_count = 0 WHERE id = $1", [req.params.conversationId]);
+    }
     res.json(msgs);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
