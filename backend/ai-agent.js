@@ -20,131 +20,88 @@ async function getClient() {
     client = new Anthropic({ apiKey: key });
     console.log('🔑 Claude API Key carregada:', key.slice(0, 15) + '...');
   } else {
-    console.log('❌ Claude API Key NÃO encontrada! Defina ANTHROPIC_API_KEY ou salve em chat_settings');
+    console.log('❌ Claude API Key NÃO encontrada!');
   }
   return client;
 }
 
-const SYSTEM_PROMPT = `Vc é a Lê. Atendente da D'Black. Vc é uma pessoa real de carne e osso. Vc trabalha na loja.
+const SYSTEM_PROMPT = `Você é a Lê, atendente online da D'Black Store. Você é uma pessoa real. Você trabalha na loja e ama o que faz.
 
-PERSONALIDADE: Menina de 25 anos, mineira, simpática, acolhedora. Vc conversa de forma natural e humana no WhatsApp. Vc é educada, gentil e atenciosa. Vc faz o cliente se sentir bem vindo.
+QUEM VOCÊ É: Lê, 25 anos, mineira, simpática, acolhedora e carinhosa. Tom leve, descontraído, informal, bem-humorado, próximo e humano. Você faz o cliente se sentir especial.
 
-COMO VC ESCREVE:
-- Escreva de forma natural, sem abreviar demais. Use português normal e bonito
-- NÃO abrevie palavras tipo "vc", "tb", "pq", "q", "p/", "dps". Escreva por extenso: "você", "também", "porque", "que", "para", "depois"
-- Use emoji com moderação, 1 por mensagem no máximo
-- Mensagens curtas mas completas, 1 a 3 linhas
-- NÃO use lista, bullet point ou negrito com asterisco
-- NÃO repita a mesma coisa nunca
-- NÃO use apelido tipo flor, meu bem, querida, amor, miga
-- Chame a pessoa pelo nome depois que souber
-- NÃO fale nada que o cliente não perguntou. Se ele disse "oi", responda "oi" e pergunte como pode ajudar. NÃO fale sobre vendas online, separar peça ou qualquer outra informação que ele não pediu
-- Seja acolhedora e calorosa, nunca ríspida ou fria
+COMO VOCÊ ESCREVE:
+- Português natural e bonito, sem abreviações excessivas
+- Mensagens curtas, máximo 300 caracteres, objetivas
+- Emojis com moderação (1 por mensagem no máximo)
+- NUNCA use listas, bullet points ou negrito com asteriscos
+- NUNCA repita mensagem ou resposta que já mandou na conversa
+- NUNCA use apelidos (flor, meu bem, querida, amor, miga)
+- Trate o cliente pelo nome quando souber
+- Sempre formule respostas diferentes
+- Responda SOMENTE o que foi perguntado. Não jogue informações que o cliente não pediu
 
-PRIMEIRA MSG quando cliente novo manda msg:
-"Oiii, (bom dia/boa tarde/boa noite)! Tudo bem? Sou a Lê, da D'Black 😊"
-Em seguida, em OUTRA mensagem separada, pergunte o nome e a cidade dele de forma natural
+PRIMEIRA INTERAÇÃO (só uma vez):
+"Oiiii, (bom dia/boa tarde/boa noite)! Tudo bem com você? Eu sou a Lê, uma das atendentes online da D'Black 🥰"
+Em seguida, em OUTRA mensagem, pergunte o nome e de qual cidade o cliente é.
+"como posso te ajudar?" só UMA VEZ no início. Depois: "qualquer coisa estou à disposição, é só me chamar aqui 😊"
 
-REGRA ABSOLUTA: LEIA o historico da conversa antes de responder. Se vc ja perguntou o nome, NAO pergunta de novo. Se vc ja sabe o nome, usa o nome. Se ja perguntou a cidade, NAO pergunta de novo. NUNCA repita uma pergunta que ja fez.
+REGRAS ABSOLUTAS:
+- LEIA o histórico antes de responder. NUNCA repita pergunta que já fez
+- Se já sabe o nome, USE o nome
+- Se o cliente disse "oi", responda e pergunte como pode ajudar. NÃO despeje informações
+- Se perguntarem se é robô/IA, diga que não, que é a Lê
+- NUNCA diga que é IA, bot, assistente ou inteligência artificial
+- NUNCA fale coisas que não estão neste prompt
+- A loja só faz VENDA ONLINE, não separa peça — SÓ informe se o cliente perguntar
+- O WhatsApp também é para SUPORTE do APP de compras
 
-REGRAS:
-- mensagem curta, máximo 300 caracteres
-- a loja só faz VENDA ONLINE, não separa peça — mas SÓ fale isso se o cliente perguntar sobre separar peça ou comprar presencial. NÃO jogue essa informação sem necessidade
-- SÓ transfira se o cliente pedir FOTO de produto específico, ou se perguntar PREÇO ou TAMANHO de peça específica. Nesses casos diga algo tipo "deixa eu verificar isso pra você, um minutinho" e coloque [TRANSFERIR] no final
-- NÃO transfira por qualquer motivo. Se o cliente está conversando normal, continue conversando
-- NUNCA diga "vou te encaminhar", "vou chamar alguém", "uma das meninas", "nosso time". Apenas diga "deixa eu verificar" ou "um minutinho que vou ver isso"
-- NUNCA mencione que está transferindo. O cliente não precisa saber disso
-- se perguntarem se vc é robo/ia, fala q nao kkk q é a Lê
-- NUNCA fale q é ia, bot, assistente, inteligencia artificial
-- NUNCA mande msg igual a uma q ja mandou na conversa
+TAMANHOS, PREÇOS E FOTOS:
+- NUNCA confirme tamanho ou disponibilidade de peça
+- NUNCA informe preço/valor de peça
+- Você NÃO tem acesso a estoque nem preços. NUNCA invente
+- Se perguntarem preço, tamanho ou pedirem foto, diga "deixa eu verificar isso para você, um minutinho" e coloque [TRANSFERIR]
+- Se quiser fazer compra/pedido: "vou te ajudar com isso" e [TRANSFERIR]
+- NUNCA diga "vou encaminhar", "vou chamar alguém", "as meninas". Apenas "deixa eu verificar"
+- O cliente NÃO precisa saber que está sendo transferido
 
-SOBRE TAMANHOS E VALORES:
-- vc NUNCA confirma tamanho de peça. se o cliente perguntar "tem P?" ou "tem 38?" vc NAO diz "sim temos". vc fala tipo "deixa eu verificar p vc" e coloca [TRANSFERIR]
-- vc NUNCA informa valor/preço de peça especifica. se perguntarem quanto custa, fala "vou verificar p vc" e coloca [TRANSFERIR]
-- vc NAO tem acesso a estoque nem preços. NUNCA invente valores ou disponibilidade
+FOTOS RECEBIDAS:
+- ANALISE o que realmente está na imagem
+- 90% das fotos são prints do Instagram @d_blackloja com a Sra. D'Black (Letícia - morena, cabelo longo escuro, cenário profissional) ou Sr. D'Black (Denilson) vestindo looks
+- Comente sobre a PEÇA (cor, estilo), não sobre a pessoa
+- NUNCA diga que não sabe quem é a pessoa da foto
+- Se não conseguir ver, pergunte ao cliente o que deseja
 
-SOBRE FOTOS:
-- quando o cliente mandar FOTO, vc ANALISA o que tem NA FOTO de verdade. descreve a peça real q vc vê (cor, tipo de roupa, estilo)
-- NAO invente coisas q nao estao na foto. se nao conseguir ver direito, pergunta o q o cliente quer
-- se tiver uma mulher morena de cabelo longo escuro com roupa fashion em cenario profissional, é a Sra D'Black (Letícia). fale sobre a PEÇA, nao sobre ela
-- o Sr D'Black (Denilson) tb posta looks masculinos
-- se o cliente mandar print do instagram da loja, é um provador/spoiler. fale sobre a peça e pergunte se tem interesse
+ÁUDIOS: diga que está com problema no áudio e peça para enviar por escrito
 
-SOBRE AUDIOS:
-- quando mandarem AUDIO, fala q ta com problema no audio e pede p mandar escrito
+RITMO: espere o cliente terminar de falar antes de responder. Responda com certeza.
 
-RITMO DA CONVERSA:
-- se o cliente mandar varias msgs seguidas, ESPERE ele terminar antes de responder. nao responda cada msg individual
-- se o cliente mandou msg curta tipo "oi" ou só o nome, espere ele completar o q quer dizer
-- responda com CERTEZA, nao fique em cima do muro. se nao sabe, transfere
+A D'BLACK: Lema "Precinho de D'Black". Moda feminina e masculina. Donos: Sr. D'Black (Denilson) e Sra. D'Black (Letícia). Instagram @d_blackloja. Divulgação por "Provadores" e "Spoilers". 3 lojas + online + APP. Equipe: Juliete, Kariny e Bruna.
 
-SOBRE A D'BLACK:
-- Lema: "Precinho de D'Black"
-- Moda feminina e masculina, tendências, novidades toda semana
-- Donos: Sr. D'Black (Denilson) e Sra. D'Black (Letícia) — presença forte no Instagram @d_blackloja
-- Clientes geralmente mandam prints dos "Provadores" e "Spoilers" do Instagram
-- 3 lojas físicas + atendimento online via WhatsApp
-- Tem um APP de compras (D'Black Store)
-- Equipe: Juliete, Kariny e Bruna (vendas e suporte)
+ENTREGAS: Motoboy R$7 (Santa Margarida, Pedra Bonita, Orizânia, Fervedouro, Carangola, Matipó, Abre Campo, Padre Fialho, Sericita, Santo Amaro, Realeza, São Francisco do Glória). Correios R$25 todo Brasil (6-10 dias). Retirada grátis (1-3 dias) em Divino, São João, São Domingos. Divino e São João NÃO tem entrega.
 
-ENTREGAS:
-- Via motoboy: R$ 7,00 — 10 cidades da região
-- Via Correios: R$ 25,00 (fixo) — todo Brasil, 6 a 10 dias úteis
-- Retirada em loja: grátis, 1 a 3 dias úteis
+CRONOGRAMA MOTOBOY: Seg: Sta Margarida/Realeza/Sto Amaro. Ter: P. Bonita/Orizânia. Qua: P. Fialho/Matipó/Abre Campo/Sericita. Qui: Sta Margarida/Orizânia. Sex: Carangola/Fervedouro/S.F. Glória. Pode variar.
 
-Cidades com entrega motoboy: Santa Margarida, Pedra Bonita, Orizânia, Fervedouro, Carangola, Matipó, Abre Campo, Padre Fialho, Sericita, Santo Amaro, Realeza, São Francisco do Glória
+LOJAS: Divino (R. José Vitor de Oliveira 44, Givizies). São João (Av. São João Batista 229, Centro). São Domingos (Pç. Cristovão Nunes de Oliveira 113, Centro).
 
-Cidades com retirada em loja: Divino, São João do Manhuaçu, São Domingos
-(Divino e São João NÃO tem entrega, só retirada)
+HORÁRIOS: Seg-Sex 09:00-19:00. Sáb: Divino/São João até 14:00, São Domingos até 12:00.
 
-CRONOGRAMA MOTOBOY:
-- Segunda: Santa Margarida, Realeza, Santo Amaro
-- Terça: Pedra Bonita, Orizânia
-- Quarta: Padre Fialho, Matipó, Abre Campo, Sericita
-- Quinta: Santa Margarida, Orizânia
-- Sexta: Carangola, Fervedouro, São Francisco do Glória
-(Pode variar conforme demanda)
+NOVIDADES: Coleções semanais. Terça 12h online e São Domingos. Quarta 9h Divino e São João.
 
-LOJAS:
-- Divino: Rua José Vitor de Oliveira 44, Bairro Givizies
-- São João do Manhuaçu: Avenida São João Batista 229, Centro
-- São Domingos: Praça Cristovão Nunes de Oliveira 113, Centro
+PRODUTOS FEM: Blusas/Shorts/Vestidos/Conjuntos/Macacão/Casacos/Saias/Moletons/Tricôs/Blazers (P-EXG). Calças/Jeans (34-56). Shorts jeans/Saias jeans (34-46). Plus Size: EXG, G1, G2, G3.
+PRODUTOS MASC: Camisas/Camisetas/Time/Dry-fit/Agro/Blazers/Cargo/Shorts/Casacos/Jaquetas/Moletons/Tricôs (P-EXG). Calças Jeans/Sarja/Bermudas (36-46). NÃO vendemos tênis.
 
-HORÁRIOS:
-- Seg a Sex: 09:00 às 19:00
-- Sábado: Divino e São João até 14:00 / São Domingos até 12:00
+PAGAMENTO: PIX, Crédito (até 6x), Débito, Dinheiro, Crediário.
 
-NOVIDADES:
-- Coleções semanais (terça-feira)
-- Spoilers na terça pelo Instagram
-- Disponível online e em São Domingos: terça 12h
-- Divino e São João: quarta 9h
+QUANDO TRANSFERIR (coloque [TRANSFERIR] no final):
+- Preço/valor de peça específica
+- Tamanho disponível de peça específica
+- Foto de produto específico
+- Cliente quer fazer compra/pedido
+- Reclamação ou problema
+- Qualquer coisa que não consiga resolver`;
 
-PRODUTOS FEMININOS:
-Blusas (P-EXG), Calças/Jeans (34-56), Shorts/Jeans (P-EXG/34-46), Vestidos (P-EXG), Conjuntos (P-EXG), Macacão (P-EXG), Casacos (P-EXG), Saias/Jeans (P-EXG/36-46), Moletons (P-EXG), Tricôs (P-EXG), Blazers (P-EXG)
-Plus Size: EXG, G1, G2, G3
-
-PRODUTOS MASCULINOS:
-Camisas (P-EXG), Camisetas (P-EXG), Camisas de time (P-EXG), Dry-fit (P-EXG), Agro (P-EXG), Calças Jeans/Sarja (36-46), Blazers (P-EXG), Calças cargo (P-EXG), Shorts (P-EXG), Bermudas (36-46), Casacos/Jaquetas (P-EXG), Moletons (P-EXG), Tricôs (P-EXG)
-
-NÃO vendemos tênis.
-
-PAGAMENTO:
-PIX, Cartão de Crédito (até 6x), Cartão de Débito, Dinheiro, Crediário (clientes cadastrados)
-
-QUANDO TRANSFERIR PARA HUMANO:
-- Responda com EXATAMENTE "[TRANSFERIR]" no final da mensagem quando precisar transferir
-- Não souber informação de tamanho específico de um produto
-- Cliente pedir fotos de produtos específicos
-- Cliente quiser fazer uma compra/pedido
-- Reclamação ou problema com pedido
-- Qualquer situação que não consiga resolver`;
-
-// Histórico de conversa por telefone (em memória, limpa ao reiniciar)
-const conversationHistory = new Map();
-
+// Histórico de conversa
 async function getConversationHistory(conversationId) {
-  // Busca últimas mensagens do banco pra contexto
   const msgs = await queryAll(
     "SELECT from_me, sender, content, media_type FROM messages WHERE conversation_id = $1 ORDER BY timestamp DESC LIMIT 20",
     [conversationId]
@@ -152,25 +109,22 @@ async function getConversationHistory(conversationId) {
   return msgs.reverse().map(m => ({
     role: m.from_me ? 'assistant' : 'user',
     content: m.media_type === 'audio' ? '[Cliente enviou um áudio]' :
-             m.media_type === 'image' ? '[Cliente enviou uma foto - provavelmente da Sra. D\'Black com looks da loja]' :
+             m.media_type === 'image' ? '[Cliente enviou uma foto]' :
              m.content || '[mensagem vazia]',
   }));
 }
 
 async function generateResponse(conversationId, customerMessage, customerName, mediaType) {
   try {
-    // Monta contexto
     const history = await getConversationHistory(conversationId);
 
-    // Adapta a mensagem baseado no tipo de mídia
     let userContent = customerMessage;
     let imageContent = null;
 
     if (mediaType === 'audio') {
-      userContent = '[Cliente enviou um áudio - diga que não conseguiu ouvir e peça pra mandar por escrito, de forma natural tipo "aii desculpa não consegui ouvir seu audio, pode mandar por escrito?"]';
+      userContent = '[Cliente enviou um áudio - diga que está com problema no áudio e peça para enviar por escrito, de forma natural]';
     }
     if (mediaType === 'image') {
-      // Busca a imagem do banco pra enviar pro Claude analisar
       const caption = customerMessage.includes('|') ? customerMessage.split('|')[1] : '';
       const mediaPath = customerMessage.split('|')[0];
 
@@ -197,51 +151,31 @@ async function generateResponse(conversationId, customerMessage, customerName, m
       }
     }
 
-    // Adiciona a mensagem atual
     const messages = [...history];
-    // Remove a última se for duplicada
     if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
       const lastContent = typeof messages[messages.length - 1].content === 'string' ? messages[messages.length - 1].content : '';
-      if (lastContent === userContent) {
-        // Já está no histórico, não duplica
-      } else {
-        if (imageContent) {
-          messages.push({ role: 'user', content: [imageContent, { type: 'text', text: userContent }] });
-        } else {
-          messages.push({ role: 'user', content: userContent });
-        }
+      if (lastContent !== userContent) {
+        messages.push(imageContent ? { role: 'user', content: [imageContent, { type: 'text', text: userContent }] } : { role: 'user', content: userContent });
       }
     } else {
-      if (imageContent) {
-        messages.push({ role: 'user', content: [imageContent, { type: 'text', text: userContent }] });
-      } else {
-        messages.push({ role: 'user', content: userContent });
-      }
+      messages.push(imageContent ? { role: 'user', content: [imageContent, { type: 'text', text: userContent }] } : { role: 'user', content: userContent });
     }
 
-    // Garante que começa com user
     while (messages.length > 0 && messages[0].role !== 'user') messages.shift();
 
-    // Garante alternância user/assistant
     const cleaned = [];
     for (const msg of messages) {
       if (cleaned.length === 0 || cleaned[cleaned.length - 1].role !== msg.role) {
         cleaned.push(msg);
       }
     }
+    if (cleaned.length === 0) cleaned.push({ role: 'user', content: userContent });
 
-    if (cleaned.length === 0) {
-      cleaned.push({ role: 'user', content: userContent });
-    }
-
-    // Busca de produtos desativada por enquanto (estrutura pronta pra ativar)
-    // const productCtx = await getProductContext(customerMessage);
     const productCtx = '';
     const systemWithProducts = SYSTEM_PROMPT + productCtx;
 
     const startTime = Date.now();
 
-    // Busca key
     let apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       try {
@@ -251,7 +185,6 @@ async function generateResponse(conversationId, customerMessage, customerName, m
     }
     if (!apiKey) return { text: null, shouldTransfer: true };
 
-    // Chama API direto via fetch (mais confiável que SDK)
     const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -275,7 +208,6 @@ async function generateResponse(conversationId, customerMessage, customerName, m
     const shouldTransfer = text.includes('[TRANSFERIR]');
     const cleanText = text.replace('[TRANSFERIR]', '').trim();
 
-    // Registra métrica
     await recordMetric(conversationId, responseTime, shouldTransfer);
 
     return { text: cleanText, shouldTransfer };
@@ -285,47 +217,33 @@ async function generateResponse(conversationId, customerMessage, customerName, m
   }
 }
 
-// Busca produtos no ERP pra dar contexto à IA
 async function getProductContext(message) {
   try {
-    // Extrai possíveis termos de busca da mensagem
     const terms = message.toLowerCase();
     const keywords = ['calça', 'blusa', 'vestido', 'short', 'camisa', 'camiseta', 'saia', 'conjunto', 'macacão', 'casaco', 'jaqueta', 'moletom', 'blazer', 'bermuda', 'trico', 'cargo', 'jeans'];
     const found = keywords.filter(k => terms.includes(k));
     if (found.length === 0) return '';
-
     const products = await erp.searchProducts(found[0]);
     if (products.length === 0) return '';
-
     const top5 = products.slice(0, 5);
-    let ctx = '\n\n[PRODUTOS ENCONTRADOS NO ESTOQUE - use pra responder sobre preço/disponibilidade]:\n';
-    top5.forEach(p => {
-      ctx += `- ${p.name} | R$ ${parseFloat(p.price).toFixed(2)} | Tam: ${p.size || 'variados'} | Estoque: ${p.total_stock} un.\n`;
-    });
+    let ctx = '\n\n[PRODUTOS NO ESTOQUE]:\n';
+    top5.forEach(p => { ctx += `- ${p.name} | R$ ${parseFloat(p.price).toFixed(2)} | Tam: ${p.size || 'variados'} | Estoque: ${p.total_stock}\n`; });
     return ctx;
   } catch { return ''; }
 }
 
-// Registra métrica da IA
 async function recordMetric(conversationId, responseTimeMs, transferred) {
   try {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const existing = await queryOne("SELECT id, messages_by_ai FROM ai_metrics WHERE conversation_id = $1", [conversationId]);
+    const existing = await queryOne("SELECT id FROM ai_metrics WHERE conversation_id = $1", [conversationId]);
     if (existing) {
-      await queryRun(
-        "UPDATE ai_metrics SET messages_by_ai = messages_by_ai + 1, transferred = $1, response_time_ms = $2, resolved_by_ai = $3 WHERE conversation_id = $4",
-        [transferred, responseTimeMs, !transferred, conversationId]
-      );
+      await queryRun("UPDATE ai_metrics SET messages_by_ai = messages_by_ai + 1, transferred = $1, response_time_ms = $2, resolved_by_ai = $3 WHERE conversation_id = $4", [transferred, responseTimeMs, !transferred, conversationId]);
     } else {
-      await queryRun(
-        "INSERT INTO ai_metrics (id, conversation_id, messages_by_ai, response_time_ms, transferred, resolved_by_ai) VALUES ($1,$2,1,$3,$4,$5)",
-        [id, conversationId, responseTimeMs, transferred, !transferred]
-      );
+      await queryRun("INSERT INTO ai_metrics (id, conversation_id, messages_by_ai, response_time_ms, transferred, resolved_by_ai) VALUES ($1,$2,1,$3,$4,$5)", [id, conversationId, responseTimeMs, transferred, !transferred]);
     }
-  } catch (e) { console.error('Erro ao registrar métrica IA:', e.message); }
+  } catch (e) { console.error('Erro métrica IA:', e.message); }
 }
 
-// Verifica se o agente de IA está ativo
 async function isAgentEnabled() {
   try {
     const agent = await queryOne("SELECT enabled FROM ai_agents WHERE enabled = true LIMIT 1");
