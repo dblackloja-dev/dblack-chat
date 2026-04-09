@@ -480,6 +480,35 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Enviar áudio PTT (via Evolution API — converte automaticamente)
+app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, res) => {
+  try {
+    const { conversation_id } = req.body;
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    if (!req.file) return res.status(400).json({ error: 'Áudio não enviado' });
+
+    // Salva no banco
+    const mediaId = 'aud_' + genId();
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/ogg', req.file.buffer.toString('base64')]);
+
+    // Envia via Evolution (sendWhatsAppAudio converte pra OGG Opus automaticamente)
+    await wa.sendAudio(conv.phone, req.file.buffer);
+
+    const msgId = genId();
+    const audioUrl = `/media/${mediaId}`;
+    await queryRun(
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'audio', $5, NOW())",
+      [msgId, conversation_id, req.user.name, audioUrl, audioUrl]
+    );
+    await queryRun("UPDATE conversations SET last_message = '🎵 Áudio', last_message_at = NOW() WHERE id = $1", [conversation_id]);
+
+    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: audioUrl, media_type: 'audio', media_url: audioUrl, timestamp: new Date().toISOString() };
+    broadcast('new_message', { conversation: { ...conv, last_message: '🎵 Áudio' }, message });
+    res.json(message);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Buscar dados do cliente no ERP pelo telefone
 app.get('/api/erp/customer-details/:phone', auth, async (req, res) => {
   try {

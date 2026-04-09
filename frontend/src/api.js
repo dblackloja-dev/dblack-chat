@@ -52,6 +52,19 @@ const api = {
   // Messages
   getMessages: (convId) => request(`/messages/${convId}`),
   sendMessage: (data) => request('/messages/send', { method: 'POST', body: data }),
+  sendAudio: async (conversationId, blob) => {
+    const token = getToken();
+    const form = new FormData();
+    form.append('audio', blob, 'audio.ogg');
+    form.append('conversation_id', conversationId);
+    const res = await fetch(`${BASE}/messages/send-audio`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) throw new Error('Erro ao enviar áudio');
+    return res.json();
+  },
   sendFile: async (conversationId, file) => {
     const token = getToken();
     const form = new FormData();
