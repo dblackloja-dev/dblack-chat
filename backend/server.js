@@ -6,7 +6,7 @@ const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 const { queryAll, queryOne, queryRun, initDB } = require('./database');
 const WhatsAppClient = require('./whatsapp');
-const { createCanvas } = require('@napi-rs/canvas');
+// Cupom gerado como texto formatado (sem dependências nativas)
 const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 require('dotenv').config();
@@ -394,8 +394,8 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       discount_type: discount_type || 'fixed',
     });
 
-    // Gera imagem do cupom não fiscal
-    const receiptBuffer = generateReceipt(sale, req.user.name, customerDisplayName);
+    // Gera cupom como texto formatado
+    const receiptText = generateReceiptText(sale, req.user.name, customerDisplayName);
 
     // Busca a conversa ativa deste telefone
     const conv = customer_phone ? await queryOne(
@@ -406,24 +406,22 @@ app.post('/api/erp/sales', auth, async (req, res) => {
     // Envia cupom via WhatsApp e registra no chat
     if (customer_phone && wa.connected) {
       try {
-        const captionText = `✅ Venda finalizada!\n🛍️ D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\n💳 ${sale.payment_method.toUpperCase()}\nObrigado pela compra! 🖤`;
-        await wa.sendImage(customer_phone, receiptBuffer, captionText);
+        await wa.sendMessage(customer_phone, receiptText);
 
-        // Registra a mensagem do cupom no chat pra aparecer na conversa
+        // Registra a mensagem do cupom no chat
         if (conv) {
           const msgId = genId();
           await queryRun(
-            "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, timestamp) VALUES ($1, $2, true, $3, $4, 'image', NOW())",
-            [msgId, conv.id, req.user.name, `🧾 Cupom de venda enviado — R$ ${sale.total.toFixed(2)} (${sale.payment_method.toUpperCase()})`]
+            "INSERT INTO messages (id, conversation_id, from_me, sender, content, timestamp) VALUES ($1, $2, true, $3, $4, NOW())",
+            [msgId, conv.id, req.user.name, receiptText]
           );
           await queryRun(
             "UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2",
             [`🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}`, conv.id]
           );
-          // Notifica via WebSocket
           broadcast('new_message', {
             conversation: { ...conv, last_message: `🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}` },
-            message: { id: msgId, conversation_id: conv.id, from_me: true, sender: req.user.name, content: `🧾 Cupom de venda enviado — R$ ${sale.total.toFixed(2)} (${sale.payment_method.toUpperCase()})`, media_type: 'image', timestamp: new Date().toISOString() },
+            message: { id: msgId, conversation_id: conv.id, from_me: true, sender: req.user.name, content: receiptText, timestamp: new Date().toISOString() },
           });
         }
       } catch (waErr) {
@@ -435,137 +433,41 @@ app.post('/api/erp/sales', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Gera imagem de cupom não fiscal usando Canvas
-function generateReceipt(sale, sellerName, customerName) {
-  const W = 400;
-  const lineH = 22;
-  const padding = 20;
-
-  // Calcula altura baseada nos itens
-  const headerLines = 8;
-  const itemLines = sale.items.length * 2;
-  const footerLines = 8;
-  const totalLines = headerLines + itemLines + footerLines;
-  const H = (totalLines * lineH) + (padding * 2) + 40;
-
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext('2d');
-
-  // Fundo branco
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, W, H);
-
-  let y = padding;
-  const left = padding;
-  const right = W - padding;
-  const center = W / 2;
-
-  // Funções auxiliares
-  const drawLine = () => {
-    ctx.strokeStyle = '#333';
-    ctx.setLineDash([2, 2]);
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(right, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    y += 10;
-  };
-
-  const textCenter = (text, size, bold) => {
-    ctx.fillStyle = '#000';
-    ctx.font = `${bold ? 'bold ' : ''}${size}px Arial`;
-    ctx.textAlign = 'center';
-    ctx.fillText(text, center, y);
-    y += lineH;
-  };
-
-  const textLeft = (text, size) => {
-    ctx.fillStyle = '#000';
-    ctx.font = `${size}px Arial`;
-    ctx.textAlign = 'left';
-    ctx.fillText(text, left, y);
-  };
-
-  const textRight = (text, size) => {
-    ctx.fillStyle = '#000';
-    ctx.font = `${size}px Arial`;
-    ctx.textAlign = 'right';
-    ctx.fillText(text, right, y);
-  };
-
-  // ─── CABEÇALHO ───
-  textCenter("D'BLACK STORE", 18, true);
-  textCenter('CUPOM NÃO FISCAL', 11, false);
-  y += 4;
-  drawLine();
-
-  // Data e vendedor
+// Gera cupom não fiscal como texto formatado para WhatsApp
+function generateReceiptText(sale, sellerName, customerName) {
+  const payLabels = { pix: 'PIX', dinheiro: 'Dinheiro', credito: 'Cartão Crédito', debito: 'Cartão Débito', crediario: 'Crediário' };
   const now = new Date();
-  const dataStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  textLeft(`Data: ${dataStr}`, 11); textRight(`Vendedor: ${sellerName}`, 11);
-  y += lineH;
-  if (customerName) {
-    textLeft(`Cliente: ${customerName}`, 11);
-    y += lineH;
-  }
-  drawLine();
+  const data = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-  // ─── ITENS ───
-  textLeft('ITEM', 10);
-  ctx.textAlign = 'right';
-  ctx.fillText('TOTAL', right, y);
-  y += lineH;
-  drawLine();
+  let text = `━━━━━━━━━━━━━━━━━━━━\n`;
+  text += `    🖤 *D'BLACK STORE*\n`;
+  text += `     CUPOM NÃO FISCAL\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━\n`;
+  text += `📅 ${data}\n`;
+  text += `👤 Vendedor: ${sellerName}\n`;
+  if (customerName) text += `🙋 Cliente: ${customerName}\n`;
+  if (sale.cupom) text += `🧾 Cupom: ${sale.cupom}\n`;
+  text += `────────────────────\n`;
+  text += `*ITENS:*\n\n`;
 
   for (const item of sale.items) {
-    textLeft(`${item.quantity}x ${item.name}`, 11);
-    textRight(`R$ ${(item.price * item.quantity).toFixed(2)}`, 11);
-    y += lineH;
-    ctx.fillStyle = '#666';
-    ctx.font = '10px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText(`  SKU: ${item.sku || '-'} | Unit: R$ ${item.price.toFixed(2)}`, left, y);
-    y += lineH;
+    text += `▸ ${item.quantity}x ${item.name}\n`;
+    text += `   SKU: ${item.sku || '-'} | R$ ${item.price.toFixed(2)} cada\n`;
+    text += `   *Subtotal: R$ ${(item.price * item.quantity).toFixed(2)}*\n\n`;
   }
 
-  drawLine();
-
-  // ─── TOTAIS ───
-  textLeft('Subtotal:', 12);
-  textRight(`R$ ${sale.subtotal.toFixed(2)}`, 12);
-  y += lineH;
-
+  text += `────────────────────\n`;
+  text += `Subtotal: R$ ${sale.subtotal.toFixed(2)}\n`;
   if (sale.discount > 0) {
-    ctx.fillStyle = '#CC0000';
-    ctx.font = '12px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText('Desconto:', left, y);
-    ctx.textAlign = 'right';
-    ctx.fillText(`- R$ ${sale.discount.toFixed(2)}`, right, y);
-    y += lineH;
+    text += `Desconto: - R$ ${sale.discount.toFixed(2)}\n`;
   }
+  text += `\n💰 *TOTAL: R$ ${sale.total.toFixed(2)}*\n`;
+  text += `💳 Pagamento: ${payLabels[sale.payment_method] || sale.payment_method}\n`;
+  text += `━━━━━━━━━━━━━━━━━━━━\n`;
+  text += `  Obrigado pela preferência! 🛍️\n`;
+  text += `  *D'Black Store* — @d_blackloja`;
 
-  ctx.fillStyle = '#000';
-  textLeft('TOTAL:', 14);
-  ctx.font = 'bold 14px Arial';
-  ctx.textAlign = 'right';
-  ctx.fillText(`R$ ${sale.total.toFixed(2)}`, right, y);
-  y += lineH;
-
-  // Forma de pagamento
-  const payLabels = { pix: 'PIX', dinheiro: 'Dinheiro', credito: 'Cartão Crédito', debito: 'Cartão Débito', crediario: 'Crediário' };
-  textLeft(`Pagamento: ${payLabels[sale.payment_method] || sale.payment_method}`, 11);
-  y += lineH;
-
-  drawLine();
-
-  // ─── RODAPÉ ───
-  y += 4;
-  textCenter('Obrigado pela preferência!', 12, true);
-  textCenter("D'Black Store — @d_blackloja", 10, false);
-
-  return canvas.toBuffer('image/png');
+  return text;
 }
 
 // ═══════════════════════════════════
