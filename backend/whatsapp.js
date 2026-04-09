@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const path = require('path');
 const fs = require('fs');
 const EventEmitter = require('events');
@@ -78,30 +78,39 @@ class WhatsAppClient extends EventEmitter {
           this.connected = false;
           this.connecting = false;
           const statusCode = lastDisconnect?.error?.output?.statusCode;
-          console.log('❌ Conexão fechada. Código:', statusCode);
+          const reason = lastDisconnect?.error?.message || 'desconhecido';
+          console.log(`❌ Conexão fechada. Código: ${statusCode} | Motivo: ${reason}`);
 
           if (statusCode === DisconnectReason.loggedOut) {
-            console.log('🚪 WhatsApp deslogado.');
+            console.log('🚪 WhatsApp deslogado. Precisa parear novamente.');
             this.qrCode = null;
             this.pairingCode = null;
             this.emit('disconnected');
+          } else if (statusCode === DisconnectReason.restartRequired) {
+            console.log('🔄 Restart necessário, reconectando imediatamente...');
+            this.connect(this.phoneForPairing);
           } else if (this.pairingCode || this.qrCode) {
-            // Tem código/QR ativo, aguarda scan sem reconectar rápido
             console.log('⏳ Aguardando pareamento...');
             setTimeout(() => this.connect(this.phoneForPairing), 20000);
           } else {
-            console.log('🔄 Reconectando em 10s...');
-            setTimeout(() => this.connect(this.phoneForPairing), 10000);
+            // Backoff progressivo: 5s, 10s, 20s
+            const delay = Math.min(5000 * Math.pow(2, this.retryCount || 0), 60000);
+            this.retryCount = (this.retryCount || 0) + 1;
+            console.log(`🔄 Reconectando em ${delay / 1000}s (tentativa ${this.retryCount})...`);
+            setTimeout(() => this.connect(this.phoneForPairing), delay);
           }
         }
 
         if (connection === 'open') {
           this.connected = true;
           this.connecting = false;
+          this.retryCount = 0;
           this.qrCode = null;
           this.pairingCode = null;
           console.log('✅ WhatsApp conectado!');
           this.emit('connected');
+          // Backup das credenciais no banco
+          this.backupAuthToDB().catch(() => {});
         }
       });
 
@@ -125,14 +134,39 @@ class WhatsAppClient extends EventEmitter {
           } else if (msg.message?.extendedTextMessage?.text) {
             content = msg.message.extendedTextMessage.text;
           } else if (msg.message?.imageMessage) {
-            content = msg.message.imageMessage.caption || '📷 Imagem';
             mediaType = 'image';
+            content = msg.message.imageMessage.caption || '📷 Imagem';
+            // Baixa a imagem pra IA analisar
+            try {
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              const imgDir = path.join(__dirname, 'uploads', 'images');
+              if (!fs.existsSync(imgDir)) fs.mkdirSync(imgDir, { recursive: true });
+              const fileName = `${msg.key.id}.jpg`;
+              fs.writeFileSync(path.join(imgDir, fileName), buffer);
+              content = `/uploads/images/${fileName}`;
+              if (msg.message.imageMessage.caption) content += `|${msg.message.imageMessage.caption}`;
+            } catch (e) {
+              console.error('Erro ao baixar imagem:', e.message);
+              content = msg.message.imageMessage.caption || '📷 Imagem';
+            }
           } else if (msg.message?.videoMessage) {
             content = msg.message.videoMessage.caption || '🎥 Vídeo';
             mediaType = 'video';
           } else if (msg.message?.audioMessage) {
-            content = '🎵 Áudio';
             mediaType = 'audio';
+            // Baixa o áudio
+            try {
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              const audioDir = path.join(__dirname, 'uploads', 'audio');
+              if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+              const ext = msg.message.audioMessage.ptt ? 'ogg' : 'mp3';
+              const fileName = `${msg.key.id}.${ext}`;
+              fs.writeFileSync(path.join(audioDir, fileName), buffer);
+              content = `/uploads/audio/${fileName}`;
+            } catch (e) {
+              console.error('Erro ao baixar áudio:', e.message);
+              content = '🎵 Áudio (erro ao baixar)';
+            }
           } else if (msg.message?.documentMessage) {
             content = '📄 ' + (msg.message.documentMessage.fileName || 'Documento');
             mediaType = 'document';

@@ -5,11 +5,26 @@ require('dotenv').config();
 const erpPool = new Pool({
   connectionString: process.env.ERP_DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  max: 8,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
 
-const erpQuery = async (text, params = []) => (await erpPool.query(text, params)).rows;
-const erpQueryOne = async (text, params = []) => ((await erpPool.query(text, params)).rows)[0] || null;
-const erpRun = async (text, params = []) => erpPool.query(text, params);
+async function erpQueryWithRetry(text, params = [], retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await erpPool.query(text, params);
+    } catch (e) {
+      if (i === retries || !e.message.includes('Connection terminated')) throw e;
+      console.log(`⚠️ ERP query retry ${i + 1}/${retries}:`, e.message);
+      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+}
+
+const erpQuery = async (text, params = []) => (await erpQueryWithRetry(text, params)).rows;
+const erpQueryOne = async (text, params = []) => ((await erpQueryWithRetry(text, params)).rows)[0] || null;
+const erpRun = async (text, params = []) => erpQueryWithRetry(text, params);
 
 // Busca produtos por SKU, nome ou EAN
 async function searchProducts(term) {
@@ -89,19 +104,13 @@ function generateCupom() {
 }
 
 // Cria venda no ERP
-async function createSale({ store_id, customer_id, customer_name, customer_phone, seller_name, seller_id, items, payment_method, discount, discount_type }) {
+async function createSale({ store_id, customer_id, customer_name, customer_phone, seller_name, seller_id, items, payment_method, discount, discount_type, discount_label }) {
   const saleId = require('crypto').randomUUID();
   const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  let discountValue = 0;
-  let discountLabel = '';
-  if (discount_type === 'percent') {
-    discountValue = subtotal * (discount / 100);
-    discountLabel = `${discount}%`;
-  } else {
-    discountValue = discount || 0;
-    discountLabel = discountValue > 0 ? `R$ ${discountValue.toFixed(2)}` : '';
-  }
-  const total = subtotal - discountValue;
+  // Desconto já vem calculado do frontend (mesma lógica do ERP)
+  const discountValue = parseFloat(discount) || 0;
+  const discountLabelFinal = discount_label || (discountValue > 0 ? `R$ ${discountValue.toFixed(2)}` : '');
+  const total = Math.max(0, subtotal - discountValue);
 
   // Abre o caixa automaticamente se estiver fechado
   await ensureCashOpen(store_id);
@@ -119,7 +128,7 @@ async function createSale({ store_id, customer_id, customer_name, customer_phone
   await erpRun(
     `INSERT INTO sales (id, store_id, date, customer, customer_id, customer_whatsapp, seller, seller_id, items, subtotal, discount, discount_label, total, payment, payments, status, cupom, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'Concluída', $16, NOW())`,
-    [saleId, store_id, today, customer_name || 'Cliente WhatsApp', customer_id || '', customer_phone || '', seller_name, seller_id || '', JSON.stringify(items), subtotal, discountValue, discountLabel, total, payLabels[payment_method] || payment_method, payments, cupom]
+    [saleId, store_id, today, customer_name || 'Cliente WhatsApp', customer_id || '', customer_phone || '', seller_name, seller_id || '', JSON.stringify(items), subtotal, discountValue, discountLabelFinal, total, payLabels[payment_method] || payment_method, payments, cupom]
   );
 
   // Deduz estoque

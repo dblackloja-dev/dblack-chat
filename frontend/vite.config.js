@@ -5,8 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5174,
+    host: '0.0.0.0',
     proxy: {
       '/api': 'http://localhost:3002',
+      '/uploads': 'http://localhost:3002',
       '/ws': { target: 'ws://localhost:3002', ws: true },
     },
   },

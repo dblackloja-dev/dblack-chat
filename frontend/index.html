@@ -2,11 +2,26 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>D'Black Chat — Atendimento</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#1f2c33"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <link rel="manifest" href="/manifest.json"/>
+  <title>D'Black Chat</title>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
+    body { background: #eae6df; }
+    input, textarea, select, button { font-size: 16px !important; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @media (max-width: 768px) {
+      html, body, #root { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; }
+    }
+  </style>
 </head>
-<body style="margin:0;background:#0A0A0C">
+<body>
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
 </body>

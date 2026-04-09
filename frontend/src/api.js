@@ -52,17 +52,70 @@ const api = {
   // Messages
   getMessages: (convId) => request(`/messages/${convId}`),
   sendMessage: (data) => request('/messages/send', { method: 'POST', body: data }),
+  sendAudio: async (conversationId, blob) => {
+    const token = getToken();
+    const form = new FormData();
+    form.append('audio', blob, 'audio.ogg');
+    form.append('conversation_id', conversationId);
+    const res = await fetch(`${BASE}/messages/send-audio`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) throw new Error('Erro ao enviar áudio');
+    return res.json();
+  },
+  sendImage: async (conversationId, file, caption) => {
+    const token = getToken();
+    const form = new FormData();
+    form.append('image', file);
+    form.append('conversation_id', conversationId);
+    if (caption) form.append('caption', caption);
+    const res = await fetch(`${BASE}/messages/send-image`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) throw new Error('Erro ao enviar imagem');
+    return res.json();
+  },
 
   // WhatsApp
   getWhatsAppStatus: () => request('/whatsapp/status'),
   reconnectWhatsApp: () => request('/whatsapp/reconnect', { method: 'POST' }),
   pairWhatsApp: (phone) => request('/whatsapp/pair', { method: 'POST', body: { phone } }),
 
+  // Quick Replies
+  getQuickReplies: () => request('/quick-replies'),
+  createQuickReply: (data) => request('/quick-replies', { method: 'POST', body: data }),
+  updateQuickReply: (id, data) => request(`/quick-replies/${id}`, { method: 'PUT', body: data }),
+  deleteQuickReply: (id) => request(`/quick-replies/${id}`, { method: 'DELETE' }),
+
+  // Settings
+  getSettings: () => request('/settings'),
+  updateSettings: (data) => request('/settings', { method: 'PUT', body: data }),
+
+  // AI Agents
+  getAIAgents: () => request('/ai-agents'),
+  createAIAgent: (data) => request('/ai-agents', { method: 'POST', body: data }),
+  updateAIAgent: (id, data) => request(`/ai-agents/${id}`, { method: 'PUT', body: data }),
+  deleteAIAgent: (id) => request(`/ai-agents/${id}`, { method: 'DELETE' }),
+
+  // Dashboard & Reports
+  getDashboard: () => request('/dashboard'),
+  getReports: (from, to) => request(`/reports?from=${from}&to=${to}`),
+
+  // Contacts (do Chat)
+  getContacts: () => request('/contacts'),
+  // Customers (do ERP)
+  getCustomers: (q) => request(`/erp/customers${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+
   // ERP — Vendas
   searchProducts: (q) => request(`/erp/products?q=${encodeURIComponent(q)}`),
   getProductStock: (id) => request(`/erp/products/${id}/stock`),
   getStores: () => request('/erp/stores'),
   findCustomer: (phone) => request(`/erp/customer/${phone}`),
+  getCustomerDetails: (phone) => request(`/erp/customer-details/${phone}`),
   createSale: (data) => request('/erp/sales', { method: 'POST', body: data }),
 };
 
