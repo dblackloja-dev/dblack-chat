@@ -24,6 +24,19 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Serve mídia salva no banco (pra funcionar no Railway sem disco persistente)
+app.get('/media/:id', async (req, res) => {
+  try {
+    const file = await queryOne("SELECT mime_type, data FROM media_files WHERE id = $1", [req.params.id]);
+    if (!file) return res.status(404).send('Not found');
+    const buffer = Buffer.from(file.data, 'base64');
+    res.set('Content-Type', file.mime_type);
+    res.set('Content-Length', buffer.length);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(buffer);
+  } catch (e) { res.status(500).send('Error'); }
+});
+
 // ─── Helpers ───
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const today = () => new Date().toISOString().split('T')[0];
@@ -431,13 +444,10 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Áudio não enviado' });
 
-    // Salva o áudio localmente
-    const audioDir = path.join(__dirname, 'uploads', 'audio');
-    const fs = require('fs');
-    if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
-    const fileName = `sent_${genId()}.ogg`;
-    const filePath = path.join(audioDir, fileName);
-    fs.writeFileSync(filePath, req.file.buffer);
+    // Salva no banco de mídia
+    const mediaId = 'aud_sent_' + genId();
+    const base64 = req.file.buffer.toString('base64');
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/ogg', base64]);
 
     // Envia via WhatsApp como PTT (push-to-talk)
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
@@ -445,7 +455,7 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
 
     // Salva no banco
     const msgId = genId();
-    const audioUrl = `/uploads/audio/${fileName}`;
+    const audioUrl = `/media/${mediaId}`;
     await queryRun(
       "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'audio', $5, NOW())",
       [msgId, conversation_id, req.user.name, audioUrl, audioUrl]

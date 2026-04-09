@@ -852,11 +852,11 @@ function MessageBubble({ msg }) {
         position: 'relative', overflow: 'hidden', wordBreak: 'break-word',
       }}>
         {!isMe && <div style={{ fontSize: 12.8, fontWeight: 700, color: '#1fa855', marginBottom: 2 }}>{msg.sender}</div>}
-        {msg.media_type === 'audio' && (msg.content?.startsWith('/uploads') || msg.media_url) ? (
+        {msg.media_type === 'audio' && (msg.content?.startsWith('/media') || msg.content?.startsWith('/uploads') || msg.media_url) ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 240 }}>
             <AudioPlayer src={msg.media_url || msg.content} />
           </div>
-        ) : msg.media_type === 'image' && msg.content?.startsWith('/uploads/images/') ? (
+        ) : msg.media_type === 'image' && (msg.content?.startsWith('/media/') || msg.content?.startsWith('/uploads/images/')) ? (
           <div>
             <img src={msg.content.split('|')[0]} alt="" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4 }} />
             {msg.content.includes('|') && <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content.split('|')[1]}</div>}

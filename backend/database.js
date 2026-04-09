@@ -121,6 +121,14 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     );
 
+    -- Mídia (áudios e imagens salvos no banco pra persistir no Railway)
+    CREATE TABLE IF NOT EXISTS media_files (
+      id TEXT PRIMARY KEY,
+      mime_type TEXT NOT NULL,
+      data TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
     -- Conexões WhatsApp (multi-número)
     CREATE TABLE IF NOT EXISTS wa_connections (
       id TEXT PRIMARY KEY,

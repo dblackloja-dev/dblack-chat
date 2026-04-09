@@ -136,15 +136,18 @@ class WhatsAppClient extends EventEmitter {
           } else if (msg.message?.imageMessage) {
             mediaType = 'image';
             content = msg.message.imageMessage.caption || '📷 Imagem';
-            // Baixa a imagem pra IA analisar
             try {
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              const { queryRun } = require('./database');
+              const mediaId = 'img_' + msg.key.id;
+              const base64 = buffer.toString('base64');
+              await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [mediaId, 'image/jpeg', base64]);
+              content = `/media/${mediaId}`;
+              if (msg.message.imageMessage.caption) content += `|${msg.message.imageMessage.caption}`;
+              // Salva também em arquivo local pra IA analisar
               const imgDir = path.join(__dirname, 'uploads', 'images');
               if (!fs.existsSync(imgDir)) fs.mkdirSync(imgDir, { recursive: true });
-              const fileName = `${msg.key.id}.jpg`;
-              fs.writeFileSync(path.join(imgDir, fileName), buffer);
-              content = `/uploads/images/${fileName}`;
-              if (msg.message.imageMessage.caption) content += `|${msg.message.imageMessage.caption}`;
+              fs.writeFileSync(path.join(imgDir, `${msg.key.id}.jpg`), buffer);
             } catch (e) {
               console.error('Erro ao baixar imagem:', e.message);
               content = msg.message.imageMessage.caption || '📷 Imagem';
@@ -154,15 +157,13 @@ class WhatsAppClient extends EventEmitter {
             mediaType = 'video';
           } else if (msg.message?.audioMessage) {
             mediaType = 'audio';
-            // Baixa o áudio
             try {
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
-              const audioDir = path.join(__dirname, 'uploads', 'audio');
-              if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
-              const ext = msg.message.audioMessage.ptt ? 'ogg' : 'mp3';
-              const fileName = `${msg.key.id}.${ext}`;
-              fs.writeFileSync(path.join(audioDir, fileName), buffer);
-              content = `/uploads/audio/${fileName}`;
+              const { queryRun } = require('./database');
+              const mediaId = 'aud_' + msg.key.id;
+              const base64 = buffer.toString('base64');
+              await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [mediaId, 'audio/ogg', base64]);
+              content = `/media/${mediaId}`;
             } catch (e) {
               console.error('Erro ao baixar áudio:', e.message);
               content = '🎵 Áudio (erro ao baixar)';

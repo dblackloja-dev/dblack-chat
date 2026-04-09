@@ -9,6 +9,7 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:3002',
       '/uploads': 'http://localhost:3002',
+      '/media': 'http://localhost:3002',
       '/ws': { target: 'ws://localhost:3002', ws: true },
     },
   },
