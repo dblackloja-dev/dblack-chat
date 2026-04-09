@@ -10,7 +10,7 @@ const WhatsAppClient = require('./whatsapp');
 const { createCanvas } = require('@napi-rs/canvas');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-// ffmpeg removido — áudio enviado como documento
+const ffmpeg = require('fluent-ffmpeg');
 const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 const aiAgent = require('./ai-agent');
@@ -445,17 +445,39 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Áudio não enviado' });
 
+    // Converte webm → mp3
+    const fs = require('fs');
+    const tmpId = genId();
+    const tmpIn = path.join(__dirname, `tmp_${tmpId}.webm`);
+    const tmpOut = path.join(__dirname, `tmp_${tmpId}.mp3`);
+    fs.writeFileSync(tmpIn, req.file.buffer);
+
+    let mp3Buffer;
+    try {
+      await new Promise((resolve, reject) => {
+        ffmpeg(tmpIn).toFormat('mp3').audioCodec('libmp3lame').audioBitrate('128k').audioChannels(1).audioFrequency(44100)
+          .on('end', resolve).on('error', reject).save(tmpOut);
+      });
+      mp3Buffer = fs.readFileSync(tmpOut);
+    } catch (e) {
+      console.log('⚠️ ffmpeg erro:', e.message);
+      mp3Buffer = null;
+    }
+    try { fs.unlinkSync(tmpIn); } catch {}
+    try { fs.unlinkSync(tmpOut); } catch {}
+
+    if (!mp3Buffer) return res.status(500).json({ error: 'Erro ao converter áudio' });
+
     // Salva no banco
     const mediaId = 'aud_sent_' + genId();
-    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/webm', req.file.buffer.toString('base64')]);
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/mpeg', mp3Buffer.toString('base64')]);
 
-    // Envia via WhatsApp como documento de áudio (sempre funciona)
+    // Envia MP3 como documento de áudio (reproduzível no WhatsApp)
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
     await wa.socket.sendMessage(jid, {
-      document: req.file.buffer,
-      mimetype: 'audio/webm',
-      fileName: 'audio.webm',
-      caption: '🎵 Mensagem de voz',
+      document: mp3Buffer,
+      mimetype: 'audio/mpeg',
+      fileName: 'mensagem-de-voz.mp3',
     });
 
     // Salva no banco
