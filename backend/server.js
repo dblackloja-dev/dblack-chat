@@ -449,48 +449,69 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     const fs = require('fs');
     const tmpId = genId();
     const tmpIn = path.join(__dirname, `tmp_in_${tmpId}.webm`);
-    const tmpMp3 = path.join(__dirname, `tmp_out_${tmpId}.mp3`);
+    const tmpOgg = path.join(__dirname, `tmp_out_${tmpId}.ogg`);
     fs.writeFileSync(tmpIn, req.file.buffer);
 
-    // Converte webm → mp3 (formato universalmente aceito pelo WhatsApp)
-    let audioBuffer;
-    let audioDuration = 5;
+    // Converte webm → ogg opus (único formato que funciona como PTT no WhatsApp)
+    let audioBuffer = req.file.buffer;
+    let useMp3Fallback = false;
     try {
       await new Promise((resolve, reject) => {
         ffmpeg(tmpIn)
-          .toFormat('mp3')
-          .audioCodec('libmp3lame')
-          .audioBitrate('64k')
+          .inputOptions(['-err_detect', 'ignore_err'])
+          .toFormat('ogg')
+          .audioCodec('libopus')
+          .audioBitrate('32k')
           .audioChannels(1)
-          .audioFrequency(44100)
+          .audioFrequency(48000)
           .outputOptions(['-avoid_negative_ts', 'make_zero', '-map_metadata', '-1'])
           .on('end', resolve)
           .on('error', reject)
-          .save(tmpMp3);
+          .save(tmpOgg);
       });
-      audioDuration = await new Promise((resolve) => {
-        ffmpeg.ffprobe(tmpMp3, (err, data) => resolve(!err && data ? Math.ceil(data.format.duration || 5) : 5));
-      });
-      audioBuffer = fs.readFileSync(tmpMp3);
+      audioBuffer = fs.readFileSync(tmpOgg);
     } catch (e) {
-      console.log('⚠️ ffmpeg falhou:', e.message);
-      audioBuffer = req.file.buffer;
+      console.log('⚠️ OGG falhou, tentando MP3:', e.message);
+      useMp3Fallback = true;
     }
+
+    // Fallback MP3 se OGG falhar
+    const tmpMp3 = path.join(__dirname, `tmp_out_${tmpId}.mp3`);
+    if (useMp3Fallback) {
+      try {
+        await new Promise((resolve, reject) => {
+          ffmpeg(tmpIn).toFormat('mp3').audioCodec('libmp3lame').audioBitrate('64k').audioChannels(1)
+            .on('end', resolve).on('error', reject).save(tmpMp3);
+        });
+        audioBuffer = fs.readFileSync(tmpMp3);
+      } catch { audioBuffer = req.file.buffer; }
+    }
+
     try { fs.unlinkSync(tmpIn); } catch {}
+    try { fs.unlinkSync(tmpOgg); } catch {}
     try { fs.unlinkSync(tmpMp3); } catch {}
 
     // Salva no banco
     const mediaId = 'aud_sent_' + genId();
-    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/mpeg', audioBuffer.toString('base64')]);
+    const mime = useMp3Fallback ? 'audio/mpeg' : 'audio/ogg';
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, mime, audioBuffer.toString('base64')]);
 
-    // Envia via WhatsApp como áudio MP3
+    // Envia via WhatsApp — tenta como PTT, se falhar envia como documento de áudio
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
-    await wa.socket.sendMessage(jid, {
-      audio: audioBuffer,
-      mimetype: 'audio/mpeg',
-      ptt: true,
-      seconds: audioDuration || 5,
-    });
+    try {
+      if (!useMp3Fallback) {
+        await wa.socket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+      } else {
+        await wa.socket.sendMessage(jid, { audio: audioBuffer, mimetype: 'audio/mpeg', ptt: true });
+      }
+    } catch (pttErr) {
+      console.log('⚠️ PTT falhou, enviando como documento:', pttErr.message);
+      await wa.socket.sendMessage(jid, {
+        document: audioBuffer,
+        mimetype: useMp3Fallback ? 'audio/mpeg' : 'audio/ogg',
+        fileName: useMp3Fallback ? 'audio.mp3' : 'audio.ogg',
+      });
+    }
 
     // Salva no banco
     const msgId = genId();
