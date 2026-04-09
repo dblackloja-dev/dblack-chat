@@ -423,9 +423,12 @@ app.post('/api/messages/send', auth, async (req, res) => {
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
 
-    // Envia via WhatsApp com nome do atendente
-    const waText = `*${req.user.name}:*\n${content}`;
-    await wa.sendMessage(conv.phone, waText);
+    // Envia via WhatsApp (só se for conversa WhatsApp, não web)
+    const isWebChat = conv.channel === 'web' || conv.phone?.startsWith('web_');
+    if (!isWebChat) {
+      const waText = `*${req.user.name}:*\n${content}`;
+      await wa.sendMessage(conv.phone, waText);
+    }
 
     // Salva no banco
     const msgId = genId();
@@ -442,6 +445,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content, ack: 1, timestamp: new Date().toISOString() };
     broadcast('new_message', { conversation: { ...conv, last_message: content }, message });
+    broadcastToChat(conversation_id, 'new_message', { message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -454,8 +458,11 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Imagem não enviada' });
 
-    // Envia via WhatsApp
-    await wa.sendImage(conv.phone, req.file.buffer, caption || '');
+    // Envia via WhatsApp (só se não for chat web)
+    const isWebChat = conv.channel === 'web' || conv.phone?.startsWith('web_');
+    if (!isWebChat) {
+      await wa.sendImage(conv.phone, req.file.buffer, caption || '');
+    }
 
     // Salva a imagem no banco para exibição no painel
     const msgId = genId();
@@ -477,6 +484,7 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: mediaUrl + (caption ? `|${caption}` : ''), media_type: 'image', media_url: mediaUrl, timestamp: new Date().toISOString() };
     broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
+    broadcastToChat(conversation_id, 'new_message', { message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -489,7 +497,6 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
 
-    const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
     const fileName = req.file.originalname || 'arquivo';
     const mime = req.file.mimetype || 'application/octet-stream';
 
@@ -497,8 +504,11 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
     const mediaId = 'file_' + genId();
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, mime, req.file.buffer.toString('base64')]);
 
-    // Envia via WhatsApp (Evolution API)
-    await wa.sendDocument(conv.phone, req.file.buffer, fileName, mime);
+    // Envia via WhatsApp (só se não for chat web)
+    const isWebChat = conv.channel === 'web' || conv.phone?.startsWith('web_');
+    if (!isWebChat) {
+      await wa.sendDocument(conv.phone, req.file.buffer, fileName, mime);
+    }
 
     const msgId = genId();
     const displayText = `📎 ${fileName}`;
@@ -511,6 +521,7 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: displayText, media_type: 'document', media_url: fileUrl, timestamp: new Date().toISOString() };
     broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
+    broadcastToChat(conversation_id, 'new_message', { message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -527,8 +538,11 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     const mediaId = 'aud_' + genId();
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/ogg', req.file.buffer.toString('base64')]);
 
-    // Envia via Evolution (sendWhatsAppAudio converte pra OGG Opus automaticamente)
-    await wa.sendAudio(conv.phone, req.file.buffer);
+    // Envia via WhatsApp (só se não for chat web)
+    const isWebChat = conv.channel === 'web' || conv.phone?.startsWith('web_');
+    if (!isWebChat) {
+      await wa.sendAudio(conv.phone, req.file.buffer);
+    }
 
     const msgId = genId();
     const audioUrl = `/media/${mediaId}`;
@@ -540,6 +554,7 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: audioUrl, media_type: 'audio', media_url: audioUrl, timestamp: new Date().toISOString() };
     broadcast('new_message', { conversation: { ...conv, last_message: '🎵 Áudio' }, message });
+    broadcastToChat(conversation_id, 'new_message', { message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1222,6 +1237,210 @@ function generateReceiptText(sale, sellerName, customerName) {
 
   return text;
 }
+
+// ═══════════════════════════════════
+// ═══  CHAT WEB (INDEPENDENTE)    ═══
+// ═══════════════════════════════════
+
+// WebSocket para clientes do chat web
+const chatWss = new WebSocketServer({ server, path: '/ws/chat' });
+const chatClients = new Map(); // conversationId -> Set<ws>
+
+chatWss.on('connection', (ws, req) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const convId = url.searchParams.get('conv');
+  const chatToken = url.searchParams.get('token');
+  if (!convId || !chatToken) { ws.close(1008, 'Parâmetros inválidos'); return; }
+
+  // Valida token simples (hash do convId)
+  const crypto = require('crypto');
+  const expected = crypto.createHash('sha256').update(convId + JWT_SECRET).digest('hex').slice(0, 16);
+  if (chatToken !== expected) { ws.close(1008, 'Token inválido'); return; }
+
+  if (!chatClients.has(convId)) chatClients.set(convId, new Set());
+  chatClients.get(convId).add(ws);
+  console.log(`💬 Chat web conectado: ${convId}`);
+
+  ws.on('close', () => {
+    chatClients.get(convId)?.delete(ws);
+    if (chatClients.get(convId)?.size === 0) chatClients.delete(convId);
+  });
+  ws.on('error', () => {
+    chatClients.get(convId)?.delete(ws);
+  });
+});
+
+// Envia evento para cliente do chat web
+function broadcastToChat(convId, event, data) {
+  const sockets = chatClients.get(convId);
+  if (!sockets) return;
+  const msg = JSON.stringify({ event, data });
+  sockets.forEach(ws => { try { if (ws.readyState === 1) ws.send(msg); } catch {} });
+}
+
+// Gerar link de chat para um cliente
+app.post('/api/chat-link', auth, async (req, res) => {
+  try {
+    const { phone, customer_name } = req.body;
+    const identifier = phone || 'web_' + genId();
+    const name = customer_name || 'Cliente Web';
+
+    // Busca conversa existente ou cria nova
+    let conv = await queryOne(
+      "SELECT * FROM conversations WHERE phone = $1 AND status != 'finalizado' ORDER BY started_at DESC LIMIT 1",
+      [identifier]
+    );
+
+    if (!conv) {
+      const convId = genId();
+      await queryRun(
+        `INSERT INTO conversations (id, phone, customer_name, customer_push_name, status, unread_count, last_message, last_message_at, channel)
+         VALUES ($1, $2, $3, $4, 'aguardando', 0, '', NOW(), 'web')`,
+        [convId, identifier, name, name]
+      );
+      conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
+    }
+
+    const crypto = require('crypto');
+    const chatToken = crypto.createHash('sha256').update(conv.id + JWT_SECRET).digest('hex').slice(0, 16);
+    const baseUrl = process.env.CHAT_URL || `${req.protocol}://${req.get('host')}`;
+    const link = `${baseUrl}/chat/${conv.id}?t=${chatToken}`;
+
+    res.json({ link, conversation_id: conv.id, token: chatToken });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Página do chat web (servida pelo backend)
+app.get('/chat/:convId', async (req, res) => {
+  const { convId } = req.params;
+  const token = req.query.t;
+  if (!convId || !token) return res.status(400).send('Link inválido');
+  res.sendFile(path.join(__dirname, 'public', 'chat.html'));
+});
+
+// API pública do chat web — buscar mensagens
+app.get('/api/webchat/:convId/messages', async (req, res) => {
+  try {
+    const { convId } = req.params;
+    const token = req.query.t;
+    const crypto = require('crypto');
+    const expected = crypto.createHash('sha256').update(convId + JWT_SECRET).digest('hex').slice(0, 16);
+    if (token !== expected) return res.status(403).json({ error: 'Token inválido' });
+
+    const msgs = await queryAll(
+      "SELECT id, from_me, sender, content, media_type, media_url, timestamp FROM messages WHERE conversation_id = $1 ORDER BY timestamp ASC",
+      [convId]
+    );
+    const conv = await queryOne("SELECT customer_push_name, phone FROM conversations WHERE id = $1", [convId]);
+    res.json({ messages: msgs, customer_name: conv?.customer_push_name || '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API pública do chat web — enviar mensagem
+app.post('/api/webchat/:convId/send', express.json(), async (req, res) => {
+  try {
+    const { convId } = req.params;
+    const { content, token, sender_name } = req.body;
+    if (!content || !token) return res.status(400).json({ error: 'Dados incompletos' });
+
+    const crypto = require('crypto');
+    const expected = crypto.createHash('sha256').update(convId + JWT_SECRET).digest('hex').slice(0, 16);
+    if (token !== expected) return res.status(403).json({ error: 'Token inválido' });
+
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+
+    // Atualiza nome do cliente se informado
+    if (sender_name && sender_name !== conv.customer_push_name) {
+      await queryRun("UPDATE conversations SET customer_push_name = $1, customer_name = $1 WHERE id = $2", [sender_name, convId]);
+    }
+
+    const msgId = genId();
+    await queryRun(
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, timestamp) VALUES ($1, $2, false, $3, $4, NOW())",
+      [msgId, convId, sender_name || conv.customer_push_name || 'Cliente', content]
+    );
+    await queryRun(
+      "UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW() WHERE id = $2",
+      [content, convId]
+    );
+
+    const updatedConv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
+    const message = { id: msgId, conversation_id: convId, from_me: false, sender: sender_name || conv.customer_push_name || 'Cliente', content, timestamp: new Date().toISOString() };
+
+    // Notifica atendentes no painel
+    broadcast('new_message', { conversation: updatedConv, message });
+
+    // Notifica o próprio chat web (se tiver outra aba aberta)
+    broadcastToChat(convId, 'new_message', { message });
+
+    // IA responde automaticamente se conversa está aguardando
+    if (updatedConv.status === 'aguardando') {
+      const aiEnabled = await aiAgent.isAgentEnabled();
+      if (aiEnabled) {
+        try {
+          const aiResponse = await aiAgent.generateResponse(convId, content, sender_name || conv.customer_push_name, null);
+          if (aiResponse.text) {
+            const aiMsgId = genId();
+            await queryRun(
+              "INSERT INTO messages (id, conversation_id, from_me, sender, content, timestamp) VALUES ($1, $2, true, $3, $4, NOW())",
+              [aiMsgId, convId, 'Lê (IA)', aiResponse.text]
+            );
+            await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [aiResponse.text, convId]);
+
+            const aiMessage = { id: aiMsgId, conversation_id: convId, from_me: true, sender: 'Lê (IA)', content: aiResponse.text, timestamp: new Date().toISOString() };
+            broadcast('new_message', { conversation: { ...updatedConv, last_message: aiResponse.text }, message: aiMessage });
+            broadcastToChat(convId, 'new_message', { message: aiMessage });
+
+            if (aiResponse.shouldTransfer) {
+              await queryRun("UPDATE conversations SET status = 'aguardando' WHERE id = $1", [convId]);
+            }
+          }
+        } catch (e) { console.error('Erro IA chat web:', e.message); }
+      }
+    }
+
+    res.json(message);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API pública do chat web — enviar imagem
+app.post('/api/webchat/:convId/send-image', upload.single('image'), async (req, res) => {
+  try {
+    const { convId } = req.params;
+    const { token, sender_name, caption } = req.body;
+    if (!token || !req.file) return res.status(400).json({ error: 'Dados incompletos' });
+
+    const crypto = require('crypto');
+    const expected = crypto.createHash('sha256').update(convId + JWT_SECRET).digest('hex').slice(0, 16);
+    if (token !== expected) return res.status(403).json({ error: 'Token inválido' });
+
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+
+    // Salva imagem no banco
+    const msgId = genId();
+    const mediaId = 'img_' + msgId;
+    const base64 = req.file.buffer.toString('base64');
+    const mime = req.file.mimetype || 'image/jpeg';
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [mediaId, mime, base64]);
+
+    const mediaUrl = `/media/${mediaId}`;
+    const displayText = caption ? `📷 ${caption}` : '📷 Imagem';
+    await queryRun(
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, false, $3, $4, 'image', $5, NOW())",
+      [msgId, convId, sender_name || 'Cliente', mediaUrl + (caption ? `|${caption}` : ''), mediaUrl]
+    );
+    await queryRun("UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, convId]);
+
+    const updatedConv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
+    const message = { id: msgId, conversation_id: convId, from_me: false, sender: sender_name || 'Cliente', content: mediaUrl, media_type: 'image', media_url: mediaUrl, timestamp: new Date().toISOString() };
+    broadcast('new_message', { conversation: updatedConv, message });
+    broadcastToChat(convId, 'new_message', { message });
+
+    res.json(message);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ═══════════════════════════════════
 // ═══  START                      ═══

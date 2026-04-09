@@ -49,6 +49,7 @@ const api = {
   finishConversation: (id) => request(`/conversations/${id}/finish`, { method: 'POST' }),
   transferConversation: (id) => request(`/conversations/${id}/transfer`, { method: 'POST' }),
   markUnread: (id) => request(`/conversations/${id}/mark-unread`, { method: 'POST' }),
+  generateChatLink: (data) => request('/chat-link', { method: 'POST', body: data }),
 
   // Messages
   getMessages: (convId) => request(`/messages/${convId}`),

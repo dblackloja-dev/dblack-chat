@@ -535,13 +535,23 @@ export default function App() {
           {user.role === 'admin' && <button onClick={() => { setShowAdmin(!showAdmin); setActiveConv(null); setSpyConv(null); setShowSales(false); }} style={iconBtn} title="Conexões WhatsApp">📱</button>}
         </div>
 
-        {/* Busca */}
-        <div style={{ padding: '6px 12px', background: W.bgPanel }}>
-          <div style={{ display: 'flex', alignItems: 'center', background: W.search, borderRadius: 8, padding: '0 12px', height: 35, border: `1px solid ${W.border}` }}>
+        {/* Busca + botão novo chat web */}
+        <div style={{ padding: '6px 12px', background: W.bgPanel, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', background: W.search, borderRadius: 8, padding: '0 12px', height: 35, border: `1px solid ${W.border}` }}>
             <span style={{ marginRight: 12 }}>{Icons.search}</span>
             <input style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 14, fontFamily: 'inherit' }}
               placeholder="Pesquisar ou começar uma nova conversa" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
           </div>
+          <button style={{ ...smallBtn, padding: '6px 10px', fontSize: 11, background: 'rgba(30,186,138,.15)', color: '#1eba8a', border: '1px solid rgba(30,186,138,.3)', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }} onClick={async () => {
+            const name = prompt('Nome do cliente:');
+            if (!name) return;
+            try {
+              const res = await api.generateChatLink({ customer_name: name });
+              await navigator.clipboard.writeText(res.link);
+              alert('Link copiado! Envie para o cliente:\n\n' + res.link);
+              loadConversations();
+            } catch (e) { alert('Erro: ' + e.message); }
+          }} title="Criar chat web">🔗 Chat Web</button>
         </div>
 
         {/* Abas */}
@@ -679,6 +689,13 @@ export default function App() {
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => loadHistory(activeConv.phone)} title="Histórico">📋</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => transferConversation(activeConv.id)} title="Devolver">↩️</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={async () => { try { await api.markUnread(activeConv.id); } catch {} }} title="Marcar como não lida">✉️</button>
+                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={async () => {
+                    try {
+                      const res = await api.generateChatLink({ phone: activeConv.phone, customer_name: activeConv.customer_push_name });
+                      await navigator.clipboard.writeText(res.link);
+                      alert('Link copiado!\n\n' + res.link);
+                    } catch (e) { alert('Erro: ' + e.message); }
+                  }} title="Gerar link do chat web">🔗</button>
                   <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11, color: W.red }} onClick={() => finishConversation(activeConv.id)} title="Finalizar">✓</button>
                 </div>}
               </div>
@@ -888,8 +905,9 @@ function ConvItem({ conv, active, onClick, finished }) {
       style={{ display: 'flex', alignItems: 'center', padding: '10px 16px', cursor: 'pointer', gap: 12,
         background: active ? W.bgActive : hover ? W.bgHover : 'transparent',
         borderBottom: `1px solid ${W.border}`, transition: 'background .1s' }}>
-      <div style={{ ...avatarStyle(49), background: finished ? '#6B7175' : W.teal, fontSize: 17 }}>
+      <div style={{ ...avatarStyle(49), background: finished ? '#6B7175' : (conv.channel === 'web' || conv.phone?.startsWith('web_')) ? '#6366f1' : W.teal, fontSize: 17, position: 'relative' }}>
         {(conv.customer_push_name || conv.phone)?.[0]?.toUpperCase() || '?'}
+        {(conv.channel === 'web' || conv.phone?.startsWith('web_')) && <span style={{ position: 'absolute', bottom: -2, right: -2, fontSize: 10, background: '#202c33', borderRadius: '50%', padding: 1 }}>🌐</span>}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
