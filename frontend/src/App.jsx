@@ -297,22 +297,32 @@ export default function App() {
   const acceptConversation = async (convId) => { try { const conv = await api.acceptConversation(convId); setConversations(prev => prev.map(c => c.id === convId ? conv : c)); setSpyConv(null); setActiveConv(conv); if (isMobile) setMobileView('chat'); await loadMessages(convId); setTab('atendendo'); } catch {} };
   const finishConversation = async (convId) => { if (!confirm('Finalizar este atendimento?')) return; try { await api.finishConversation(convId); if (activeConv?.id === convId) { setActiveConv(null); setMessages([]); } await loadConversations(); } catch {} };
   const transferConversation = async (convId) => { if (!confirm('Devolver para a fila?')) return; try { await api.transferConversation(convId); if (activeConv?.id === convId) { setActiveConv(null); setMessages([]); } await loadConversations(); } catch {} };
-  const sendMessage = async () => { if (!msgInput.trim() || !activeConv) return; const text = msgInput.trim(); setMsgInput(''); try { await api.sendMessage({ conversation_id: activeConv.id, content: text }); } catch { setMsgInput(text); } };
-  const sendQuickReply = async (qr) => {
-    if (!activeConv) return; setShowQuickReplies(false);
+  const sendMessage = async () => {
+    if (!msgInput.trim() || !activeConv) return;
+    const text = msgInput.trim();
+    setMsgInput('');
     try {
-      // Envia texto
-      await api.sendMessage({ conversation_id: activeConv.id, content: qr.text });
-      // Se tem imagem, busca e envia
-      if (qr.has_image) {
-        const res = await fetch(`/api/quick-replies/${qr.id}/image`, { headers: { Authorization: `Bearer ${api.getToken()}` } });
-        if (res.ok) {
-          const blob = await res.blob();
-          const file = new File([blob], 'resposta.jpg', { type: blob.type });
-          await api.sendImage(activeConv.id, file, '');
-        }
+      await api.sendMessage({ conversation_id: activeConv.id, content: text });
+      // Se tinha imagem de resposta rápida pendente, envia junto
+      if (pendingQuickReply?.has_image) {
+        try {
+          const res = await fetch(`/api/quick-replies/${pendingQuickReply.id}/image`, { headers: { Authorization: `Bearer ${api.getToken()}` } });
+          if (res.ok) {
+            const blob = await res.blob();
+            const file = new File([blob], 'resposta.jpg', { type: blob.type });
+            await api.sendImage(activeConv.id, file, '');
+          }
+        } catch {}
       }
-    } catch {}
+      setPendingQuickReply(null);
+    } catch { setMsgInput(text); }
+  };
+  const [pendingQuickReply, setPendingQuickReply] = useState(null); // guarda a QR selecionada (pra enviar imagem junto)
+
+  const selectQuickReply = (qr) => {
+    setMsgInput(qr.text);
+    setPendingQuickReply(qr.has_image ? qr : null);
+    setShowQuickReplies(false);
   };
   const [sendingMedia, setSendingMedia] = useState(false);
 
@@ -687,7 +697,7 @@ export default function App() {
               {showQuickReplies && activeConv.status === 'atendendo' && activeConv.agent_id === user.id && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '8px 16px', background: W.bgHeader, borderTop: `1px solid ${W.border}` }}>
                   {quickReplies.map((qr, i) => (
-                    <button key={qr.id || i} onClick={() => sendQuickReply(qr)}
+                    <button key={qr.id || i} onClick={() => selectQuickReply(qr)}
                       style={{ padding: '5px 10px', borderRadius: 16, border: `1px solid ${W.border}`, background: '#fff', color: W.txt, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
                       {qr.has_image && <span>📷</span>}
                       {qr.label}
@@ -719,7 +729,8 @@ export default function App() {
                     <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
                     <button style={{ ...iconBtn, padding: 6, opacity: sendingFile ? 0.4 : 1 }} onClick={() => !sendingFile && fileAttachRef.current?.click()} title="Anexar arquivo">{sendingFile ? '⏳' : '📎'}</button>
                     <input ref={fileAttachRef} type="file" style={{ display: 'none' }} onChange={handleFileAttach} />
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 8px', border: `1px solid ${W.border}`, position: 'relative' }}>
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 8px', border: `1px solid ${pendingQuickReply ? '#1eba8a' : W.border}`, position: 'relative' }}>
+                      {pendingQuickReply && <span style={{ fontSize: 10, color: '#1eba8a', position: 'absolute', top: -8, left: 8, background: W.bgHeader, padding: '0 4px' }}>📷 + imagem</span>}
                       <button style={{ ...iconBtn, padding: 4, flexShrink: 0 }} onClick={() => setShowEmojis(!showEmojis)} title="Emojis">😊</button>
                       {showEmojis && (
                         <div style={{ position: 'absolute', bottom: '100%', left: 0, background: W.bgHeader, border: `1px solid ${W.border}`, borderRadius: 12, padding: 8, display: 'flex', flexWrap: 'wrap', gap: 2, width: 260, maxHeight: 180, overflowY: 'auto', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,.2)' }}>
