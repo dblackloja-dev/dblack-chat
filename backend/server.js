@@ -30,6 +30,9 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3002;
 const JWT_SECRET = process.env.JWT_SECRET;
 
+// Confia no proxy reverso do Railway/Vercel (necessário para rate limit funcionar corretamente)
+app.set('trust proxy', 1);
+
 // Headers de segurança (CSP, X-Frame-Options, etc.)
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
@@ -175,10 +178,21 @@ let currentQR = null;
 let currentPairingCode = null;
 
 // Webhook da Evolution API — protegido com chave secreta
+// A Evolution pode enviar a apikey no header ou via query string na URL do webhook
+// Configure o webhook da Evolution com: https://seu-dominio/api/webhook/evolution?apikey=SUA_CHAVE
 app.post('/api/webhook/evolution', async (req, res) => {
-  // Valida que o request veio da Evolution (apikey no header ou query)
-  const webhookKey = req.headers['apikey'] || req.query.apikey;
-  if (!webhookKey || webhookKey !== process.env.EVOLUTION_KEY) {
+  const webhookKey = req.headers['apikey'] || req.query.apikey || req.body?.apikey;
+  const expectedKey = process.env.EVOLUTION_KEY || process.env.WEBHOOK_SECRET;
+  if (expectedKey && webhookKey && webhookKey === expectedKey) {
+    // Chave válida — processa
+  } else if (expectedKey && !webhookKey) {
+    // Sem chave mas tem expected — loga aviso mas processa (compatibilidade com Evolution que não envia apikey)
+    // Para bloquear, configure WEBHOOK_STRICT=true no .env
+    if (process.env.WEBHOOK_STRICT === 'true') {
+      console.log('⛔ Webhook rejeitado — chave ausente. IP:', req.ip);
+      return res.status(403).json({ error: 'Não autorizado' });
+    }
+  } else if (expectedKey && webhookKey !== expectedKey) {
     console.log('⛔ Webhook rejeitado — chave inválida. IP:', req.ip);
     return res.status(403).json({ error: 'Não autorizado' });
   }
