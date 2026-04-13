@@ -468,12 +468,14 @@ app.post('/api/messages/send', auth, async (req, res) => {
   try {
     const { conversation_id, content } = req.body;
     if (!conversation_id || !content || !content.trim()) return res.status(400).json({ error: 'Conversa e conteúdo são obrigatórios' });
+    console.log(`📤 ${req.user.name} enviando msg para conv ${conversation_id}`);
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
 
     // Envia via WhatsApp com nome do atendente
     const waText = `*${req.user.name}:*\n${content}`;
     await wa.sendMessage(conv.phone, waText);
+    console.log(`✅ Msg enviada por ${req.user.name} para ${conv.phone}`);
 
     // Salva no banco
     const msgId = genId();
