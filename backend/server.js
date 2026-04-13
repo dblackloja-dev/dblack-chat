@@ -251,7 +251,7 @@ wa.on('message', (msg) => {
         if (wa.connected && greetingText) {
           try {
             const greeting = greetingText.replace('{nome}', msg.pushName || 'cliente');
-            const greetResult = await wa.sendMessage(msg.phone, greeting);
+            const greetResult = await wa.sendMessage(msg.phone, greeting, { isBot: true });
             // Salva a saudação no histórico
             const greetId = greetResult?._waId || genId();
             await queryRun(
@@ -292,7 +292,7 @@ wa.on('message', (msg) => {
             const aiResponse = await aiAgent.generateResponse(conv.id, msg.content, msg.pushName, msg.mediaType);
             if (aiResponse.text) {
               // Envia resposta via WhatsApp
-              const aiWaResult = await wa.sendMessage(msg.phone, aiResponse.text);
+              const aiWaResult = await wa.sendMessage(msg.phone, aiResponse.text, { isBot: true });
 
               // Salva no banco com ID do WhatsApp para rastrear entrega/leitura
               const aiMsgId = aiWaResult?._waId || genId();

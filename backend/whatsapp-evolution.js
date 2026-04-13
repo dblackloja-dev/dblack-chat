@@ -185,25 +185,29 @@ class WhatsAppEvolution extends EventEmitter {
     }
   }
 
-  async sendMessage(phone, text) {
+  // isBot: true = IA/saudação automática (usa delay + digitando pra parecer humano)
+  //        false = atendente humano (envia instantâneo, sem delay)
+  async sendMessage(phone, text, { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido. Tente novamente mais tarde.');
     const number = phone.replace(/\D/g, '');
-    // Simula comportamento humano: digitando... + delay
-    await this.sendPresence(phone, 'composing');
-    await this.humanDelay();
+    if (isBot) {
+      await this.sendPresence(phone, 'composing');
+      await this.humanDelay();
+    }
     this.trackSend();
     const result = await this.api('POST', 'message/sendText', { number, text });
-    // Retorna o ID do WhatsApp para rastreamento de entrega/leitura
     result._waId = result?.key?.id || null;
     return result;
   }
 
-  async sendImage(phone, imageBuffer, caption = '') {
+  async sendImage(phone, imageBuffer, caption = '', { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     const number = phone.replace(/\D/g, '');
     const base64 = imageBuffer.toString('base64');
-    await this.sendPresence(phone, 'composing');
-    await this.humanDelay(true);
+    if (isBot) {
+      await this.sendPresence(phone, 'composing');
+      await this.humanDelay(true);
+    }
     this.trackSend();
     const result = await this.api('POST', 'message/sendMedia', {
       number, mediatype: 'image', mimetype: 'image/jpeg', caption, media: base64, fileName: 'imagem.jpg',
@@ -212,24 +216,28 @@ class WhatsAppEvolution extends EventEmitter {
     return result;
   }
 
-  async sendAudio(phone, audioBuffer) {
+  async sendAudio(phone, audioBuffer, { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     const number = phone.replace(/\D/g, '');
     const base64 = audioBuffer.toString('base64');
-    await this.sendPresence(phone, 'recording');
-    await this.humanDelay(true);
+    if (isBot) {
+      await this.sendPresence(phone, 'recording');
+      await this.humanDelay(true);
+    }
     this.trackSend();
     const result = await this.api('POST', 'message/sendWhatsAppAudio', { number, audio: base64 });
     result._waId = result?.key?.id || null;
     return result;
   }
 
-  async sendDocument(phone, buffer, fileName, mimetype) {
+  async sendDocument(phone, buffer, fileName, mimetype, { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     const number = phone.replace(/\D/g, '');
     const base64 = buffer.toString('base64');
-    await this.sendPresence(phone, 'composing');
-    await this.humanDelay(true);
+    if (isBot) {
+      await this.sendPresence(phone, 'composing');
+      await this.humanDelay(true);
+    }
     this.trackSend();
     const result = await this.api('POST', 'message/sendMedia', {
       number, mediatype: 'document', mimetype: mimetype || 'application/octet-stream', media: base64, fileName,
