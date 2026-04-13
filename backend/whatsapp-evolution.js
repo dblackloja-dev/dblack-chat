@@ -258,21 +258,27 @@ class WhatsAppEvolution extends EventEmitter {
     }
 
     // Status de entrega das mensagens (enviado/entregue/lido)
-    // Evolution v2 pode enviar como: messages.update, message.update, send.message, messages.set
+    // Evolution v2 pode enviar como: messages.update, message.update
     if (event === 'messages.update' || event === 'message.update') {
       const updates = Array.isArray(body.data) ? body.data : [body.data];
       for (const upd of updates) {
         const msgId = upd?.key?.id || upd?.keyId || upd?.id;
-        const status = upd?.update?.status || upd?.status || upd?.update?.messageStubType;
-        if (msgId && status != null) {
-          // Evolution: 0=erro, 1=pendente, 2=enviado(servidor), 3=entregue(dispositivo), 4=lido, 5=reproduzido
-          // Nosso ack: 1=enviado, 2=entregue, 3=lido
+        const rawStatus = upd?.update?.status || upd?.status || upd?.update?.messageStubType;
+        if (msgId && rawStatus != null) {
+          // Evolution v2 pode enviar status como texto OU número
+          // Textos: SERVER_ACK, DELIVERY_ACK, READ, PLAYED
+          // Números: 1=pendente, 2=enviado, 3=entregue, 4=lido, 5=reproduzido
+          const statusMap = { 'SERVER_ACK': 1, 'DELIVERY_ACK': 2, 'READ': 3, 'PLAYED': 3 };
           let ack;
-          if (status >= 4) ack = 3;       // lido ou reproduzido
-          else if (status >= 3) ack = 2;  // entregue no dispositivo
-          else ack = 1;                    // enviado ao servidor
+          if (typeof rawStatus === 'string') {
+            ack = statusMap[rawStatus] || 1;
+          } else {
+            if (rawStatus >= 4) ack = 3;
+            else if (rawStatus >= 3) ack = 2;
+            else ack = 1;
+          }
           this.emit('message_ack', { id: msgId, ack });
-          console.log(`✓ Status msg ${msgId}: ${['','enviado','entregue','lido'][ack]} (raw: ${status})`);
+          console.log(`✓ Status msg ${msgId}: ${['','enviado','entregue','lido'][ack]} (raw: ${rawStatus})`);
         }
       }
       return;
