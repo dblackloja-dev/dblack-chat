@@ -312,6 +312,11 @@ class WhatsAppEvolution extends EventEmitter {
       let mediaUrl = null;
 
       const msgContent = msg.message;
+      // Log para diagnóstico — mostra as chaves da mensagem pra entender o formato
+      const msgKeys = msgContent ? Object.keys(msgContent) : [];
+      if (msgKeys.length > 0 && !msgContent?.conversation && !msgContent?.extendedTextMessage) {
+        console.log('🔍 Tipo de msg:', msgKeys.join(', '), '| ID:', msg.key?.id);
+      }
       if (msgContent?.conversation) {
         content = msgContent.conversation;
       } else if (msgContent?.extendedTextMessage?.text) {
