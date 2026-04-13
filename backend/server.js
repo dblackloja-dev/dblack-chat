@@ -120,11 +120,12 @@ const msgQueue = new MessageQueue();
 // ─── Auth Middleware ───
 const auth = (req, res, next) => {
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token) return res.status(401).json({ error: 'Token necessário' });
+  if (!token) { console.log('⚠️ 401: Token ausente em', req.method, req.path); return res.status(401).json({ error: 'Token necessário' }); }
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch {
+    console.log('⚠️ 401: Token inválido em', req.method, req.path);
     res.status(401).json({ error: 'Token inválido' });
   }
 };
