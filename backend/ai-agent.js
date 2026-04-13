@@ -206,6 +206,7 @@ async function generateResponse(conversationId, customerMessage, customerName, m
         messages: cleaned,
       }),
     });
+    if (!apiRes.ok) throw new Error(`API Anthropic retornou ${apiRes.status}: ${apiRes.statusText}`);
     const response = await apiRes.json();
     if (response.error) throw new Error(JSON.stringify(response.error));
     const responseTime = Date.now() - startTime;

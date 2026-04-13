@@ -1079,11 +1079,11 @@ app.post('/api/erp/sales', auth, async (req, res) => {
     if (customer_phone && wa.connected) {
       try {
         const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\nObrigado pela compra! 🖤`;
-        await wa.sendImage(customer_phone, receiptBuffer, caption);
+        const cupomResult = await wa.sendImage(customer_phone, receiptBuffer, caption);
 
         // Registra no chat (salva imagem no banco para exibição no painel)
         if (conv) {
-          const msgId = genId();
+          const msgId = cupomResult?._waId || genId();
           const mediaId = 'img_' + msgId;
           const base64 = receiptBuffer.toString('base64');
           await queryRun(

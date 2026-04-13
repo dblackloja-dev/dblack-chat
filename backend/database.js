@@ -146,6 +146,8 @@ async function initDB() {
   try { await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_to TEXT"); } catch {}
   try { await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS ai_handled BOOLEAN DEFAULT false"); } catch {}
   try { await queryRun("ALTER TABLE messages ADD COLUMN IF NOT EXISTS ack INTEGER DEFAULT 0"); } catch {}
+  try { await queryRun("ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS image_data TEXT"); } catch {}
+  try { await queryRun("ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS image_mime TEXT"); } catch {}
 
   // Insere respostas rápidas padrão se tabela vazia
   const qrCount = await queryOne("SELECT COUNT(*) as c FROM quick_replies");
