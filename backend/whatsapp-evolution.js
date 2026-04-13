@@ -341,14 +341,52 @@ class WhatsAppEvolution extends EventEmitter {
       } else if (msgContent?.stickerMessage) {
         content = '🏷️ Figurinha';
         mediaType = 'sticker';
-      } else if (msgContent?.contactMessage) {
+      } else if (msgContent?.contactMessage || msgContent?.contactsArrayMessage) {
         content = '👤 Contato';
         mediaType = 'contact';
-      } else if (msgContent?.locationMessage) {
+      } else if (msgContent?.locationMessage || msgContent?.liveLocationMessage) {
         content = '📍 Localização';
         mediaType = 'location';
+      } else if (msgContent?.reactionMessage) {
+        // Reação a mensagem — ignora (não é mensagem real)
+        return;
+      } else if (msgContent?.protocolMessage || msgContent?.senderKeyDistributionMessage) {
+        // Mensagem de protocolo interno — ignora
+        return;
+      } else if (msgContent?.viewOnceMessage || msgContent?.viewOnceMessageV2) {
+        // "Visualização única" — tenta extrair o conteúdo interno
+        const inner = msgContent.viewOnceMessage?.message || msgContent.viewOnceMessageV2?.message;
+        if (inner?.imageMessage) {
+          content = inner.imageMessage.caption || '📷 Foto (visualização única)';
+          mediaType = 'image';
+          mediaUrl = await this.downloadMedia(msg.key?.id);
+        } else if (inner?.videoMessage) {
+          content = '🎥 Vídeo (visualização única)';
+          mediaType = 'video';
+        } else if (inner?.audioMessage) {
+          content = '🎵 Áudio (visualização única)';
+          mediaType = 'audio';
+        } else {
+          content = '👁️ Mensagem de visualização única';
+        }
+      } else if (msgContent?.listResponseMessage) {
+        content = msgContent.listResponseMessage.title || msgContent.listResponseMessage.singleSelectReply?.selectedRowId || '📋 Resposta de lista';
+      } else if (msgContent?.buttonsResponseMessage) {
+        content = msgContent.buttonsResponseMessage.selectedDisplayText || '🔘 Resposta de botão';
+      } else if (msgContent?.templateButtonReplyMessage) {
+        content = msgContent.templateButtonReplyMessage.selectedDisplayText || '🔘 Resposta de botão';
+      } else if (msgContent?.editedMessage) {
+        content = msgContent.editedMessage?.message?.conversation || msgContent.editedMessage?.message?.extendedTextMessage?.text || '✏️ Mensagem editada';
+      } else if (msgContent?.pollCreationMessage || msgContent?.pollCreationMessageV3) {
+        content = '📊 Enquete';
+      } else if (msgContent?.pollUpdateMessage) {
+        // Voto em enquete — ignora
+        return;
       } else {
-        content = '[Mensagem não suportada]';
+        // Tipo desconhecido — loga para adicionar suporte depois
+        const tipos = msgContent ? Object.keys(msgContent).filter(k => k !== 'messageContextInfo') : [];
+        console.log('⚠️ Tipo de msg não suportado:', tipos.join(', '), '| De:', phone);
+        content = tipos.length > 0 ? `[${tipos[0].replace('Message', '')}]` : '[Mensagem]';
       }
 
       this.emit('message', {
