@@ -192,7 +192,10 @@ class WhatsAppEvolution extends EventEmitter {
     await this.sendPresence(phone, 'composing');
     await this.humanDelay();
     this.trackSend();
-    return this.api('POST', 'message/sendText', { number, text });
+    const result = await this.api('POST', 'message/sendText', { number, text });
+    // Retorna o ID do WhatsApp para rastreamento de entrega/leitura
+    result._waId = result?.key?.id || null;
+    return result;
   }
 
   async sendImage(phone, imageBuffer, caption = '') {
@@ -202,9 +205,11 @@ class WhatsAppEvolution extends EventEmitter {
     await this.sendPresence(phone, 'composing');
     await this.humanDelay(true);
     this.trackSend();
-    return this.api('POST', 'message/sendMedia', {
+    const result = await this.api('POST', 'message/sendMedia', {
       number, mediatype: 'image', mimetype: 'image/jpeg', caption, media: base64, fileName: 'imagem.jpg',
     });
+    result._waId = result?.key?.id || null;
+    return result;
   }
 
   async sendAudio(phone, audioBuffer) {
@@ -214,7 +219,9 @@ class WhatsAppEvolution extends EventEmitter {
     await this.sendPresence(phone, 'recording');
     await this.humanDelay(true);
     this.trackSend();
-    return this.api('POST', 'message/sendWhatsAppAudio', { number, audio: base64 });
+    const result = await this.api('POST', 'message/sendWhatsAppAudio', { number, audio: base64 });
+    result._waId = result?.key?.id || null;
+    return result;
   }
 
   async sendDocument(phone, buffer, fileName, mimetype) {
@@ -224,9 +231,11 @@ class WhatsAppEvolution extends EventEmitter {
     await this.sendPresence(phone, 'composing');
     await this.humanDelay(true);
     this.trackSend();
-    return this.api('POST', 'message/sendMedia', {
+    const result = await this.api('POST', 'message/sendMedia', {
       number, mediatype: 'document', mimetype: mimetype || 'application/octet-stream', media: base64, fileName,
     });
+    result._waId = result?.key?.id || null;
+    return result;
   }
 
   // Processa webhook da Evolution

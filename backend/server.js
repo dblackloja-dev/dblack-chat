@@ -251,9 +251,9 @@ wa.on('message', (msg) => {
         if (wa.connected && greetingText) {
           try {
             const greeting = greetingText.replace('{nome}', msg.pushName || 'cliente');
-            await wa.sendMessage(msg.phone, greeting);
+            const greetResult = await wa.sendMessage(msg.phone, greeting);
             // Salva a saudação no histórico
-            const greetId = genId();
+            const greetId = greetResult?._waId || genId();
             await queryRun(
               "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
               [greetId, convId, 'D\'Black Bot', greeting]
@@ -292,10 +292,10 @@ wa.on('message', (msg) => {
             const aiResponse = await aiAgent.generateResponse(conv.id, msg.content, msg.pushName, msg.mediaType);
             if (aiResponse.text) {
               // Envia resposta via WhatsApp
-              await wa.sendMessage(msg.phone, aiResponse.text);
+              const aiWaResult = await wa.sendMessage(msg.phone, aiResponse.text);
 
-              // Salva no banco
-              const aiMsgId = genId();
+              // Salva no banco com ID do WhatsApp para rastrear entrega/leitura
+              const aiMsgId = aiWaResult?._waId || genId();
               await queryRun(
                 "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
                 [aiMsgId, conv.id, 'Lê (IA)', aiResponse.text]
@@ -473,12 +473,12 @@ app.post('/api/messages/send', auth, async (req, res) => {
 
     // Envia via WhatsApp com nome do atendente
     const waText = `*${req.user.name}:*\n${content}`;
-    await wa.sendMessage(conv.phone, waText);
+    const waResult = await wa.sendMessage(conv.phone, waText);
 
-    // Salva no banco
-    const msgId = genId();
+    // Usa o ID do WhatsApp para rastrear entrega/leitura (se disponível)
+    const msgId = waResult?._waId || genId();
     await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW()) ON CONFLICT (id) DO NOTHING",
       [msgId, conversation_id, req.user.name, content]
     );
 
@@ -503,10 +503,10 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
     if (!req.file) return res.status(400).json({ error: 'Imagem não enviada' });
 
     // Envia via WhatsApp
-    await wa.sendImage(conv.phone, req.file.buffer, caption || '');
+    const waResult = await wa.sendImage(conv.phone, req.file.buffer, caption || '');
 
     // Salva a imagem no banco para exibição no painel
-    const msgId = genId();
+    const msgId = waResult?._waId || genId();
     const mediaId = 'img_' + msgId;
     const base64 = req.file.buffer.toString('base64');
     const mime = req.file.mimetype || 'image/jpeg';
@@ -546,9 +546,9 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, mime, req.file.buffer.toString('base64')]);
 
     // Envia via WhatsApp (Evolution API)
-    await wa.sendDocument(conv.phone, req.file.buffer, fileName, mime);
+    const waResultDoc = await wa.sendDocument(conv.phone, req.file.buffer, fileName, mime);
 
-    const msgId = genId();
+    const msgId = waResultDoc?._waId || genId();
     const displayText = `📎 ${fileName}`;
     const fileUrl = `/media/${mediaId}`;
     await queryRun(
@@ -576,9 +576,9 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/ogg', req.file.buffer.toString('base64')]);
 
     // Envia via Evolution (sendWhatsAppAudio converte pra OGG Opus automaticamente)
-    await wa.sendAudio(conv.phone, req.file.buffer);
+    const waResultAud = await wa.sendAudio(conv.phone, req.file.buffer);
 
-    const msgId = genId();
+    const msgId = waResultAud?._waId || genId();
     const audioUrl = `/media/${mediaId}`;
     await queryRun(
       "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'audio', $5, 1, NOW())",
