@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import api from './api';
+import api, { mediaUrl } from './api';
 import SalesPanel from './SalesPanel';
 import Dashboard from './modules/Dashboard';
 import Contacts from './modules/Contacts';
@@ -650,7 +650,7 @@ export default function App() {
               <button style={iconBtn} onClick={() => setSpyConv(null)}>✕</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
-              {spyMsgs.map(msg => <MessageBubble key={msg.id} msg={msg} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+              {spyMsgs.map(msg => <MessageBubble key={msg.id} msg={msg} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
             </div>
             <div style={{ padding: '10px 16px', flexShrink: 0, background: 'rgba(0,168,132,.04)', textAlign: 'center', fontSize: 13, color: W.green }}>
               Aceite o atendimento para responder
@@ -708,7 +708,7 @@ export default function App() {
 
               {/* Messages */}
               <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
-                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -906,13 +906,14 @@ function ConvItem({ conv, active, onClick, finished }) {
   );
 }
 
-function MessageBubble({ msg, onImageClick, onDelete }) {
+function MessageBubble({ msg, onImageClick, onDelete, isAdmin }) {
   const isMe = msg.from_me;
   const [showMenu, setShowMenu] = useState(false);
   const isDeleted = msg.content === '🚫 Mensagem apagada';
+  const canDelete = isAdmin || isMe;
   return (
     <div style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 2 }}
-      onMouseEnter={() => isMe && !isDeleted && setShowMenu(true)} onMouseLeave={() => setShowMenu(false)}>
+      onMouseEnter={() => canDelete && !isDeleted && setShowMenu(true)} onMouseLeave={() => setShowMenu(false)}>
       <div style={{
         maxWidth: '80%', padding: '6px 7px 8px 9px', borderRadius: isMe ? '7.5px 7.5px 0 7.5px' : '7.5px 7.5px 7.5px 0',
         background: isDeleted ? 'rgba(150,150,150,.1)' : (isMe ? W.bgMsgMe : W.bgMsg),
@@ -927,14 +928,14 @@ function MessageBubble({ msg, onImageClick, onDelete }) {
         {!isMe && <div style={{ fontSize: 12.8, fontWeight: 700, color: '#1fa855', marginBottom: 2 }}>{msg.sender}</div>}
         {msg.media_type === 'audio' && (msg.content?.startsWith('/media') || msg.content?.startsWith('/uploads') || msg.media_url) ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 240 }}>
-            <AudioPlayer src={msg.media_url || msg.content} />
+            <AudioPlayer src={mediaUrl(msg.media_url || msg.content)} />
           </div>
         ) : msg.media_type === 'image' ? (
           <div>
             {(msg.media_url || msg.content?.startsWith('/media/') || msg.content?.startsWith('http')) && (
-              <img src={msg.media_url || msg.content.split('|')[0]} alt=""
+              <img src={mediaUrl(msg.media_url || msg.content.split('|')[0])} alt=""
                 style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4, cursor: 'pointer' }}
-                onClick={() => onImageClick?.(msg.media_url || msg.content.split('|')[0])}
+                onClick={() => onImageClick?.(mediaUrl(msg.media_url || msg.content.split('|')[0]))}
                 onError={e => { e.target.style.display = 'none'; }} />
             )}
             <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content?.includes('|') ? msg.content.split('|')[1] : (msg.content?.startsWith('http') || msg.content?.startsWith('/') ? '' : msg.content)}</div>
@@ -947,7 +948,7 @@ function MessageBubble({ msg, onImageClick, onDelete }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#111b21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{msg.content?.replace('📄 ', '') || 'Documento'}</div>
               {msg.media_url ? (
-                <a href={msg.media_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#1eba8a', textDecoration: 'none' }}>Abrir arquivo</a>
+                <a href={mediaUrl(msg.media_url)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#1eba8a', textDecoration: 'none' }}>Abrir arquivo</a>
               ) : (
                 <span style={{ fontSize: 12, color: '#667781' }}>Documento recebido</span>
               )}

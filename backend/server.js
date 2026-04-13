@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { queryAll, queryOne, queryRun, initDB } = require('./database');
 // const WhatsAppClient = require('./whatsapp'); // Baileys (desativado)
 const WhatsAppEvolution = require('./whatsapp-evolution');
@@ -17,24 +19,56 @@ const erp = require('./erp');
 const aiAgent = require('./ai-agent');
 require('dotenv').config();
 
+// Valida que JWT_SECRET foi definido no .env (nunca usar fallback hardcoded)
+if (!process.env.JWT_SECRET) {
+  console.error('❌ ERRO FATAL: JWT_SECRET não definido no .env! O servidor não vai iniciar sem isso.');
+  process.exit(1);
+}
+
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3002;
-const JWT_SECRET = process.env.JWT_SECRET || 'dblack_chat_secret_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
 
-app.use(cors());
+// Headers de segurança (CSP, X-Frame-Options, etc.)
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+
+// CORS restrito — só aceita do frontend e do Railway
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3002').split(',').map(o => o.trim());
+app.use(cors({
+  origin: (origin, cb) => {
+    // Permite requests sem origin (mobile, curl, servidor-a-servidor)
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    console.log('⛔ CORS bloqueou origem:', origin);
+    cb(new Error('Origem não permitida'));
+  },
+  credentials: true,
+}));
+
+// Rate limit global — máximo 100 requests por minuto por IP
+const globalLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, message: { error: 'Muitas requisições. Aguarde um momento.' } });
+app.use(globalLimiter);
+
+// Rate limit específico para login — máximo 5 tentativas por minuto por IP
+const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: 'Muitas tentativas de login. Aguarde 1 minuto.' } });
+
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Serve mídia salva no banco (pra funcionar no Railway sem disco persistente)
+// Serve mídia salva no banco — protegido com token JWT (via header ou query string)
 app.get('/media/:id', async (req, res) => {
   try {
+    // Aceita token via header Authorization OU via query string ?token=xxx (para <img src>)
+    const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+    if (!token) return res.status(401).send('Token necessário');
+    try { jwt.verify(token, JWT_SECRET); } catch { return res.status(401).send('Token inválido'); }
+
     const file = await queryOne("SELECT mime_type, data FROM media_files WHERE id = $1", [req.params.id]);
     if (!file) return res.status(404).send('Not found');
     const buffer = Buffer.from(file.data, 'base64');
     res.set('Content-Type', file.mime_type);
     res.set('Content-Length', buffer.length);
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'private, max-age=3600');
     res.send(buffer);
   } catch (e) { res.status(500).send('Error'); }
 });
@@ -140,8 +174,14 @@ const wa = new WhatsAppEvolution();
 let currentQR = null;
 let currentPairingCode = null;
 
-// Webhook da Evolution API
+// Webhook da Evolution API — protegido com chave secreta
 app.post('/api/webhook/evolution', async (req, res) => {
+  // Valida que o request veio da Evolution (apikey no header ou query)
+  const webhookKey = req.headers['apikey'] || req.query.apikey;
+  if (!webhookKey || webhookKey !== process.env.EVOLUTION_KEY) {
+    console.log('⛔ Webhook rejeitado — chave inválida. IP:', req.ip);
+    return res.status(403).json({ error: 'Não autorizado' });
+  }
   res.json({ ok: true }); // responde rápido pra Evolution não dar timeout
   try {
     await wa.processWebhook(req.body);
@@ -294,9 +334,10 @@ wa.on('message', (msg) => {
 // ═══════════════════════════════════
 // ═══  AUTH ROUTES                ═══
 // ═══════════════════════════════════
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email e senha são obrigatórios' });
     // Autentica no banco do ERP
     const user = await erp.findUser(email);
     if (!user) return res.status(401).json({ error: 'Usuário não encontrado' });
@@ -420,6 +461,7 @@ app.post('/api/conversations/:conversationId/mark-unread', auth, async (req, res
 app.post('/api/messages/send', auth, async (req, res) => {
   try {
     const { conversation_id, content } = req.body;
+    if (!conversation_id || !content || !content.trim()) return res.status(400).json({ error: 'Conversa e conteúdo são obrigatórios' });
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
 
@@ -557,7 +599,8 @@ app.delete('/api/messages/:id', auth, async (req, res) => {
   try {
     const msg = await queryOne("SELECT * FROM messages WHERE id = $1", [req.params.id]);
     if (!msg) return res.status(404).json({ error: 'Mensagem não encontrada' });
-    if (!msg.from_me) return res.status(403).json({ error: 'Só pode apagar mensagens enviadas' });
+    // Admin pode apagar qualquer mensagem, demais só as enviadas
+    if (!msg.from_me && req.user.role !== 'admin') return res.status(403).json({ error: 'Só pode apagar mensagens enviadas' });
 
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [msg.conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });

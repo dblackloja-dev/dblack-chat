@@ -2,9 +2,14 @@
 const EventEmitter = require('events');
 require('dotenv').config();
 
-const EVOLUTION_URL = process.env.EVOLUTION_URL || 'https://evolution-api-production-fd89.up.railway.app';
-const EVOLUTION_KEY = process.env.EVOLUTION_KEY || 'c5796614004d61049c43a173bfbb0f18dafda837c6b3447354b6958bca68175c';
+// Variáveis obrigatórias — NUNCA hardcodar chaves no código
+const EVOLUTION_URL = process.env.EVOLUTION_URL;
+const EVOLUTION_KEY = process.env.EVOLUTION_KEY;
 const INSTANCE = process.env.EVOLUTION_INSTANCE || 'dblack-chat';
+
+if (!EVOLUTION_URL || !EVOLUTION_KEY) {
+  console.error('❌ ERRO: EVOLUTION_URL e EVOLUTION_KEY devem estar no .env!');
+}
 
 class WhatsAppEvolution extends EventEmitter {
   constructor() {
@@ -17,6 +22,37 @@ class WhatsAppEvolution extends EventEmitter {
     this.msgCount = { hour: 0, day: 0, hourReset: Date.now(), dayReset: Date.now() };
     this.MSG_LIMIT_HOUR = 30;   // máximo 30 msgs por hora
     this.MSG_LIMIT_DAY = 200;   // máximo 200 msgs por dia
+
+    // Restaura contadores do banco ao iniciar (evita reset ao reiniciar servidor)
+    this.restoreRateLimits();
+  }
+
+  // Restaura contadores de rate limit do banco
+  async restoreRateLimits() {
+    try {
+      const { queryOne, queryRun } = require('./database');
+      await queryRun("CREATE TABLE IF NOT EXISTS wa_rate_limits (key TEXT PRIMARY KEY, value INTEGER NOT NULL, updated_at TIMESTAMP DEFAULT NOW())");
+      const hourRow = await queryOne("SELECT value, updated_at FROM wa_rate_limits WHERE key = 'msg_hour'");
+      const dayRow = await queryOne("SELECT value, updated_at FROM wa_rate_limits WHERE key = 'msg_day'");
+      if (hourRow) {
+        const elapsed = Date.now() - new Date(hourRow.updated_at).getTime();
+        if (elapsed < 3600000) { this.msgCount.hour = hourRow.value; this.msgCount.hourReset = Date.now() - elapsed; }
+      }
+      if (dayRow) {
+        const elapsed = Date.now() - new Date(dayRow.updated_at).getTime();
+        if (elapsed < 86400000) { this.msgCount.day = dayRow.value; this.msgCount.dayReset = Date.now() - elapsed; }
+      }
+      console.log(`📊 Rate limit restaurado: ${this.msgCount.hour}/h | ${this.msgCount.day}/dia`);
+    } catch (e) { console.error('Erro ao restaurar rate limits:', e.message); }
+  }
+
+  // Salva contadores no banco
+  async saveRateLimits() {
+    try {
+      const { queryRun } = require('./database');
+      await queryRun("INSERT INTO wa_rate_limits (key, value, updated_at) VALUES ('msg_hour', $1, NOW()) ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()", [this.msgCount.hour]);
+      await queryRun("INSERT INTO wa_rate_limits (key, value, updated_at) VALUES ('msg_day', $1, NOW()) ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()", [this.msgCount.day]);
+    } catch {}
   }
 
   // Verifica se pode enviar (rate limit)
@@ -29,16 +65,30 @@ class WhatsAppEvolution extends EventEmitter {
     return true;
   }
 
-  // Registra envio
+  // Registra envio e persiste no banco
   trackSend() {
     this.msgCount.hour++;
     this.msgCount.day++;
     console.log(`📊 Msgs: ${this.msgCount.hour}/h | ${this.msgCount.day}/dia`);
+    this.saveRateLimits();
   }
 
-  // Delay humanizado (2-5 segundos)
-  async humanDelay() {
-    const delay = 2000 + Math.random() * 3000;
+  // Delay humanizado — inteligente: curto se enviou recente (ex: várias fotos), normal se não
+  async humanDelay(isMedia = false) {
+    const now = Date.now();
+    const timeSinceLast = now - (this.lastSendTime || 0);
+    let delay;
+    if (timeSinceLast < 10000 && isMedia) {
+      // Enviou algo há menos de 10s e é mídia = envio em lote, delay curto (300-800ms)
+      delay = 300 + Math.random() * 500;
+    } else if (timeSinceLast < 10000) {
+      // Enviou texto recente = delay médio (1-2s)
+      delay = 1000 + Math.random() * 1000;
+    } else {
+      // Primeira msg ou faz tempo = delay normal (2-4s)
+      delay = 2000 + Math.random() * 2000;
+    }
+    this.lastSendTime = now;
     await new Promise(r => setTimeout(r, delay));
   }
 
@@ -150,7 +200,7 @@ class WhatsAppEvolution extends EventEmitter {
     const number = phone.replace(/\D/g, '');
     const base64 = imageBuffer.toString('base64');
     await this.sendPresence(phone, 'composing');
-    await this.humanDelay();
+    await this.humanDelay(true);
     this.trackSend();
     return this.api('POST', 'message/sendMedia', {
       number, mediatype: 'image', mimetype: 'image/jpeg', caption, media: base64, fileName: 'imagem.jpg',
@@ -162,7 +212,7 @@ class WhatsAppEvolution extends EventEmitter {
     const number = phone.replace(/\D/g, '');
     const base64 = audioBuffer.toString('base64');
     await this.sendPresence(phone, 'recording');
-    await this.humanDelay();
+    await this.humanDelay(true);
     this.trackSend();
     return this.api('POST', 'message/sendWhatsAppAudio', { number, audio: base64 });
   }
@@ -172,7 +222,7 @@ class WhatsAppEvolution extends EventEmitter {
     const number = phone.replace(/\D/g, '');
     const base64 = buffer.toString('base64');
     await this.sendPresence(phone, 'composing');
-    await this.humanDelay();
+    await this.humanDelay(true);
     this.trackSend();
     return this.api('POST', 'message/sendMedia', {
       number, mediatype: 'document', mimetype: mimetype || 'application/octet-stream', media: base64, fileName,

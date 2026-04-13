@@ -21,6 +21,14 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+// Monta URL de mídia com token de autenticação (para <img>, <audio>, <a> que precisam acessar /media/)
+function mediaUrl(url) {
+  if (!url) return url;
+  if (!url.startsWith('/media/')) return url;
+  const token = getToken();
+  return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+}
+
 const api = {
   // Auth
   login: async (email, password) => {
@@ -170,4 +178,5 @@ const api = {
   createSale: (data) => request('/erp/sales', { method: 'POST', body: data }),
 };
 
+export { mediaUrl };
 export default api;
