@@ -177,24 +177,16 @@ const wa = new WhatsAppEvolution();
 let currentQR = null;
 let currentPairingCode = null;
 
-// Webhook da Evolution API — protegido com chave secreta
-// A Evolution pode enviar a apikey no header ou via query string na URL do webhook
-// Configure o webhook da Evolution com: https://seu-dominio/api/webhook/evolution?apikey=SUA_CHAVE
+// Webhook da Evolution API — protegido com chave secreta (opcional)
+// Configure WEBHOOK_SECRET no .env para ativar. Na URL do webhook da Evolution, adicione ?secret=SUA_CHAVE
 app.post('/api/webhook/evolution', async (req, res) => {
-  const webhookKey = req.headers['apikey'] || req.query.apikey || req.body?.apikey;
-  const expectedKey = process.env.EVOLUTION_KEY || process.env.WEBHOOK_SECRET;
-  if (expectedKey && webhookKey && webhookKey === expectedKey) {
-    // Chave válida — processa
-  } else if (expectedKey && !webhookKey) {
-    // Sem chave mas tem expected — loga aviso mas processa (compatibilidade com Evolution que não envia apikey)
-    // Para bloquear, configure WEBHOOK_STRICT=true no .env
-    if (process.env.WEBHOOK_STRICT === 'true') {
-      console.log('⛔ Webhook rejeitado — chave ausente. IP:', req.ip);
+  const webhookSecret = process.env.WEBHOOK_SECRET;
+  if (webhookSecret) {
+    const received = req.headers['x-webhook-secret'] || req.query.secret;
+    if (received !== webhookSecret) {
+      console.log('⛔ Webhook rejeitado — chave inválida. IP:', req.ip);
       return res.status(403).json({ error: 'Não autorizado' });
     }
-  } else if (expectedKey && webhookKey !== expectedKey) {
-    console.log('⛔ Webhook rejeitado — chave inválida. IP:', req.ip);
-    return res.status(403).json({ error: 'Não autorizado' });
   }
   res.json({ ok: true }); // responde rápido pra Evolution não dar timeout
   try {
