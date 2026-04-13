@@ -255,7 +255,7 @@ wa.on('message', (msg) => {
             // Salva a saudação no histórico
             const greetId = genId();
             await queryRun(
-              "INSERT INTO messages (id, conversation_id, from_me, sender, content, timestamp) VALUES ($1, $2, true, $3, $4, NOW())",
+              "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
               [greetId, convId, 'D\'Black Bot', greeting]
             );
             console.log(`👋 Saudação enviada para ${msg.pushName || msg.phone}`);
@@ -297,7 +297,7 @@ wa.on('message', (msg) => {
               // Salva no banco
               const aiMsgId = genId();
               await queryRun(
-                "INSERT INTO messages (id, conversation_id, from_me, sender, content, timestamp) VALUES ($1, $2, true, $3, $4, NOW())",
+                "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
                 [aiMsgId, conv.id, 'Lê (IA)', aiResponse.text]
               );
               await queryRun(
@@ -478,7 +478,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
     // Salva no banco
     const msgId = genId();
     await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, timestamp) VALUES ($1, $2, true, $3, $4, NOW())",
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
       [msgId, conversation_id, req.user.name, content]
     );
 
@@ -518,7 +518,7 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
     const mediaUrl = `/media/${mediaId}`;
     const displayText = caption ? `📷 ${caption}` : '📷 Imagem';
     await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, NOW())",
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, 1, NOW())",
       [msgId, conversation_id, req.user.name, mediaUrl + (caption ? `|${caption}` : ''), mediaUrl]
     );
     await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, conversation_id]);
@@ -552,7 +552,7 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
     const displayText = `📎 ${fileName}`;
     const fileUrl = `/media/${mediaId}`;
     await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'document', $5, NOW())",
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'document', $5, 1, NOW())",
       [msgId, conversation_id, req.user.name, displayText, fileUrl]
     );
     await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, conversation_id]);
@@ -581,7 +581,7 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     const msgId = genId();
     const audioUrl = `/media/${mediaId}`;
     await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'audio', $5, NOW())",
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'audio', $5, 1, NOW())",
       [msgId, conversation_id, req.user.name, audioUrl, audioUrl]
     );
     await queryRun("UPDATE conversations SET last_message = '🎵 Áudio', last_message_at = NOW() WHERE id = $1", [conversation_id]);
@@ -1093,7 +1093,7 @@ app.post('/api/erp/sales', auth, async (req, res) => {
           const mediaUrl = `/media/${mediaId}`;
           const displayText = `🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}`;
           await queryRun(
-            "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, NOW())",
+            "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, 1, NOW())",
             [msgId, conv.id, req.user.name, mediaUrl, mediaUrl]
           );
           await queryRun(

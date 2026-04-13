@@ -258,18 +258,32 @@ class WhatsAppEvolution extends EventEmitter {
     }
 
     // Status de entrega das mensagens (enviado/entregue/lido)
-    if (event === 'messages.update') {
+    // Evolution v2 pode enviar como: messages.update, message.update, send.message, messages.set
+    if (event === 'messages.update' || event === 'message.update') {
       const updates = Array.isArray(body.data) ? body.data : [body.data];
       for (const upd of updates) {
-        const msgId = upd?.key?.id || upd?.keyId;
-        const status = upd?.update?.status || upd?.status;
+        const msgId = upd?.key?.id || upd?.keyId || upd?.id;
+        const status = upd?.update?.status || upd?.status || upd?.update?.messageStubType;
         if (msgId && status != null) {
-          // Evolution: 1=enviado, 2=entregue(servidor), 3=entregue(dispositivo), 4=lido
+          // Evolution: 0=erro, 1=pendente, 2=enviado(servidor), 3=entregue(dispositivo), 4=lido, 5=reproduzido
           // Nosso ack: 1=enviado, 2=entregue, 3=lido
-          const ack = status >= 4 ? 3 : status >= 3 ? 2 : status >= 2 ? 2 : 1;
+          let ack;
+          if (status >= 4) ack = 3;       // lido ou reproduzido
+          else if (status >= 3) ack = 2;  // entregue no dispositivo
+          else ack = 1;                    // enviado ao servidor
           this.emit('message_ack', { id: msgId, ack });
-          console.log(`✓ Status msg ${msgId}: ${['','enviado','entregue','lido'][ack]}`);
+          console.log(`✓ Status msg ${msgId}: ${['','enviado','entregue','lido'][ack]} (raw: ${status})`);
         }
+      }
+      return;
+    }
+
+    // Evento de envio confirmado — marca como enviado (ack=1)
+    if (event === 'send.message') {
+      const msgId = body.data?.key?.id;
+      if (msgId) {
+        this.emit('message_ack', { id: msgId, ack: 1 });
+        console.log(`✓ Msg enviada confirmada: ${msgId}`);
       }
       return;
     }
