@@ -1115,6 +1115,8 @@ function generateReceiptImage(sale, sellerName, customerName) {
   const W = 420;
   const pad = 24;
   const lh = 24;
+  // Fonte que funciona em Linux (Railway) e Windows
+  const F = 'DejaVu Sans, Arial, sans-serif';
 
   // Calcula altura
   const itemCount = sale.items.length;
@@ -1141,10 +1143,10 @@ function generateReceiptImage(sale, sellerName, customerName) {
 
   // Cabeçalho
   ctx.fillStyle = '#000';
-  ctx.font = 'bold 20px Arial';
+  ctx.font = `bold 20px ${F}`;
   ctx.textAlign = 'center';
   ctx.fillText("D'BLACK STORE", cx, y); y += lh;
-  ctx.font = '11px Arial';
+  ctx.font = `11px ${F}`;
   ctx.fillStyle = '#666';
   ctx.fillText('CUPOM NÃO FISCAL', cx, y); y += 8;
   line();
@@ -1152,7 +1154,7 @@ function generateReceiptImage(sale, sellerName, customerName) {
   // Info
   ctx.textAlign = 'left';
   ctx.fillStyle = '#333';
-  ctx.font = '12px Arial';
+  ctx.font = `12px ${F}`;
   const now = new Date();
   const dataStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   ctx.fillText(`Data: ${dataStr}`, pad, y);
@@ -1172,21 +1174,21 @@ function generateReceiptImage(sale, sellerName, customerName) {
   for (const item of sale.items) {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#000';
-    ctx.font = 'bold 12px Arial';
+    ctx.font = `bold 12px ${F}`;
     ctx.fillText(`${item.quantity}x ${item.name}`, pad, y);
     ctx.textAlign = 'right';
-    ctx.font = 'bold 12px Arial';
+    ctx.font = `bold 12px ${F}`;
     ctx.fillText(`R$ ${(item.price * item.quantity).toFixed(2)}`, r, y); y += 18;
     ctx.textAlign = 'left';
     ctx.fillStyle = '#888';
-    ctx.font = '10px Arial';
+    ctx.font = `10px ${F}`;
     ctx.fillText(`SKU: ${item.sku || '-'}  |  R$ ${item.price.toFixed(2)} cada`, pad + 8, y); y += 22;
   }
   line();
 
   // Subtotal
   ctx.fillStyle = '#333';
-  ctx.font = '13px Arial';
+  ctx.font = `13px ${F}`;
   ctx.textAlign = 'left';
   ctx.fillText('Subtotal:', pad, y);
   ctx.textAlign = 'right';
@@ -1195,7 +1197,7 @@ function generateReceiptImage(sale, sellerName, customerName) {
   // Desconto
   if (sale.discount > 0) {
     ctx.fillStyle = '#CC0000';
-    ctx.font = '13px Arial';
+    ctx.font = `13px ${F}`;
     ctx.textAlign = 'left';
     ctx.fillText('Desconto:', pad, y);
     ctx.textAlign = 'right';
@@ -1204,7 +1206,7 @@ function generateReceiptImage(sale, sellerName, customerName) {
 
   // Total
   ctx.fillStyle = '#000';
-  ctx.font = 'bold 18px Arial';
+  ctx.font = `bold 18px ${F}`;
   ctx.textAlign = 'left';
   ctx.fillText('TOTAL:', pad, y);
   ctx.textAlign = 'right';
@@ -1212,7 +1214,7 @@ function generateReceiptImage(sale, sellerName, customerName) {
 
   // Pagamento
   const payLabels = { pix: 'PIX', dinheiro: 'Dinheiro', credito: 'Cartão Crédito', debito: 'Cartão Débito', crediario: 'Crediário' };
-  ctx.font = '12px Arial';
+  ctx.font = `12px ${F}`;
   ctx.fillStyle = '#333';
   ctx.textAlign = 'left';
   ctx.fillText(`Pagamento: ${payLabels[sale.payment_method] || sale.payment_method}`, pad, y); y += 8;
@@ -1221,10 +1223,10 @@ function generateReceiptImage(sale, sellerName, customerName) {
   // Rodapé
   y += 4;
   ctx.fillStyle = '#000';
-  ctx.font = 'bold 12px Arial';
+  ctx.font = `bold 12px ${F}`;
   ctx.textAlign = 'center';
-  ctx.fillText('Obrigado pela preferência!', cx, y); y += 18;
-  ctx.font = '10px Arial';
+  ctx.fillText('Obrigado pela preferencia!', cx, y); y += 18;
+  ctx.font = `10px ${F}`;
   ctx.fillStyle = '#666';
   ctx.fillText("D'Black Store — @d_blackloja", cx, y);
 
