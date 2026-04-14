@@ -940,6 +940,13 @@ function MessageBubble({ msg, onImageClick, onDelete, isAdmin }) {
             )}
             <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content?.includes('|') ? msg.content.split('|')[1] : (msg.content?.startsWith('http') || msg.content?.startsWith('/') ? '' : msg.content)}</div>
           </div>
+        ) : msg.media_type === 'video' && (msg.media_url || msg.content?.startsWith('/media/')) ? (
+          <div>
+            <video src={mediaUrl(msg.media_url || msg.content.split('|')[0])} controls
+              style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4 }}
+              onError={e => { e.target.style.display = 'none'; }} />
+            <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content?.includes('|') ? msg.content.split('|')[1] : (msg.content?.startsWith('http') || msg.content?.startsWith('/') ? '' : msg.content)}</div>
+          </div>
         ) : msg.media_type === 'document' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
             <div style={{ width: 40, height: 40, borderRadius: 6, background: msg.content?.includes('.pdf') ? '#ea4335' : '#4285f4', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>

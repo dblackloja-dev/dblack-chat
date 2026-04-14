@@ -18,59 +18,22 @@ class WhatsAppEvolution extends EventEmitter {
     this.qrCode = null;
     this.pairingCode = null;
 
-    // Proteções anti-restrição
+    // Contador de mensagens (só para monitoramento, sem bloqueio)
     this.msgCount = { hour: 0, day: 0, hourReset: Date.now(), dayReset: Date.now() };
-    this.MSG_LIMIT_HOUR = 120;  // máximo 120 msgs por hora (2 por minuto)
-    this.MSG_LIMIT_DAY = 800;   // máximo 800 msgs por dia
-
-    // Restaura contadores do banco ao iniciar (evita reset ao reiniciar servidor)
-    this.restoreRateLimits();
   }
 
-  // Restaura contadores de rate limit do banco
-  async restoreRateLimits() {
-    try {
-      const { queryOne, queryRun } = require('./database');
-      await queryRun("CREATE TABLE IF NOT EXISTS wa_rate_limits (key TEXT PRIMARY KEY, value INTEGER NOT NULL, updated_at TIMESTAMP DEFAULT NOW())");
-      const hourRow = await queryOne("SELECT value, updated_at FROM wa_rate_limits WHERE key = 'msg_hour'");
-      const dayRow = await queryOne("SELECT value, updated_at FROM wa_rate_limits WHERE key = 'msg_day'");
-      if (hourRow) {
-        const elapsed = Date.now() - new Date(hourRow.updated_at).getTime();
-        if (elapsed < 3600000) { this.msgCount.hour = hourRow.value; this.msgCount.hourReset = Date.now() - elapsed; }
-      }
-      if (dayRow) {
-        const elapsed = Date.now() - new Date(dayRow.updated_at).getTime();
-        if (elapsed < 86400000) { this.msgCount.day = dayRow.value; this.msgCount.dayReset = Date.now() - elapsed; }
-      }
-      console.log(`📊 Rate limit restaurado: ${this.msgCount.hour}/h | ${this.msgCount.day}/dia`);
-    } catch (e) { console.error('Erro ao restaurar rate limits:', e.message); }
-  }
-
-  // Salva contadores no banco
-  async saveRateLimits() {
-    try {
-      const { queryRun } = require('./database');
-      await queryRun("INSERT INTO wa_rate_limits (key, value, updated_at) VALUES ('msg_hour', $1, NOW()) ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()", [this.msgCount.hour]);
-      await queryRun("INSERT INTO wa_rate_limits (key, value, updated_at) VALUES ('msg_day', $1, NOW()) ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()", [this.msgCount.day]);
-    } catch {}
-  }
-
-  // Verifica se pode enviar (rate limit)
+  // Verifica se pode enviar (sempre permite — sem rate limit)
   canSend() {
     const now = Date.now();
     if (now - this.msgCount.hourReset > 3600000) { this.msgCount.hour = 0; this.msgCount.hourReset = now; }
     if (now - this.msgCount.dayReset > 86400000) { this.msgCount.day = 0; this.msgCount.dayReset = now; }
-    if (this.msgCount.hour >= this.MSG_LIMIT_HOUR) { console.log('⚠️ Limite de msgs/hora atingido'); return false; }
-    if (this.msgCount.day >= this.MSG_LIMIT_DAY) { console.log('⚠️ Limite de msgs/dia atingido'); return false; }
     return true;
   }
 
-  // Registra envio e persiste no banco
+  // Registra envio (só monitoramento)
   trackSend() {
     this.msgCount.hour++;
     this.msgCount.day++;
-    console.log(`📊 Msgs: ${this.msgCount.hour}/h | ${this.msgCount.day}/dia`);
-    this.saveRateLimits();
   }
 
   // Delay humanizado — inteligente: curto se enviou recente (ex: várias fotos), normal se não
@@ -341,6 +304,7 @@ class WhatsAppEvolution extends EventEmitter {
       } else if (msgContent?.videoMessage) {
         content = msgContent.videoMessage.caption || '🎥 Vídeo';
         mediaType = 'video';
+        mediaUrl = await this.downloadMedia(msg.key?.id);
       } else if (msgContent?.audioMessage) {
         content = '🎵 Áudio';
         mediaType = 'audio';
