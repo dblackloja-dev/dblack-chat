@@ -20,8 +20,8 @@ class WhatsAppEvolution extends EventEmitter {
 
     // Proteções anti-restrição
     this.msgCount = { hour: 0, day: 0, hourReset: Date.now(), dayReset: Date.now() };
-    this.MSG_LIMIT_HOUR = 30;   // máximo 30 msgs por hora
-    this.MSG_LIMIT_DAY = 200;   // máximo 200 msgs por dia
+    this.MSG_LIMIT_HOUR = 120;  // máximo 120 msgs por hora (2 por minuto)
+    this.MSG_LIMIT_DAY = 800;   // máximo 800 msgs por dia
 
     // Restaura contadores do banco ao iniciar (evita reset ao reiniciar servidor)
     this.restoreRateLimits();
