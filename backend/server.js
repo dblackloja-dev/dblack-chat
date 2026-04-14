@@ -58,20 +58,16 @@ const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: 
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Serve mídia salva no banco — protegido com token JWT (via header ou query string)
+// Serve mídia salva no banco — protegido por IDs longos e aleatórios (ex: evo_AC71BC721C...)
+// Não exige token JWT para evitar problemas de expiração em <img src> e <audio src>
 app.get('/media/:id', async (req, res) => {
   try {
-    // Aceita token via header Authorization OU via query string ?token=xxx (para <img src>)
-    const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
-    if (!token) return res.status(401).send('Token necessário');
-    try { jwt.verify(token, JWT_SECRET); } catch { return res.status(401).send('Token inválido'); }
-
     const file = await queryOne("SELECT mime_type, data FROM media_files WHERE id = $1", [req.params.id]);
     if (!file) return res.status(404).send('Not found');
     const buffer = Buffer.from(file.data, 'base64');
     res.set('Content-Type', file.mime_type);
     res.set('Content-Length', buffer.length);
-    res.set('Cache-Control', 'private, max-age=3600');
+    res.set('Cache-Control', 'private, max-age=86400');
     res.send(buffer);
   } catch (e) { res.status(500).send('Error'); }
 });
