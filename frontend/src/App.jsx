@@ -353,6 +353,20 @@ export default function App() {
     e.target.value = '';
   };
 
+  // ─── ENVIAR VÍDEO ───
+  const videoInputRef = useRef(null);
+  const [sendingVideo, setSendingVideo] = useState(false);
+
+  const handleVideoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeConv || sendingVideo) return;
+    if (file.size > 64 * 1024 * 1024) { alert('Vídeo muito grande! Máximo 64MB.'); return; }
+    setSendingVideo(true);
+    try { await api.sendVideo(activeConv.id, file, ''); } catch (err) { alert('Erro ao enviar vídeo: ' + err.message); }
+    setSendingVideo(false);
+    if (videoInputRef.current) videoInputRef.current.value = '';
+  };
+
   // ─── ENVIAR ARQUIVO ───
   const fileAttachRef = useRef(null);
   const [sendingFile, setSendingFile] = useState(false);
@@ -746,6 +760,8 @@ export default function App() {
                     <button style={{ ...iconBtn, padding: 6 }} onClick={() => setShowQuickReplies(!showQuickReplies)} title="Respostas rápidas">⚡</button>
                     <button style={{ ...iconBtn, padding: 6, opacity: sendingMedia ? 0.4 : 1 }} onClick={() => !sendingMedia && fileInputRef.current?.click()} title="Enviar imagem">{sendingMedia ? '⏳' : '📷'}</button>
                     <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
+                    <button style={{ ...iconBtn, padding: 6, opacity: sendingVideo ? 0.4 : 1 }} onClick={() => !sendingVideo && videoInputRef.current?.click()} title="Enviar vídeo">{sendingVideo ? '⏳' : '🎥'}</button>
+                    <input ref={videoInputRef} type="file" accept="video/*" style={{ display: 'none' }} onChange={handleVideoUpload} />
                     <button style={{ ...iconBtn, padding: 6, opacity: sendingFile ? 0.4 : 1 }} onClick={() => !sendingFile && fileAttachRef.current?.click()} title="Anexar arquivo">{sendingFile ? '⏳' : '📎'}</button>
                     <input ref={fileAttachRef} type="file" style={{ display: 'none' }} onChange={handleFileAttach} />
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 8px', border: `1px solid ${pendingQuickReply ? '#1eba8a' : W.border}`, position: 'relative' }}>

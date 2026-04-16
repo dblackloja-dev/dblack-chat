@@ -1,3 +1,6 @@
+// Carrega variáveis de ambiente ANTES de qualquer outro módulo
+require('dotenv').config();
+
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
@@ -12,12 +15,13 @@ const { queryAll, queryOne, queryRun, initDB } = require('./database');
 const WhatsAppEvolution = require('./whatsapp-evolution');
 const { createCanvas } = require('@napi-rs/canvas');
 const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const sharp = require('sharp');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024 } });
+const uploadVideo = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 // ffmpeg removido — PTT não funciona no Baileys v7
 const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 const aiAgent = require('./ai-agent');
-require('dotenv').config();
 
 // Valida que JWT_SECRET foi definido no .env (nunca usar fallback hardcoded)
 if (!process.env.JWT_SECRET) {
@@ -490,7 +494,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Enviar imagem (atendente → cliente via WhatsApp)
+// Enviar imagem (atendente → cliente via WhatsApp) — com compressão automática
 app.post('/api/messages/send-image', auth, upload.single('image'), async (req, res) => {
   try {
     const { conversation_id, caption } = req.body;
@@ -498,17 +502,28 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Imagem não enviada' });
 
-    // Envia via WhatsApp
-    const waResult = await wa.sendImage(conv.phone, req.file.buffer, caption || '');
+    // Comprime a imagem: reduz para max 1280px e qualidade 80% (JPEG)
+    let imageBuffer = req.file.buffer;
+    try {
+      imageBuffer = await sharp(req.file.buffer)
+        .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      console.log(`📷 Imagem comprimida: ${Math.round(req.file.buffer.length/1024)}KB → ${Math.round(imageBuffer.length/1024)}KB`);
+    } catch (e) {
+      console.log('⚠️ Compressão falhou, usando original:', e.message);
+    }
 
-    // Salva a imagem no banco para exibição no painel
+    // Envia via WhatsApp (usa o buffer já comprimido)
+    const waResult = await wa.sendImage(conv.phone, imageBuffer, caption || '');
+
+    // Salva no banco (usa o buffer comprimido — menor e mais rápido)
     const msgId = waResult?._waId || genId();
     const mediaId = 'img_' + msgId;
-    const base64 = req.file.buffer.toString('base64');
-    const mime = req.file.mimetype || 'image/jpeg';
+    const base64 = imageBuffer.toString('base64');
     await queryRun(
       "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
-      [mediaId, mime, base64]
+      [mediaId, 'image/jpeg', base64]
     );
 
     const mediaUrl = `/media/${mediaId}`;
@@ -557,6 +572,45 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
     broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Enviar vídeo (atendente → cliente via WhatsApp)
+app.post('/api/messages/send-video', auth, uploadVideo.single('video'), async (req, res) => {
+  try {
+    const { conversation_id, caption } = req.body;
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    if (!req.file) return res.status(400).json({ error: 'Vídeo não enviado' });
+
+    console.log(`🎥 Enviando vídeo: ${Math.round(req.file.buffer.length/1024/1024)}MB | ${req.file.mimetype}`);
+
+    // Envia via WhatsApp
+    const waResult = await wa.sendVideo(conv.phone, req.file.buffer, caption || '');
+
+    // Salva no banco
+    const msgId = waResult?._waId || genId();
+    const mediaId = 'vid_' + msgId;
+    const mime = req.file.mimetype || 'video/mp4';
+    await queryRun(
+      "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+      [mediaId, mime, req.file.buffer.toString('base64')]
+    );
+
+    const mediaUrl = `/media/${mediaId}`;
+    const displayText = caption ? `🎥 ${caption}` : '🎥 Vídeo';
+    await queryRun(
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'video', $5, 1, NOW())",
+      [msgId, conversation_id, req.user.name, mediaUrl + (caption ? `|${caption}` : ''), mediaUrl]
+    );
+    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, conversation_id]);
+
+    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: mediaUrl + (caption ? `|${caption}` : ''), media_type: 'video', media_url: mediaUrl, timestamp: new Date().toISOString() };
+    broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
+    res.json(message);
+  } catch (e) {
+    console.error('❌ Erro ao enviar vídeo:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Enviar áudio PTT (via Evolution API — converte automaticamente)

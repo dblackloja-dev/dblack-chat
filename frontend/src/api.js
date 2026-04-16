@@ -102,6 +102,20 @@ const api = {
     if (!res.ok) throw new Error('Erro ao enviar imagem');
     return res.json();
   },
+  sendVideo: async (conversationId, file, caption) => {
+    const token = getToken();
+    const form = new FormData();
+    form.append('video', file);
+    form.append('conversation_id', conversationId);
+    if (caption) form.append('caption', caption);
+    const res = await fetch(`${BASE}/messages/send-video`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) throw new Error('Erro ao enviar vídeo');
+    return res.json();
+  },
 
   // WhatsApp
   getWhatsAppStatus: () => request('/whatsapp/status'),

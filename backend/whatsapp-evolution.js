@@ -193,6 +193,22 @@ class WhatsAppEvolution extends EventEmitter {
     return result;
   }
 
+  async sendVideo(phone, videoBuffer, caption = '', { isBot = false } = {}) {
+    if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
+    const number = phone.replace(/\D/g, '');
+    const base64 = videoBuffer.toString('base64');
+    if (isBot) {
+      await this.sendPresence(phone, 'composing');
+      await this.humanDelay(true);
+    }
+    this.trackSend();
+    const result = await this.api('POST', 'message/sendMedia', {
+      number, mediatype: 'video', mimetype: 'video/mp4', caption, media: base64, fileName: 'video.mp4',
+    });
+    result._waId = result?.key?.id || null;
+    return result;
+  }
+
   async sendDocument(phone, buffer, fileName, mimetype, { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     const number = phone.replace(/\D/g, '');
