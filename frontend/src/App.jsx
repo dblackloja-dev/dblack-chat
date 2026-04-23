@@ -386,6 +386,7 @@ export default function App() {
   const [sendingAudio, setSendingAudio] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const cancelledRef = useRef(false);
   const recordingTimerRef = useRef(null);
 
   const startRecording = async () => {
@@ -395,9 +396,12 @@ export default function App() {
       const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : 'audio/webm;codecs=opus';
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       audioChunksRef.current = [];
+      cancelledRef.current = false;
       mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
+        // Se foi cancelado, não envia o áudio
+        if (cancelledRef.current) { cancelledRef.current = false; return; }
         const blob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
         if (blob.size > 500) {
           setSendingAudio(true);
@@ -423,6 +427,9 @@ export default function App() {
 
   const cancelRecording = () => {
     if (mediaRecorderRef.current && recording) {
+      // Marca como cancelado ANTES de parar, para o onstop não enviar
+      cancelledRef.current = true;
+      mediaRecorderRef.current.stop();
       mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
       mediaRecorderRef.current = null;
       audioChunksRef.current = [];
@@ -913,7 +920,7 @@ function ConvItem({ conv, active, onClick, finished }) {
           <span style={{ fontSize: 12, color: conv.unread_count > 0 ? W.green : W.txt2, flexShrink: 0, marginLeft: 8 }}>{fmt(conv.last_message_at)}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {conv.status === 'atendendo' && <span style={{ flexShrink: 0 }}>{Icons.check}</span>}
+          {conv.last_message_from_me && <span style={{ flexShrink: 0 }}>{Icons.dblcheck}</span>}
           <span style={{ fontSize: 14, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{conv.last_message}</span>
           {!finished && conv.unread_count > 0 && <span style={{ background: W.green, color: '#fff', borderRadius: 12, padding: '1px 7px', fontSize: 12, fontWeight: 500, flexShrink: 0, marginLeft: 'auto' }}>{conv.unread_count}</span>}
         </div>
@@ -923,7 +930,7 @@ function ConvItem({ conv, active, onClick, finished }) {
 }
 
 function MessageBubble({ msg, onImageClick, onDelete, isAdmin }) {
-  const isMe = msg.from_me;
+  const isMe = msg.from_me === true || msg.from_me === 'true';
   const [showMenu, setShowMenu] = useState(false);
   const isDeleted = msg.content === '🚫 Mensagem apagada';
   const canDelete = isAdmin || isMe;

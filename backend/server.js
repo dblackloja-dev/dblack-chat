@@ -264,7 +264,7 @@ wa.on('message', (msg) => {
       } else {
         // Atualiza conversa existente
         await queryRun(
-          "UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW(), customer_push_name = COALESCE(NULLIF($2, ''), customer_push_name) WHERE id = $3",
+          "UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW(), last_message_from_me = false, customer_push_name = COALESCE(NULLIF($2, ''), customer_push_name) WHERE id = $3",
           [msg.content, msg.pushName || '', conv.id]
         );
         conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
@@ -301,13 +301,13 @@ wa.on('message', (msg) => {
                 [aiMsgId, conv.id, 'Lê (IA)', aiResponse.text]
               );
               await queryRun(
-                "UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2",
+                "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
                 [aiResponse.text, conv.id]
               );
 
               // Notifica atendentes
               broadcast('new_message', {
-                conversation: { ...conv, last_message: aiResponse.text },
+                conversation: { ...conv, last_message: aiResponse.text, last_message_from_me: true },
                 message: { id: aiMsgId, conversation_id: conv.id, from_me: true, sender: 'Lê (IA)', content: aiResponse.text, timestamp: new Date().toISOString() },
               });
 
@@ -318,7 +318,7 @@ wa.on('message', (msg) => {
                 console.log(`🔀 Lê transferindo ${msg.pushName || msg.phone} para atendente humano`);
                 // Mantém como aguardando mas adiciona flag
                 await queryRun(
-                  "UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2",
+                  "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
                   ['🔀 IA transferiu para atendente', conv.id]
                 );
                 broadcast('conversation_updated', { ...conv, last_message: '🔀 IA transferiu para atendente' });
@@ -484,12 +484,12 @@ app.post('/api/messages/send', auth, async (req, res) => {
 
     // Atualiza última mensagem
     await queryRun(
-      "UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2",
+      "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
       [content, conversation_id]
     );
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content, ack: 1, timestamp: new Date().toISOString() };
-    broadcast('new_message', { conversation: { ...conv, last_message: content }, message });
+    broadcast('new_message', { conversation: { ...conv, last_message: content, last_message_from_me: true }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -532,10 +532,10 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
       "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, 1, NOW())",
       [msgId, conversation_id, req.user.name, mediaUrl + (caption ? `|${caption}` : ''), mediaUrl]
     );
-    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, conversation_id]);
+    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", [displayText, conversation_id]);
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: mediaUrl + (caption ? `|${caption}` : ''), media_type: 'image', media_url: mediaUrl, timestamp: new Date().toISOString() };
-    broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
+    broadcast('new_message', { conversation: { ...conv, last_message: displayText, last_message_from_me: true }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -566,10 +566,10 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
       "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'document', $5, 1, NOW())",
       [msgId, conversation_id, req.user.name, displayText, fileUrl]
     );
-    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, conversation_id]);
+    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", [displayText, conversation_id]);
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: displayText, media_type: 'document', media_url: fileUrl, timestamp: new Date().toISOString() };
-    broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
+    broadcast('new_message', { conversation: { ...conv, last_message: displayText, last_message_from_me: true }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -602,10 +602,10 @@ app.post('/api/messages/send-video', auth, uploadVideo.single('video'), async (r
       "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'video', $5, 1, NOW())",
       [msgId, conversation_id, req.user.name, mediaUrl + (caption ? `|${caption}` : ''), mediaUrl]
     );
-    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2", [displayText, conversation_id]);
+    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", [displayText, conversation_id]);
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: mediaUrl + (caption ? `|${caption}` : ''), media_type: 'video', media_url: mediaUrl, timestamp: new Date().toISOString() };
-    broadcast('new_message', { conversation: { ...conv, last_message: displayText }, message });
+    broadcast('new_message', { conversation: { ...conv, last_message: displayText, last_message_from_me: true }, message });
     res.json(message);
   } catch (e) {
     console.error('❌ Erro ao enviar vídeo:', e.message);
@@ -634,10 +634,10 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
       "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'audio', $5, 1, NOW())",
       [msgId, conversation_id, req.user.name, audioUrl, audioUrl]
     );
-    await queryRun("UPDATE conversations SET last_message = '🎵 Áudio', last_message_at = NOW() WHERE id = $1", [conversation_id]);
+    await queryRun("UPDATE conversations SET last_message = '🎵 Áudio', last_message_at = NOW(), last_message_from_me = true WHERE id = $1", [conversation_id]);
 
     const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: audioUrl, media_type: 'audio', media_url: audioUrl, timestamp: new Date().toISOString() };
-    broadcast('new_message', { conversation: { ...conv, last_message: '🎵 Áudio' }, message });
+    broadcast('new_message', { conversation: { ...conv, last_message: '🎵 Áudio', last_message_from_me: true }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1147,11 +1147,11 @@ app.post('/api/erp/sales', auth, async (req, res) => {
             [msgId, conv.id, req.user.name, mediaUrl, mediaUrl]
           );
           await queryRun(
-            "UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2",
+            "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
             [displayText, conv.id]
           );
           broadcast('new_message', {
-            conversation: { ...conv, last_message: displayText },
+            conversation: { ...conv, last_message: displayText, last_message_from_me: true },
             message: { id: msgId, conversation_id: conv.id, from_me: true, sender: req.user.name, content: mediaUrl, media_type: 'image', media_url: mediaUrl, timestamp: new Date().toISOString() },
           });
         }
