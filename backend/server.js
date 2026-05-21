@@ -190,6 +190,11 @@ app.post('/api/webhook/evolution', async (req, res) => {
   }
   res.json({ ok: true }); // responde rápido pra Evolution não dar timeout
   try {
+    // Log temporário para debug de LID
+    if (req.body?.event === 'messages.upsert' && req.body?.data?.key) {
+      const k = req.body.data.key;
+      console.log('🔍 DEBUG key:', JSON.stringify({ remoteJid: k.remoteJid, remoteJidAlt: k.remoteJidAlt, participant: k.participant }));
+    }
     await wa.processWebhook(req.body);
   } catch (e) { console.error('Webhook erro:', e.message); }
 });
