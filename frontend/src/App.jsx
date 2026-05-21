@@ -228,62 +228,113 @@ export default function App() {
     try { setMessages(await api.getMessages(convId)); } catch {}
   }, []);
 
-  // ─── WEBSOCKET ───
+  // ─── WEBSOCKET com reconexão automática ───
   useEffect(() => {
     if (!user) return;
     loadConversations();
     api.getWhatsAppStatus().then(setWaStatus).catch(() => {});
     if (user.role === 'admin') api.getUsers().then(setUsers).catch(() => {});
 
-    const token = api.getToken();
-    const WS_HOST = window.location.hostname === 'localhost'
-      ? `ws://${window.location.host}`
-      : 'wss://dblack-chat-production.up.railway.app';
-    const wsUrl = `${WS_HOST}/ws?token=${token}`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let reconnectDelay = 2000;
+    let reconnectTimer = null;
+    let stopped = false;
 
-    ws.onmessage = (evt) => {
-      try {
-        const { event, data } = JSON.parse(evt.data);
-        if (event === 'new_message') {
-          setConversations(prev => {
-            const exists = prev.find(c => c.id === data.conversation.id);
-            if (exists) return prev.map(c => c.id === data.conversation.id ? { ...c, ...data.conversation } : c);
-            return [data.conversation, ...prev];
-          });
-          setActiveConv(cur => {
-            if (cur?.id === data.conversation.id) setMessages(prev => prev.find(m => m.id === data.message.id) ? prev : [...prev, data.message]);
-            return cur;
-          });
-          setSpyConv(cur => {
-            if (cur?.id === data.conversation.id) setSpyMsgs(prev => prev.find(m => m.id === data.message.id) ? prev : [...prev, data.message]);
-            return cur;
-          });
-          if (!data.message.from_me) {
-            playNotif();
-            if (document.hidden) sendPushNotif(data.message.sender || 'Nova mensagem', data.message.content?.slice(0, 100) || 'Nova mensagem');
+    function connectWs() {
+      if (stopped) return;
+      const token = api.getToken();
+      if (!token) return;
+      const WS_HOST = window.location.hostname === 'localhost'
+        ? `ws://${window.location.host}`
+        : 'wss://dblack-chat-production.up.railway.app';
+      const wsUrl = `${WS_HOST}/ws?token=${token}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        reconnectDelay = 2000; // reset backoff on successful connect
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const { event, data } = JSON.parse(evt.data);
+          if (event === 'new_message') {
+            setConversations(prev => {
+              const exists = prev.find(c => c.id === data.conversation.id);
+              if (exists) return prev.map(c => c.id === data.conversation.id ? { ...c, ...data.conversation } : c);
+              return [data.conversation, ...prev];
+            });
+            setActiveConv(cur => {
+              if (cur?.id === data.conversation.id) setMessages(prev => prev.find(m => m.id === data.message.id) ? prev : [...prev, data.message]);
+              return cur;
+            });
+            setSpyConv(cur => {
+              if (cur?.id === data.conversation.id) setSpyMsgs(prev => prev.find(m => m.id === data.message.id) ? prev : [...prev, data.message]);
+              return cur;
+            });
+            if (!data.message.from_me) {
+              playNotif();
+              if (document.hidden) sendPushNotif(data.message.sender || 'Nova mensagem', data.message.content?.slice(0, 100) || 'Nova mensagem');
+            }
           }
-        }
-        if (event === 'message_deleted') {
-          setMessages(prev => prev.map(m => m.id === data.id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m));
-        }
-        if (event === 'message_ack') {
-          setMessages(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack } : m));
-          setSpyMsgs(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack } : m));
-        }
-        if (event === 'conversation_updated') {
-          setConversations(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c));
-          setActiveConv(cur => cur?.id === data.id ? { ...cur, ...data } : cur);
-        }
-        if (event === 'qr') setWaStatus(prev => ({ ...prev, qr: data.qr, connected: false }));
-        if (event === 'pairing_code') setWaStatus(prev => ({ ...prev, pairingCode: data.code }));
-        if (event === 'wa_status') setWaStatus(prev => ({ ...prev, connected: data.connected, qr: data.connected ? null : prev.qr, pairingCode: data.connected ? null : prev.pairingCode }));
-      } catch {}
+          if (event === 'message_deleted') {
+            setMessages(prev => prev.map(m => m.id === data.id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m));
+          }
+          if (event === 'message_ack') {
+            setMessages(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack } : m));
+            setSpyMsgs(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack } : m));
+          }
+          if (event === 'conversation_updated') {
+            setConversations(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c));
+            setActiveConv(cur => cur?.id === data.id ? { ...cur, ...data } : cur);
+          }
+          if (event === 'qr') setWaStatus(prev => ({ ...prev, qr: data.qr, connected: false }));
+          if (event === 'pairing_code') setWaStatus(prev => ({ ...prev, pairingCode: data.code }));
+          if (event === 'wa_status') setWaStatus(prev => ({ ...prev, connected: data.connected, qr: data.connected ? null : prev.qr, pairingCode: data.connected ? null : prev.pairingCode }));
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        if (stopped) return;
+        loadConversations();
+        // Reconecta com backoff exponencial (2s, 4s, 8s, máx 30s)
+        reconnectTimer = setTimeout(() => {
+          connectWs();
+        }, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+      };
+
+      ws.onerror = () => {}; // onclose será chamado em seguida
+    }
+
+    connectWs();
+
+    // Reconecta imediatamente quando a aba volta ao foco ou rede volta
+    const onVisibilityChange = () => {
+      if (!document.hidden && wsRef.current?.readyState !== WebSocket.OPEN) {
+        clearTimeout(reconnectTimer);
+        reconnectDelay = 2000;
+        connectWs();
+      }
     };
-    ws.onclose = () => { setTimeout(() => { if (user) loadConversations(); }, 3000); };
+    const onOnline = () => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        clearTimeout(reconnectTimer);
+        reconnectDelay = 2000;
+        connectWs();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('online', onOnline);
+
     const interval = setInterval(loadConversations, 15000);
-    return () => { ws.close(); clearInterval(interval); };
+    return () => {
+      stopped = true;
+      clearTimeout(reconnectTimer);
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('online', onOnline);
+      wsRef.current?.close();
+    };
   }, [user?.id]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
