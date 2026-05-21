@@ -59,7 +59,7 @@ app.use(globalLimiter);
 // Rate limit específico para login — máximo 5 tentativas por minuto por IP
 const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: 'Muitas tentativas de login. Aguarde 1 minuto.' } });
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Serve mídia salva no banco — protegido por IDs longos e aleatórios (ex: evo_AC71BC721C...)
@@ -666,7 +666,7 @@ app.delete('/api/messages/:id', auth, async (req, res) => {
       await wa.api('DELETE', 'chat/deleteMessageForEveryone', {
         id: req.params.id,
         fromMe: true,
-        remoteJid: conv.phone + '@s.whatsapp.net',
+        remoteJid: conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net',
       });
     } catch (e) { console.log('Erro ao apagar no WhatsApp:', e.message); }
 

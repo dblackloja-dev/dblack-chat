@@ -32,9 +32,9 @@ npm run dev
 
 Acesse http://localhost:5174
 
-### Login padrão
-- **E-mail:** admin@dblack.com
-- **Senha:** admin123
+### Login
+- Credenciais configuradas no banco de dados
+- **Nunca use senhas fracas em produção!**
 
 ## Deploy
 

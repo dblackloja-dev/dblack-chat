@@ -55,19 +55,27 @@ class WhatsAppEvolution extends EventEmitter {
     await new Promise(r => setTimeout(r, delay));
   }
 
+  // Retorna os campos corretos para envio: { number } ou { remoteJid } dependendo do formato
+  _sendTarget(phone) {
+    if (phone.endsWith('@lid')) {
+      return { remoteJid: phone };
+    }
+    return { number: phone.replace(/\D/g, '') };
+  }
+
   // Simula "digitando..." antes de enviar
   async sendPresence(phone, type = 'composing') {
     try {
-      const number = phone.replace(/\D/g, '');
-      await this.api('POST', 'chat/sendPresence', { number, presence: type });
+      await this.api('POST', 'chat/sendPresence', { ...this._sendTarget(phone), presence: type });
     } catch {}
   }
 
   // Marca mensagem como lida (read receipt)
   async markAsRead(msgId, phone) {
     try {
+      const remoteJid = phone.includes('@') ? phone : phone + '@s.whatsapp.net';
       await this.api('POST', 'chat/markMessageAsRead', {
-        readMessages: [{ remoteJid: phone.includes('@') ? phone : phone + '@s.whatsapp.net', id: msgId }],
+        readMessages: [{ remoteJid, id: msgId }],
       });
       console.log('👁️ Marcado como lido:', msgId);
     } catch (e) { console.error('Erro ao marcar como lido:', e.message); }
@@ -152,20 +160,18 @@ class WhatsAppEvolution extends EventEmitter {
   //        false = atendente humano (envia instantâneo, sem delay)
   async sendMessage(phone, text, { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido. Tente novamente mais tarde.');
-    const number = phone.replace(/\D/g, '');
     if (isBot) {
       await this.sendPresence(phone, 'composing');
       await this.humanDelay();
     }
     this.trackSend();
-    const result = await this.api('POST', 'message/sendText', { number, text });
+    const result = await this.api('POST', 'message/sendText', { ...this._sendTarget(phone), text });
     result._waId = result?.key?.id || null;
     return result;
   }
 
   async sendImage(phone, imageBuffer, caption = '', { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
-    const number = phone.replace(/\D/g, '');
     const base64 = imageBuffer.toString('base64');
     if (isBot) {
       await this.sendPresence(phone, 'composing');
@@ -173,7 +179,7 @@ class WhatsAppEvolution extends EventEmitter {
     }
     this.trackSend();
     const result = await this.api('POST', 'message/sendMedia', {
-      number, mediatype: 'image', mimetype: 'image/jpeg', caption, media: base64, fileName: 'imagem.jpg',
+      ...this._sendTarget(phone), mediatype: 'image', mimetype: 'image/jpeg', caption, media: base64, fileName: 'imagem.jpg',
     });
     result._waId = result?.key?.id || null;
     return result;
@@ -181,21 +187,19 @@ class WhatsAppEvolution extends EventEmitter {
 
   async sendAudio(phone, audioBuffer, { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
-    const number = phone.replace(/\D/g, '');
     const base64 = audioBuffer.toString('base64');
     if (isBot) {
       await this.sendPresence(phone, 'recording');
       await this.humanDelay(true);
     }
     this.trackSend();
-    const result = await this.api('POST', 'message/sendWhatsAppAudio', { number, audio: base64 });
+    const result = await this.api('POST', 'message/sendWhatsAppAudio', { ...this._sendTarget(phone), audio: base64 });
     result._waId = result?.key?.id || null;
     return result;
   }
 
   async sendVideo(phone, videoBuffer, caption = '', { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
-    const number = phone.replace(/\D/g, '');
     const base64 = videoBuffer.toString('base64');
     if (isBot) {
       await this.sendPresence(phone, 'composing');
@@ -203,7 +207,7 @@ class WhatsAppEvolution extends EventEmitter {
     }
     this.trackSend();
     const result = await this.api('POST', 'message/sendMedia', {
-      number, mediatype: 'video', mimetype: 'video/mp4', caption, media: base64, fileName: 'video.mp4',
+      ...this._sendTarget(phone), mediatype: 'video', mimetype: 'video/mp4', caption, media: base64, fileName: 'video.mp4',
     });
     result._waId = result?.key?.id || null;
     return result;
@@ -211,7 +215,6 @@ class WhatsAppEvolution extends EventEmitter {
 
   async sendDocument(phone, buffer, fileName, mimetype, { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
-    const number = phone.replace(/\D/g, '');
     const base64 = buffer.toString('base64');
     if (isBot) {
       await this.sendPresence(phone, 'composing');
@@ -219,7 +222,7 @@ class WhatsAppEvolution extends EventEmitter {
     }
     this.trackSend();
     const result = await this.api('POST', 'message/sendMedia', {
-      number, mediatype: 'document', mimetype: mimetype || 'application/octet-stream', media: base64, fileName,
+      ...this._sendTarget(phone), mediatype: 'document', mimetype: mimetype || 'application/octet-stream', media: base64, fileName,
     });
     result._waId = result?.key?.id || null;
     return result;
@@ -296,9 +299,17 @@ class WhatsAppEvolution extends EventEmitter {
       const jid = msg.key?.remoteJidAlt || msg.key?.remoteJid || '';
       if (jid === 'status@broadcast') return;
       if (jid.endsWith('@g.us')) return;
-      if (jid.endsWith('@lid') && !msg.key?.remoteJidAlt) return;
 
-      const phone = jid.replace('@s.whatsapp.net', '').replace('@lid', '');
+      // Resolve identificador do contato
+      // Evolution v1 usa LID (@lid) como identificador principal
+      // Usamos o LID completo (com @lid) como "phone" pra manter conversas separadas
+      // O envio de mensagem também funciona com LID na Evolution
+      let phone = '';
+      if (jid.endsWith('@lid')) {
+        phone = jid; // Usa o JID completo (ex: 36232444825602@lid)
+      } else {
+        phone = jid.replace('@s.whatsapp.net', '');
+      }
       if (!phone || phone.length < 8) return;
       console.log('📨 Mensagem de:', phone, '| Nome:', msg.pushName);
 
@@ -307,7 +318,12 @@ class WhatsAppEvolution extends EventEmitter {
       let mediaType = null;
       let mediaUrl = null;
 
-      const msgContent = msg.message;
+      // Desembrulha mensagens efêmeras (chats com mensagens temporárias ativadas)
+      let msgContent = msg.message;
+      if (msgContent?.ephemeralMessage?.message) {
+        msgContent = msgContent.ephemeralMessage.message;
+      }
+
       if (msgContent?.conversation) {
         content = msgContent.conversation;
       } else if (msgContent?.extendedTextMessage?.text) {
@@ -430,8 +446,7 @@ class WhatsAppEvolution extends EventEmitter {
   // Busca foto de perfil do contato
   async getProfilePic(phone) {
     try {
-      const number = phone.replace(/\D/g, '');
-      const result = await this.api('POST', 'chat/fetchProfilePictureUrl', { number });
+      const result = await this.api('POST', 'chat/fetchProfilePictureUrl', this._sendTarget(phone));
       return result?.profilePictureUrl || result?.url || null;
     } catch { return null; }
   }
