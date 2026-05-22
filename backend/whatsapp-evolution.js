@@ -55,10 +55,11 @@ class WhatsAppEvolution extends EventEmitter {
     await new Promise(r => setTimeout(r, delay));
   }
 
-  // Retorna os campos corretos para envio: { number } ou { remoteJid } dependendo do formato
+  // Retorna os campos corretos para envio
+  // LID e números normais usam o campo 'number' — o patch na Evolution cuida da validação
   _sendTarget(phone) {
     if (phone.endsWith('@lid')) {
-      return { remoteJid: phone };
+      return { number: phone };
     }
     return { number: phone.replace(/\D/g, '') };
   }
