@@ -181,6 +181,9 @@ async function initDB() {
     console.log('⚙️ Configurações padrão criadas');
   }
 
+  // Adiciona coluna real_phone se não existir (migração LID)
+  await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS real_phone TEXT");
+
   console.log('✅ D\'Black Chat — Banco inicializado!');
 }
 

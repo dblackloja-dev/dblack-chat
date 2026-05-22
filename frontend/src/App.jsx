@@ -371,7 +371,22 @@ export default function App() {
     const text = msgInput.trim();
     setMsgInput('');
     try {
-      await api.sendMessage({ conversation_id: activeConv.id, content: text });
+      const sendResult = await api.sendMessage({ conversation_id: activeConv.id, content: text });
+      if (sendResult?.needsRealPhone) {
+        const num = prompt('Este contato usa identificador novo (LID) do WhatsApp.\n\nDigite o número real do cliente com DDD (ex: 5531999998888):');
+        if (num && num.trim().length >= 10) {
+          await fetch(`${api.BASE || ''}/api/conversations/${activeConv.id}/real-phone`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${api.getToken()}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone: num.trim() })
+          });
+          setMsgInput(text); // restaura texto pra reenviar
+          alert('Número salvo! Clique enviar novamente.');
+          return;
+        }
+        setMsgInput(text);
+        return;
+      }
       // Se tinha imagem de resposta rápida pendente, envia junto
       if (pendingQuickReply?.has_image) {
         try {
