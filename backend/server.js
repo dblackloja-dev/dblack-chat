@@ -1368,11 +1368,25 @@ wss.on('connection', (ws) => {
   ws.on('pong', () => { ws.isAlive = true; });
 });
 
-// Monitoramento a cada 5 min
-setInterval(() => {
+// Monitoramento a cada 5 min + health check da Evolution
+setInterval(async () => {
   const memMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
   const wsCount = clients.size;
   console.log(`📊 Status: ${memMB}MB RAM | ${wsCount} WS conectados | Fila: ${msgQueue.size} | WhatsApp: ${wa.connected ? '✅' : '❌'}`);
+
+  // Verifica se a Evolution está respondendo corretamente
+  try {
+    const status = await wa.api('GET', 'instance/connectionState');
+    const state = status?.instance?.state;
+    if (state !== 'open' && wa.connected) {
+      console.log('⚠️ Evolution desconectou (state:', state, ') — reconectando...');
+      wa.connected = false;
+      await wa.connect();
+    }
+  } catch (e) {
+    console.log('⚠️ Health check falhou:', e.message, '— tentando reconectar...');
+    try { await wa.connect(); } catch {}
+  }
 }, 300000);
 
 start().catch(console.error);
