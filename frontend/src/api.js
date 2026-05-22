@@ -60,18 +60,7 @@ const api = {
 
   // Messages
   getMessages: (convId) => request(`/messages/${convId}`),
-  sendMessage: async (data) => {
-    const token = getToken();
-    const res = await fetch(`${BASE}/messages/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(data),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (body.needsRealPhone) return body;
-    if (!res.ok) throw new Error(body.error || 'Erro ao enviar');
-    return body;
-  },
+  sendMessage: (data) => request('/messages/send', { method: 'POST', body: data }),
   deleteMessage: (id) => request(`/messages/${id}`, { method: 'DELETE' }),
   sendAudio: async (conversationId, blob) => {
     const token = getToken();

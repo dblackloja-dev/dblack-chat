@@ -463,27 +463,6 @@ app.post('/api/conversations/:conversationId/mark-unread', auth, async (req, res
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Resolve o número de envio: se for LID, usa real_phone da conversa
-function getSendPhone(conv) {
-  if (conv.phone?.endsWith('@lid')) {
-    if (conv.real_phone) return conv.real_phone;
-    throw new Error('LID_SEM_NUMERO');
-  }
-  return conv.phone;
-}
-
-// Atualizar número real de um contato LID
-app.post('/api/conversations/:id/real-phone', auth, async (req, res) => {
-  try {
-    const { phone } = req.body;
-    if (!phone || !phone.trim()) return res.status(400).json({ error: 'Informe o número' });
-    const cleaned = phone.replace(/\D/g, '');
-    if (cleaned.length < 10) return res.status(400).json({ error: 'Número inválido' });
-    await queryRun("UPDATE conversations SET real_phone = $1 WHERE id = $2", [cleaned, req.params.id]);
-    res.json({ success: true, real_phone: cleaned });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // Enviar mensagem (atendente → cliente via WhatsApp)
 app.post('/api/messages/send', auth, async (req, res) => {
   try {
@@ -492,19 +471,9 @@ app.post('/api/messages/send', auth, async (req, res) => {
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
 
-    // Resolve número: usa real_phone se for LID
-    let sendPhone;
-    try { sendPhone = getSendPhone(conv); }
-    catch (e) {
-      if (e.message === 'LID_SEM_NUMERO') {
-        return res.status(400).json({ error: 'Este contato usa LID. Informe o número real do cliente para enviar mensagens.', needsRealPhone: true });
-      }
-      throw e;
-    }
-
     // Envia via WhatsApp com nome do atendente
     const waText = `*${req.user.name}:*\n${content}`;
-    const waResult = await wa.sendMessage(sendPhone, waText);
+    const waResult = await wa.sendMessage(conv.phone, waText);
 
     // Usa o ID do WhatsApp para rastrear entrega/leitura (se disponível)
     const msgId = waResult?._waId || genId();
@@ -546,7 +515,7 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
     }
 
     // Envia via WhatsApp (usa o buffer já comprimido)
-    const waResult = await wa.sendImage(getSendPhone(conv), imageBuffer, caption || '');
+    const waResult = await wa.sendImage(conv.phone, imageBuffer, caption || '');
 
     // Salva no banco (usa o buffer comprimido — menor e mais rápido)
     const msgId = waResult?._waId || genId();
@@ -588,7 +557,7 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, mime, req.file.buffer.toString('base64')]);
 
     // Envia via WhatsApp (Evolution API)
-    const waResultDoc = await wa.sendDocument(getSendPhone(conv), req.file.buffer, fileName, mime);
+    const waResultDoc = await wa.sendDocument(conv.phone, req.file.buffer, fileName, mime);
 
     const msgId = waResultDoc?._waId || genId();
     const displayText = `📎 ${fileName}`;
@@ -616,7 +585,7 @@ app.post('/api/messages/send-video', auth, uploadVideo.single('video'), async (r
     console.log(`🎥 Enviando vídeo: ${Math.round(req.file.buffer.length/1024/1024)}MB | ${req.file.mimetype}`);
 
     // Envia via WhatsApp
-    const waResult = await wa.sendVideo(getSendPhone(conv), req.file.buffer, caption || '');
+    const waResult = await wa.sendVideo(conv.phone, req.file.buffer, caption || '');
 
     // Salva no banco
     const msgId = waResult?._waId || genId();
@@ -657,7 +626,7 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/ogg', req.file.buffer.toString('base64')]);
 
     // Envia via Evolution (sendWhatsAppAudio converte pra OGG Opus automaticamente)
-    const waResultAud = await wa.sendAudio(getSendPhone(conv), req.file.buffer);
+    const waResultAud = await wa.sendAudio(conv.phone, req.file.buffer);
 
     const msgId = waResultAud?._waId || genId();
     const audioUrl = `/media/${mediaId}`;
