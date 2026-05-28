@@ -879,7 +879,7 @@ export default function App() {
                     {(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 600 }}>{activeConv.customer_push_name || 'Cliente'}</div>
-                  <div style={{ fontSize: 13, color: W.txt2 }}>{fmtPhone(activeConv.phone)}</div>
+                  <div style={{ fontSize: 13, color: W.txt2 }}>{activeConv.phone?.endsWith('@lid') ? `LID: ${activeConv.phone.replace('@lid', '')}` : fmtPhone(activeConv.phone)}</div>
                 </div>
 
                 {/* Dados do ERP */}
