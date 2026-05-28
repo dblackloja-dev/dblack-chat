@@ -970,8 +970,8 @@ function ConvItem({ conv, active, onClick, finished }) {
           <span style={{ fontSize: 17, fontWeight: 600, color: W.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.customer_push_name || fmtPhone(conv.phone)}</span>
           <span style={{ fontSize: 12, color: conv.unread_count > 0 ? W.green : W.txt2, flexShrink: 0, marginLeft: 8 }}>{fmt(conv.last_message_at)}</span>
         </div>
-        {conv.customer_push_name && conv.phone && (
-          <div style={{ fontSize: 12, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 2 }}>{conv.phone.endsWith('@lid') ? conv.phone.replace('@lid', '') : fmtPhone(conv.phone)}</div>
+        {conv.customer_push_name && conv.phone && !conv.phone.endsWith('@lid') && (
+          <div style={{ fontSize: 12, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 2 }}>{fmtPhone(conv.phone)}</div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           {(conv.last_message_from_me === true || conv.last_message_from_me === 'true') && <span style={{ flexShrink: 0 }}>{Icons.dblcheck}</span>}
