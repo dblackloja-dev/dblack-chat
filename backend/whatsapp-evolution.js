@@ -297,8 +297,6 @@ class WhatsAppEvolution extends EventEmitter {
     if (event === 'messages.upsert') {
       const msg = body.data;
       if (!msg || msg.key?.fromMe) return;
-      // DEBUG: log completo do webhook para descobrir onde está o número real
-      console.log('🔍 WEBHOOK COMPLETO:', JSON.stringify({ key: msg.key, participant: msg.participant, verifiedBizName: msg.verifiedBizName, pushName: msg.pushName, source: msg.source, messageTimestamp: msg.messageTimestamp }, null, 0));
       const jid = msg.key?.remoteJidAlt || msg.key?.remoteJid || '';
       if (jid === 'status@broadcast') return;
       if (jid.endsWith('@g.us')) return;
