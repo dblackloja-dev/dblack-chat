@@ -453,7 +453,7 @@ export default function App() {
         stream.getTracks().forEach(t => t.stop());
         // Se foi cancelado, não envia o áudio
         if (cancelledRef.current) { cancelledRef.current = false; return; }
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
         if (blob.size > 500) {
           setSendingAudio(true);
           try { await api.sendAudio(activeConv.id, blob); } catch {}
@@ -970,8 +970,11 @@ function ConvItem({ conv, active, onClick, finished }) {
           <span style={{ fontSize: 17, fontWeight: 600, color: W.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.customer_push_name || fmtPhone(conv.phone)}</span>
           <span style={{ fontSize: 12, color: conv.unread_count > 0 ? W.green : W.txt2, flexShrink: 0, marginLeft: 8 }}>{fmt(conv.last_message_at)}</span>
         </div>
+        {conv.customer_push_name && conv.phone && !conv.phone.endsWith('@lid') && (
+          <div style={{ fontSize: 12, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 2 }}>{fmtPhone(conv.phone)}</div>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {conv.last_message_from_me && <span style={{ flexShrink: 0 }}>{Icons.dblcheck}</span>}
+          {(conv.last_message_from_me === true || conv.last_message_from_me === 'true') && <span style={{ flexShrink: 0 }}>{Icons.dblcheck}</span>}
           <span style={{ fontSize: 14, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{conv.last_message}</span>
           {!finished && conv.unread_count > 0 && <span style={{ background: W.green, color: '#fff', borderRadius: 12, padding: '1px 7px', fontSize: 12, fontWeight: 500, flexShrink: 0, marginLeft: 'auto' }}>{conv.unread_count}</span>}
         </div>

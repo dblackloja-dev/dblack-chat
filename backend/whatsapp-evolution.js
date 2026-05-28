@@ -194,7 +194,7 @@ class WhatsAppEvolution extends EventEmitter {
       await this.humanDelay(true);
     }
     this.trackSend();
-    const result = await this.api('POST', 'message/sendWhatsAppAudio', { ...this._sendTarget(phone), audio: base64 });
+    const result = await this.api('POST', 'message/sendWhatsAppAudio', { ...this._sendTarget(phone), audio: base64, encoding: true });
     result._waId = result?.key?.id || null;
     return result;
   }

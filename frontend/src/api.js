@@ -65,7 +65,8 @@ const api = {
   sendAudio: async (conversationId, blob) => {
     const token = getToken();
     const form = new FormData();
-    form.append('audio', blob, 'audio.ogg');
+    const ext = blob.type.includes('webm') ? 'webm' : 'ogg';
+    form.append('audio', blob, `audio.${ext}`);
     form.append('conversation_id', conversationId);
     const res = await fetch(`${BASE}/messages/send-audio`, {
       method: 'POST',

@@ -239,8 +239,8 @@ wa.on('message', (msg) => {
         // Nova conversa — vai pra fila "aguardando"
         const convId = genId();
         await queryRun(
-          `INSERT INTO conversations (id, phone, customer_name, customer_push_name, status, unread_count, last_message, last_message_at)
-           VALUES ($1, $2, $3, $4, 'aguardando', 1, $5, NOW())`,
+          `INSERT INTO conversations (id, phone, customer_name, customer_push_name, status, unread_count, last_message, last_message_at, last_message_from_me)
+           VALUES ($1, $2, $3, $4, 'aguardando', 1, $5, NOW(), false)`,
           [convId, msg.phone, msg.pushName || msg.phone, msg.pushName || '', msg.content]
         );
         conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
@@ -623,7 +623,8 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
 
     // Salva no banco
     const mediaId = 'aud_' + genId();
-    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, 'audio/ogg', req.file.buffer.toString('base64')]);
+    const audioMime = req.file.mimetype || 'audio/ogg';
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3)", [mediaId, audioMime, req.file.buffer.toString('base64')]);
 
     // Envia via Evolution (sendWhatsAppAudio converte pra OGG Opus automaticamente)
     const waResultAud = await wa.sendAudio(conv.phone, req.file.buffer);
