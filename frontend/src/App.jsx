@@ -741,8 +741,8 @@ export default function App() {
                 <div style={{ ...avatarStyle(36), background: W.teal, fontSize: 14 }}>{(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}</div>
                 <div style={{ flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden' }} onClick={() => setShowCustomerPanel(!showCustomerPanel)}>
                   <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeConv.customer_push_name || fmtPhone(activeConv.phone)}</div>
-                  {activeConv.phone && !activeConv.phone.endsWith('@lid') && (
-                    <div style={{ fontSize: 11, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtPhone(activeConv.phone)}</div>
+                  {(activeConv.real_phone || (activeConv.phone && !activeConv.phone.endsWith('@lid'))) && (
+                    <div style={{ fontSize: 11, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtPhone(activeConv.real_phone || activeConv.phone)}</div>
                   )}
                 </div>
                 {activeConv.status === 'atendendo' && <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
@@ -881,8 +881,8 @@ export default function App() {
                     {(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 600 }}>{activeConv.customer_push_name || 'Cliente'}</div>
-                  {activeConv.phone && !activeConv.phone.endsWith('@lid') && (
-                    <div style={{ fontSize: 13, color: W.txt2 }}>{fmtPhone(activeConv.phone)}</div>
+                  {(activeConv.real_phone || (activeConv.phone && !activeConv.phone.endsWith('@lid'))) && (
+                    <div style={{ fontSize: 13, color: W.txt2 }}>{fmtPhone(activeConv.real_phone || activeConv.phone)}</div>
                   )}
                 </div>
 

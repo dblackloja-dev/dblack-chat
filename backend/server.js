@@ -239,9 +239,9 @@ wa.on('message', (msg) => {
         // Nova conversa — vai pra fila "aguardando"
         const convId = genId();
         await queryRun(
-          `INSERT INTO conversations (id, phone, customer_name, customer_push_name, status, unread_count, last_message, last_message_at, last_message_from_me)
-           VALUES ($1, $2, $3, $4, 'aguardando', 1, $5, NOW(), false)`,
-          [convId, msg.phone, msg.pushName || msg.phone, msg.pushName || '', msg.content]
+          `INSERT INTO conversations (id, phone, customer_name, customer_push_name, status, unread_count, last_message, last_message_at, last_message_from_me, real_phone)
+           VALUES ($1, $2, $3, $4, 'aguardando', 1, $5, NOW(), false, $6)`,
+          [convId, msg.phone, msg.pushName || msg.phone, msg.pushName || '', msg.content, msg.realPhone || null]
         );
         conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
 
@@ -264,8 +264,8 @@ wa.on('message', (msg) => {
       } else {
         // Atualiza conversa existente
         await queryRun(
-          "UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW(), last_message_from_me = false, customer_push_name = COALESCE(NULLIF($2, ''), customer_push_name) WHERE id = $3",
-          [msg.content, msg.pushName || '', conv.id]
+          "UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW(), last_message_from_me = false, customer_push_name = COALESCE(NULLIF($2, ''), customer_push_name), real_phone = COALESCE(NULLIF($4, ''), real_phone) WHERE id = $3",
+          [msg.content, msg.pushName || '', conv.id, msg.realPhone || '']
         );
         conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
       }

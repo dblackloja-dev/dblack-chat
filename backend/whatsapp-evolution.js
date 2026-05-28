@@ -306,13 +306,19 @@ class WhatsAppEvolution extends EventEmitter {
       // Usamos o LID completo (com @lid) como "phone" pra manter conversas separadas
       // O envio de mensagem também funciona com LID na Evolution
       let phone = '';
+      let realPhone = '';
+      const remoteJid = msg.key?.remoteJid || '';
+      const remoteJidAlt = msg.key?.remoteJidAlt || '';
       if (jid.endsWith('@lid')) {
         phone = jid; // Usa o JID completo (ex: 36232444825602@lid)
+        // Tenta extrair número real do JID alternativo
+        const altJid = remoteJidAlt.endsWith('@s.whatsapp.net') ? remoteJidAlt : (remoteJid.endsWith('@s.whatsapp.net') ? remoteJid : '');
+        if (altJid) realPhone = altJid.replace('@s.whatsapp.net', '');
       } else {
         phone = jid.replace('@s.whatsapp.net', '');
       }
       if (!phone || phone.length < 8) return;
-      console.log('📨 Mensagem de:', phone, '| Nome:', msg.pushName);
+      console.log('📨 Mensagem de:', phone, '| Nome:', msg.pushName, realPhone ? `| Tel real: ${realPhone}` : '| Sem tel real', `| JID: ${remoteJid} | JIDAlt: ${remoteJidAlt}`);
 
       const pushName = msg.pushName || '';
       let content = '';
@@ -406,6 +412,7 @@ class WhatsAppEvolution extends EventEmitter {
       this.emit('message', {
         id: msg.key?.id || Date.now().toString(),
         phone,
+        realPhone,
         pushName,
         content,
         mediaType,
