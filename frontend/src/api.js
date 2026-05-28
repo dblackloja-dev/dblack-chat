@@ -169,6 +169,9 @@ const api = {
   // Customers (do ERP)
   getCustomers: (q) => request(`/erp/customers${q ? `?q=${encodeURIComponent(q)}` : ''}`),
 
+  // Phone
+  updateRealPhone: (convId, realPhone) => request(`/conversations/${convId}/real-phone`, { method: 'PUT', body: { real_phone: realPhone } }),
+
   // Tags
   getConvTags: (convId) => request(`/conversations/${convId}/tags`),
   addConvTag: (convId, data) => request(`/conversations/${convId}/tags`, { method: 'POST', body: data }),

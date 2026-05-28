@@ -881,8 +881,12 @@ export default function App() {
                     {(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 600 }}>{activeConv.customer_push_name || 'Cliente'}</div>
-                  {(activeConv.real_phone || (activeConv.phone && !activeConv.phone.endsWith('@lid'))) && (
+                  {(activeConv.real_phone || (activeConv.phone && !activeConv.phone.endsWith('@lid'))) ? (
                     <div style={{ fontSize: 13, color: W.txt2 }}>{fmtPhone(activeConv.real_phone || activeConv.phone)}</div>
+                  ) : (
+                    <PhoneInput convId={activeConv.id} onSave={(phone) => {
+                      setConversations(prev => prev.map(c => c.id === activeConv.id ? { ...c, real_phone: phone } : c));
+                    }} />
                   )}
                 </div>
 
@@ -1102,6 +1106,39 @@ function AudioPlayer({ src }) {
         </div>
       </div>
       <span style={{ fontSize: 11, color: '#667781', flexShrink: 0 }}>{fmtSec(playing ? (duration * progress / 100) : duration)}</span>
+    </div>
+  );
+}
+
+function PhoneInput({ convId, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const cleaned = phone.replace(/\D/g, '');
+    if (cleaned.length < 10) return;
+    setSaving(true);
+    try {
+      await api.updateRealPhone(convId, cleaned);
+      onSave(cleaned);
+      setEditing(false);
+    } catch {}
+    setSaving(false);
+  };
+
+  if (!editing) {
+    return <button onClick={() => setEditing(true)} style={{ fontSize: 12, color: W.teal, background: 'none', border: `1px solid ${W.teal}`, borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontFamily: 'inherit', marginTop: 4 }}>+ Adicionar telefone</button>;
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
+      <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="(32) 99999-9999" autoFocus
+        style={{ fontSize: 13, padding: '4px 8px', borderRadius: 6, border: `1px solid ${W.border}`, outline: 'none', width: 140, fontFamily: 'inherit' }}
+        onKeyDown={e => e.key === 'Enter' && save()}
+      />
+      <button onClick={save} disabled={saving} style={{ fontSize: 11, background: W.teal, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontFamily: 'inherit' }}>✓</button>
+      <button onClick={() => setEditing(false)} style={{ fontSize: 11, background: 'none', border: `1px solid ${W.border}`, borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontFamily: 'inherit', color: W.txt2 }}>✕</button>
     </div>
   );
 }

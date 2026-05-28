@@ -433,6 +433,17 @@ app.post('/api/conversations/:id/transfer', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Atualizar telefone real de conversa LID
+app.put('/api/conversations/:id/real-phone', auth, async (req, res) => {
+  try {
+    const { real_phone } = req.body;
+    await queryRun("UPDATE conversations SET real_phone = $1 WHERE id = $2", [real_phone || null, req.params.id]);
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [req.params.id]);
+    broadcast('conversation_updated', conv);
+    res.json(conv);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══════════════════════════════════
 // ═══  MESSAGES                   ═══
 // ═══════════════════════════════════
