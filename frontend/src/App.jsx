@@ -741,7 +741,9 @@ export default function App() {
                 <div style={{ ...avatarStyle(36), background: W.teal, fontSize: 14 }}>{(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}</div>
                 <div style={{ flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden' }} onClick={() => setShowCustomerPanel(!showCustomerPanel)}>
                   <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeConv.customer_push_name || fmtPhone(activeConv.phone)}</div>
-                  <div style={{ fontSize: 11, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtPhone(activeConv.phone)}</div>
+                  {activeConv.phone && !activeConv.phone.endsWith('@lid') && (
+                    <div style={{ fontSize: 11, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtPhone(activeConv.phone)}</div>
+                  )}
                 </div>
                 {activeConv.status === 'atendendo' && <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
                   <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(30,186,138,.1)', color: '#1eba8a', border: '1px solid rgba(30,186,138,.3)', fontWeight: 600 }} onClick={() => { setShowSales(true); setShowAdmin(false); }} title="Vender">🛒 Vender</button>
@@ -879,7 +881,9 @@ export default function App() {
                     {(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 600 }}>{activeConv.customer_push_name || 'Cliente'}</div>
-                  <div style={{ fontSize: 13, color: W.txt2 }}>{activeConv.phone?.endsWith('@lid') ? `LID: ${activeConv.phone.replace('@lid', '')}` : fmtPhone(activeConv.phone)}</div>
+                  {activeConv.phone && !activeConv.phone.endsWith('@lid') && (
+                    <div style={{ fontSize: 13, color: W.txt2 }}>{fmtPhone(activeConv.phone)}</div>
+                  )}
                 </div>
 
                 {/* Dados do ERP */}
