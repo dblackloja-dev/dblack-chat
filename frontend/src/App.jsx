@@ -8,6 +8,7 @@ import Reports from './modules/Reports';
 import Settings from './modules/Settings';
 import AIAgents from './modules/AIAgents';
 import AIMetrics from './modules/AIMetrics';
+import PromoManager from './modules/PromoManager';
 import { Sidebar as DBlackSidebar } from './components/layout/Sidebar';
 
 // ─── CORES WHATSAPP WEB (TEMA CLARO) ───
@@ -326,7 +327,9 @@ export default function App() {
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('online', onOnline);
 
-    const interval = setInterval(loadConversations, 15000);
+    // Polling reduzido — WebSocket já traz atualizações em tempo real
+    // Só faz polling como fallback (60s em vez de 15s)
+    const interval = setInterval(loadConversations, 60000);
     return () => {
       stopped = true;
       clearTimeout(reconnectTimer);
@@ -561,9 +564,9 @@ export default function App() {
       {isMobile && sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 99 }} />}
       <div style={{ position: isMobile ? 'fixed' : 'relative', top: 0, left: 0, bottom: 0, zIndex: isMobile ? 100 : 1, display: isMobile && !sidebarOpen ? 'none' : 'block' }}>
         <DBlackSidebar
-          activeRoute={currentModule === 'chat' ? 'conversas' : currentModule === 'quick-replies' ? 'respostas' : currentModule === 'ai-agents' ? 'agentes' : currentModule === 'ai-metrics' ? 'relatorios' : currentModule === 'contacts' ? 'contatos' : currentModule}
+          activeRoute={currentModule === 'chat' ? 'conversas' : currentModule === 'quick-replies' ? 'respostas' : currentModule === 'ai-agents' ? 'agentes' : currentModule === 'ai-metrics' ? 'relatorios' : currentModule === 'contacts' ? 'contatos' : currentModule === 'promo' ? 'promo' : currentModule}
           onNavigate={(key) => {
-            const map = { dashboard: 'dashboard', conversas: 'chat', contatos: 'contacts', respostas: 'quick-replies', agentes: 'ai-agents', relatorios: 'reports', config: 'settings' };
+            const map = { dashboard: 'dashboard', conversas: 'chat', contatos: 'contacts', promo: 'promo', respostas: 'quick-replies', agentes: 'ai-agents', relatorios: 'reports', config: 'settings' };
             setCurrentModule(map[key] || key);
             if (isMobile) setSidebarOpen(false);
             setMobileView('list');
@@ -583,6 +586,7 @@ export default function App() {
       {currentModule === 'ai-metrics' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><AIMetrics /></div>}
       {currentModule === 'reports' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><Reports /></div>}
       {currentModule === 'settings' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><Settings /></div>}
+      {currentModule === 'promo' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><PromoManager /></div>}
 
       {/* ═══ CHAT (módulo principal) ═══ */}
       {currentModule === 'chat' && <>

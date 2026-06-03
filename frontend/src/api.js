@@ -187,6 +187,15 @@ const api = {
   // Métricas IA
   getAIMetrics: () => request('/ai-metrics'),
 
+  // Promoção
+  getPromoItems: () => request('/promo-items'),
+  addPromoItem: (data) => request('/promo-items', { method: 'POST', body: data }),
+  updatePromoItem: (id, data) => request(`/promo-items/${id}`, { method: 'PUT', body: data }),
+  deletePromoItem: (id) => request(`/promo-items/${id}`, { method: 'DELETE' }),
+  getPromoPhotos: (promoItemId) => request(`/promo-items/${promoItemId}/photos`),
+  addPromoPhoto: (promoItemId, data) => request(`/promo-items/${promoItemId}/photos`, { method: 'POST', body: data }),
+  deletePromoPhoto: (photoId) => request(`/promo-photos/${photoId}`, { method: 'DELETE' }),
+
   // ERP — Vendas
   searchProducts: (q) => request(`/erp/products?q=${encodeURIComponent(q)}`),
   getProductStock: (id) => request(`/erp/products/${id}/stock`),

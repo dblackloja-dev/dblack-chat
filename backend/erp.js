@@ -155,4 +155,36 @@ async function listUsers() {
   return erpQuery("SELECT id, name, email, role, store_id, active, avatar FROM users WHERE active = true ORDER BY name");
 }
 
-module.exports = { searchProducts, getProductStock, getStores, findCustomerByPhone, createSale, ensureCashOpen, findUser, listUsers, erpQuery, erpQueryOne };
+// Busca produtos do ERP por lista de refs (para promoção), com estoque da loja online
+async function getProductsByRefs(refs, storeId = 'loja4') {
+  if (!refs.length) return [];
+  const placeholders = refs.map((_, i) => `$${i + 1}`).join(',');
+  return erpQuery(
+    `SELECT p.id, p.sku, p.name, p.brand, p.category, p.size, p.color,
+            p.price, p.ref, p.photo,
+            COALESCE(SUM(CASE WHEN s.stock_id = '${storeId}' THEN s.quantity ELSE 0 END), 0) AS stock
+     FROM products p
+     LEFT JOIN stock s ON s.product_id = p.id
+     WHERE p.active = true AND p.ref IN (${placeholders})
+     GROUP BY p.id
+     HAVING COALESCE(SUM(CASE WHEN s.stock_id = '${storeId}' THEN s.quantity ELSE 0 END), 0) > 0
+     ORDER BY p.ref, p.name`,
+    refs
+  );
+}
+
+// Todas as variantes (tamanho/cor) de um ref com estoque na loja online
+async function getProductVariants(ref, storeId = 'loja4') {
+  return erpQuery(
+    `SELECT p.id, p.sku, p.name, p.size, p.color, p.price, p.photo,
+            COALESCE(SUM(CASE WHEN s.stock_id = $2 THEN s.quantity ELSE 0 END), 0) AS stock
+     FROM products p
+     LEFT JOIN stock s ON s.product_id = p.id
+     WHERE p.active = true AND p.ref = $1
+     GROUP BY p.id
+     ORDER BY p.size, p.color`,
+    [ref, storeId]
+  );
+}
+
+module.exports = { searchProducts, getProductStock, getStores, findCustomerByPhone, createSale, ensureCashOpen, findUser, listUsers, erpQuery, erpQueryOne, getProductsByRefs, getProductVariants };

@@ -269,10 +269,21 @@ export const Avatar = ({ name = '', size = 42, index = 0, badge, className = '' 
 
 // ── EXPORTS MAP (para uso dinâmico) ───────────────────────────
 
+export const IconPromo = ({ active = false, size = 20 }) => (
+  <svg {...iconProps} width={size} height={size}>
+    <path d="M4 8L12 3L20 8V16L12 21L4 16V8Z"
+      stroke={active ? '#0d1b18' : s} strokeWidth="1.5" fill="none"
+      opacity={active ? 1 : 0.7}/>
+    <path d="M12 11L14 12.5V15.5L12 17L10 15.5V12.5L12 11Z"
+      fill={active ? '#0d1b18' : s} opacity={active ? 0.8 : 0.5}/>
+  </svg>
+);
+
 export const SIDEBAR_ICONS = [
   { key: 'dashboard',  label: 'Dashboard',  Icon: IconDashboard  },
   { key: 'conversas',  label: 'Conversas',  Icon: IconConversas  },
   { key: 'contatos',   label: 'Contatos',   Icon: IconContatos   },
+  { key: 'promo',      label: 'Promo',      Icon: IconPromo      },
   { key: 'respostas',  label: 'Respostas',  Icon: IconRespostas  },
   { key: 'agentes',    label: 'Ag. IA',     Icon: IconAgentesIA  },
   { key: 'relatorios', label: 'Relatórios', Icon: IconRelatorios },

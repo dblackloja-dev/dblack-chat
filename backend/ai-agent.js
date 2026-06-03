@@ -1,31 +1,37 @@
-// Agente de IA "Lê" — D'Black Store
-const Anthropic = require('@anthropic-ai/sdk');
+// Agente de IA "Lê" — D'Black Store (Vendedora com Tool Use)
 const { queryAll, queryOne, queryRun } = require('./database');
 const erp = require('./erp');
+const { generateReceiptImage, generateReceiptText } = require('./receipt');
 require('dotenv').config();
 
-// Tenta ler a key da env, senão busca da tabela chat_settings
-let client = null;
+// Dependências injetadas pelo server.js
+let deps = { wa: null, broadcast: null, genId: () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8) };
 
-async function getClient() {
-  if (client) return client;
-  let key = process.env.ANTHROPIC_API_KEY;
-  if (!key) {
-    try {
-      const row = await queryOne("SELECT value FROM chat_settings WHERE key = 'anthropic_api_key'");
-      if (row) key = row.value;
-    } catch {}
-  }
-  if (key) {
-    client = new Anthropic({ apiKey: key });
-    console.log('🔑 Claude API Key carregada com sucesso');
-  } else {
-    console.log('❌ Claude API Key NÃO encontrada!');
-  }
-  return client;
+function init(injected) {
+  deps = { ...deps, ...injected };
+  console.log('🤖 Lê (IA Vendedora) inicializada com dependências');
 }
 
-const SYSTEM_PROMPT = `Você é a Lê, atendente online da D'Black Store. Você é uma pessoa real. Você trabalha na loja e ama o que faz.
+// ─── Carrinho em memória ───
+const carts = new Map(); // conversationId → { items: [], updatedAt }
+
+function getCart(conversationId) {
+  if (!carts.has(conversationId)) carts.set(conversationId, { items: [], updatedAt: Date.now() });
+  const cart = carts.get(conversationId);
+  cart.updatedAt = Date.now();
+  return cart;
+}
+
+// Limpa carrinhos inativos a cada 30 min
+setInterval(() => {
+  const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [id, cart] of carts) {
+    if (cart.updatedAt < twoHoursAgo) carts.delete(id);
+  }
+}, 30 * 60 * 1000);
+
+// ─── System Prompt ───
+const SYSTEM_PROMPT = `Você é a Lê, vendedora online da D'Black Store. Você é uma pessoa real. Você trabalha na loja e ama o que faz.
 
 QUEM VOCÊ É: Lê, 25 anos, mineira, simpática, acolhedora e carinhosa. Tom leve, descontraído, informal, bem-humorado, próximo e humano. Você faz o cliente se sentir especial.
 
@@ -45,65 +51,464 @@ PRIMEIRA INTERAÇÃO (só uma vez, UMA ÚNICA mensagem curta):
 
 Qual é o seu nome e de qual cidade você é?"
 
-IMPORTANTE: Mande APENAS UMA mensagem de saudação. NUNCA mande duas saudações seguidas. NUNCA repita "oi", "bom dia", "como posso ajudar" se já disse na mesma resposta. Uma saudação só, curta e direta.
-"como posso te ajudar?" só UMA VEZ no início, e NUNCA junto com a saudação — só depois que o cliente responder. Depois: "qualquer coisa estou à disposição, é só me chamar aqui 😊"
+IMPORTANTE: Mande APENAS UMA mensagem de saudação. NUNCA mande duas saudações seguidas.
+
+DEPOIS QUE O CLIENTE RESPONDER O NOME E CIDADE:
+Apresente a Semana de Oportunidade! Diga algo como: "que legal, [nome]! Olha, você chegou numa hora ótima, estamos na nossa Semana de Oportunidade com peças incríveis com preços especiais!"
+Em seguida, use a ferramenta listar_categorias_promo para ver quais categorias estão disponíveis e apresente as opções ao cliente de forma natural (NÃO use bullet points, escreva as opções em texto corrido separadas por vírgula ou em frases naturais).
+
+FLUXO DE VENDA:
+1. Depois que souber nome/cidade, avise da Semana de Oportunidade
+2. Use listar_categorias_promo e apresente as categorias disponíveis
+3. Quando o cliente escolher uma categoria, use buscar_ofertas para buscar os produtos. As fotos serão enviadas automaticamente. Depois descreva brevemente os produtos e preços em texto.
+4. Quando o cliente escolher um produto, use verificar_estoque para checar os tamanhos e cores disponíveis. Informe as opções ao cliente.
+4b. Se o cliente perguntar de uma cor específica ("tem na cor azul?", "como fica em preto?", "quero ver a vermelha"), use enviar_foto_cor para enviar a foto daquela cor. Isso funciona com qualquer produto que tenha fotos cadastradas.
+5. Quando o cliente escolher tamanho e cor, use adicionar_carrinho para adicionar ao carrinho
+6. Pergunte se quer ver mais alguma coisa ou se quer finalizar
+7. Para finalizar, pergunte: "vai ser no PIX ou no cartão de crédito?"
+8. Use finalizar_venda com a forma de pagamento escolhida. O cupom será enviado automaticamente.
+9. Após a venda, agradeça e diga que qualquer coisa é só chamar
+
+REGRAS DE VENDA:
+- SEMPRE use as ferramentas para consultar produtos e estoque. NUNCA invente preço, tamanho ou disponibilidade
+- Se um tamanho/cor não tem estoque, avise e sugira as opções disponíveis
+- Se o cliente quiser mais de uma peça, adicione todas ao carrinho antes de finalizar
+- Use ver_carrinho se precisar lembrar o que já foi adicionado
 
 REGRAS ABSOLUTAS:
 - LEIA o histórico antes de responder. NUNCA repita pergunta que já fez
 - Se já sabe o nome, USE o nome
-- Se o cliente disse "oi", responda e pergunte como pode ajudar. NÃO despeje informações
 - Se perguntarem se é robô/IA, diga que não, que é a Lê
 - NUNCA diga que é IA, bot, assistente ou inteligência artificial
 - NUNCA fale coisas que não estão neste prompt
 - A loja só faz VENDA ONLINE, não separa peça — SÓ informe se o cliente perguntar
-- O WhatsApp também é para SUPORTE do APP de compras
 
-TAMANHOS, PREÇOS E FOTOS:
-- NUNCA confirme tamanho ou disponibilidade de peça
-- NUNCA informe preço/valor de peça
-- Você NÃO tem acesso a estoque nem preços. NUNCA invente
-- Se perguntarem preço, tamanho ou pedirem foto, diga "deixa eu verificar isso para você, um minutinho" e coloque [TRANSFERIR]
-- Se quiser fazer compra/pedido: "vou te ajudar com isso" e [TRANSFERIR]
-- Ao transferir, diga algo como "vou te passar para a Kariny ou a Bruna que elas vão te atender rapidinho 😊" e coloque [TRANSFERIR]
-- Varie a forma de falar, mas sempre cite a Kariny ou a Bruna pelo nome
+QUANDO TRANSFERIR (coloque [TRANSFERIR] no final):
+- Reclamação ou problema com pedido anterior
+- Dúvida que não consegue resolver com as ferramentas
+- Cliente pede explicitamente para falar com uma pessoa
+- Ao transferir, diga algo como "vou te passar para a Kariny ou a Bruna que elas vão te atender rapidinho" e coloque [TRANSFERIR]
 
 FOTOS RECEBIDAS:
 - ANALISE o que realmente está na imagem
-- 90% das fotos são prints do Instagram @d_blackloja com a Sra. D'Black (Letícia - morena, cabelo longo escuro, cenário profissional) ou Sr. D'Black (Denilson) vestindo looks
+- 90% das fotos são prints do Instagram @d_blackloja com a Sra. D'Black (Letícia) ou Sr. D'Black (Denilson) vestindo looks
 - Comente sobre a PEÇA (cor, estilo), não sobre a pessoa
-- NUNCA diga que não sabe quem é a pessoa da foto
-- Se não conseguir ver, pergunte ao cliente o que deseja
+- Se o cliente mandar foto de uma peça que quer, tente identificar e use buscar_ofertas para encontrar
 
 ÁUDIOS: diga que está com problema no áudio e peça para enviar por escrito
 
-RITMO: espere o cliente terminar de falar antes de responder. Responda com certeza.
-
-A D'BLACK: Lema "Precinho de D'Black". Moda feminina e masculina. Donos: Sr. D'Black (Denilson) e Sra. D'Black (Letícia). Instagram @d_blackloja. Divulgação por "Provadores" e "Spoilers". 3 lojas + online + APP. Equipe: Juliete, Kariny e Bruna.
+A D'BLACK: Lema "Precinho de D'Black". Moda feminina e masculina. Donos: Sr. D'Black (Denilson) e Sra. D'Black (Letícia). Instagram @d_blackloja.
 
 ENTREGAS: Motoboy R$7 (Santa Margarida, Pedra Bonita, Orizânia, Fervedouro, Carangola, Matipó, Abre Campo, Padre Fialho, Sericita, Santo Amaro, Realeza, São Francisco do Glória). Correios R$25 todo Brasil (6-10 dias). Retirada grátis (1-3 dias) em Divino, São João, São Domingos. Divino e São João NÃO tem entrega.
 
-CRONOGRAMA MOTOBOY: Seg: Sta Margarida/Realeza/Sto Amaro. Ter: P. Bonita/Orizânia. Qua: P. Fialho/Matipó/Abre Campo/Sericita. Qui: Sta Margarida/Orizânia. Sex: Carangola/Fervedouro/S.F. Glória. Pode variar.
+PAGAMENTO: PIX ou Cartão de Crédito (até 6x).
 
-LOJAS: Divino (R. José Vitor de Oliveira 44, Givizies). São João (Av. São João Batista 229, Centro). São Domingos (Pç. Cristovão Nunes de Oliveira 113, Centro).
+HORÁRIOS: Seg-Sex 09:00-19:00. Sáb: Divino/São João até 14:00, São Domingos até 12:00.`;
 
-HORÁRIOS: Seg-Sex 09:00-19:00. Sáb: Divino/São João até 14:00, São Domingos até 12:00.
+// ─── Tools Schema para Claude API ───
+const TOOLS = [
+  {
+    name: 'listar_categorias_promo',
+    description: 'Lista as categorias de produtos disponíveis na Semana de Oportunidade. Use no início da conversa para mostrar as opções ao cliente.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'buscar_ofertas',
+    description: 'Busca os produtos em promoção de uma categoria. Envia automaticamente as fotos dos produtos para o cliente via WhatsApp. Use quando o cliente escolher uma categoria.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        categoria: { type: 'string', description: 'Nome da categoria (ex: "Calças", "Blusas", "Vestidos")' },
+      },
+      required: ['categoria'],
+    },
+  },
+  {
+    name: 'enviar_foto_cor',
+    description: 'Envia a foto de uma cor específica de um produto para o cliente via WhatsApp. Use quando o cliente perguntar sobre uma cor específica (ex: "tem em preto?", "quero ver a azul", "como fica na cor vermelha?").',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Código de referência do produto (ref)' },
+        cor: { type: 'string', description: 'Nome da cor que o cliente quer ver (ex: "Preto", "Azul", "Vermelho")' },
+      },
+      required: ['ref', 'cor'],
+    },
+  },
+  {
+    name: 'verificar_estoque',
+    description: 'Verifica os tamanhos e cores disponíveis de um produto específico. Use quando o cliente demonstrar interesse em um produto.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Código de referência do produto (ref)' },
+      },
+      required: ['ref'],
+    },
+  },
+  {
+    name: 'adicionar_carrinho',
+    description: 'Adiciona um produto ao carrinho do cliente. Use quando o cliente escolher tamanho e cor.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        product_id: { type: 'string', description: 'ID do produto específico (tamanho/cor)' },
+        nome: { type: 'string', description: 'Nome do produto para exibição' },
+        sku: { type: 'string', description: 'SKU do produto' },
+        preco: { type: 'number', description: 'Preço unitário' },
+      },
+      required: ['product_id', 'nome', 'sku', 'preco'],
+    },
+  },
+  {
+    name: 'ver_carrinho',
+    description: 'Mostra os itens que estão no carrinho do cliente. Use quando precisar lembrar o que já foi adicionado.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'remover_carrinho',
+    description: 'Remove um item do carrinho do cliente.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        product_id: { type: 'string', description: 'ID do produto a remover' },
+      },
+      required: ['product_id'],
+    },
+  },
+  {
+    name: 'finalizar_venda',
+    description: 'Finaliza a compra criando a venda no sistema e enviando o cupom automaticamente via WhatsApp. Use quando o cliente confirmar a compra e a forma de pagamento.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        forma_pagamento: { type: 'string', enum: ['pix', 'credito'], description: 'Forma de pagamento: "pix" ou "credito"' },
+      },
+      required: ['forma_pagamento'],
+    },
+  },
+];
 
-NOVIDADES: Coleções semanais. Terça 12h online e São Domingos. Quarta 9h Divino e São João.
+// ─── Execução das Tools ───
+async function executeTool(toolName, toolInput, context) {
+  const { conversationId, customerPhone, customerName } = context;
 
-PRODUTOS FEM: Blusas/Shorts/Vestidos/Conjuntos/Macacão/Casacos/Saias/Moletons/Tricôs/Blazers (P-EXG). Calças/Jeans (34-56). Shorts jeans/Saias jeans (34-46). Plus Size: EXG, G1, G2, G3.
-PRODUTOS MASC: Camisas/Camisetas/Time/Dry-fit/Agro/Blazers/Cargo/Shorts/Casacos/Jaquetas/Moletons/Tricôs (P-EXG). Calças Jeans/Sarja/Bermudas (36-46). NÃO vendemos tênis.
+  switch (toolName) {
+    case 'listar_categorias_promo': {
+      const items = await queryAll("SELECT DISTINCT category FROM promo_items WHERE active = true ORDER BY category");
+      const categories = items.map(i => i.category);
+      if (categories.length === 0) return { resultado: 'Não há promoções ativas no momento.' };
+      return { categorias: categories, mensagem: `${categories.length} categorias disponíveis` };
+    }
 
-PAGAMENTO: PIX, Crédito (até 6x), Débito, Dinheiro, Crediário.
+    case 'buscar_ofertas': {
+      const { categoria } = toolInput;
+      // Busca refs da promoção nesta categoria
+      const promoItems = await queryAll(
+        "SELECT id, ref, display_name FROM promo_items WHERE active = true AND LOWER(category) = LOWER($1)",
+        [categoria]
+      );
+      if (promoItems.length === 0) return { resultado: `Não encontrei ofertas na categoria "${categoria}".` };
 
-QUANDO TRANSFERIR (coloque [TRANSFERIR] no final):
-- Preço/valor de peça específica
-- Tamanho disponível de peça específica
-- Foto de produto específico
-- Cliente quer fazer compra/pedido
-- Reclamação ou problema
-- Qualquer coisa que não consiga resolver`;
+      const refs = promoItems.map(p => p.ref);
+      // Busca produtos do ERP com estoque
+      const products = await erp.getProductsByRefs(refs);
 
-// Histórico de conversa
+      // Agrupa por ref para mostrar 1 entrada por produto (com variações de tamanho/cor)
+      const grouped = {};
+      for (const p of products) {
+        if (!grouped[p.ref]) {
+          const promoItem = promoItems.find(pi => pi.ref === p.ref);
+          grouped[p.ref] = {
+            ref: p.ref,
+            promoItemId: promoItem?.id,
+            nome: promoItem?.display_name || p.name.replace(/\s+(P|M|G|GG|EXG|G1|G2|G3|\d{2})$/i, '').trim(),
+            preco: parseFloat(p.price),
+            foto: p.photo,
+            tamanhos: new Set(),
+            cores: new Set(),
+          };
+        }
+        if (p.size) grouped[p.ref].tamanhos.add(p.size);
+        if (p.color) grouped[p.ref].cores.add(p.color);
+      }
+
+      const ofertas = Object.values(grouped).map(g => ({
+        ref: g.ref,
+        nome: g.nome,
+        preco: `R$ ${g.preco.toFixed(2)}`,
+        tamanhos: [...g.tamanhos].join(', ') || 'variados',
+        cores: [...g.cores].join(', ') || 'variadas',
+      }));
+
+      // Envia fotos via WhatsApp (side-effect)
+      if (deps.wa?.connected && customerPhone) {
+        for (const g of Object.values(grouped)) {
+          try {
+            // Primeiro tenta fotos cadastradas na promoção (por cor)
+            const promoPhotos = g.promoItemId
+              ? await queryAll("SELECT id, color, mime_type, data FROM promo_photos WHERE promo_item_id = $1 ORDER BY color", [g.promoItemId])
+              : [];
+
+            if (promoPhotos.length > 0) {
+              // Envia cada foto (uma por cor)
+              for (const photo of promoPhotos) {
+                const buffer = Buffer.from(photo.data, 'base64');
+                const colorLabel = photo.color ? ` — ${photo.color}` : '';
+                const caption = `${g.nome}${colorLabel}\n💰 R$ ${g.preco.toFixed(2)}\nRef: ${g.ref}`;
+                const waResult = await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
+
+                const msgId = waResult?._waId || deps.genId();
+                const mediaId = 'img_' + msgId;
+                await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+                  [mediaId, photo.mime_type, photo.data]);
+                await queryRun(
+                  "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
+                  [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
+                );
+                await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+                  [`📷 ${g.nome}${colorLabel}`, conversationId]);
+
+                if (deps.broadcast) {
+                  deps.broadcast('new_message', {
+                    conversation: { id: conversationId, last_message: `📷 ${g.nome}${colorLabel}`, last_message_from_me: true },
+                    message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
+                  });
+                }
+              }
+            } else if (g.foto) {
+              // Fallback: foto do ERP
+              const uploadsUrl = process.env.ERP_UPLOADS_URL || '';
+              const photoUrl = g.foto.startsWith('http') ? g.foto : `${uploadsUrl}/${g.foto}`;
+              const response = await fetch(photoUrl);
+              if (response.ok) {
+                const buffer = Buffer.from(await response.arrayBuffer());
+                const caption = `${g.nome}\n💰 R$ ${g.preco.toFixed(2)}\nRef: ${g.ref}`;
+                const waResult = await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
+
+                const msgId = waResult?._waId || deps.genId();
+                const mediaId = 'img_' + msgId;
+                await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+                  [mediaId, 'image/jpeg', buffer.toString('base64')]);
+                await queryRun(
+                  "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
+                  [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
+                );
+                await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+                  [`📷 ${g.nome}`, conversationId]);
+
+                if (deps.broadcast) {
+                  deps.broadcast('new_message', {
+                    conversation: { id: conversationId, last_message: `📷 ${g.nome}`, last_message_from_me: true },
+                    message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            console.error(`⚠️ Erro ao enviar foto do produto ${g.ref}:`, e.message);
+          }
+        }
+      }
+
+      return { ofertas, total: ofertas.length, mensagem: `Encontrei ${ofertas.length} produto(s) na categoria ${categoria}. As fotos foram enviadas.` };
+    }
+
+    case 'enviar_foto_cor': {
+      const { ref, cor } = toolInput;
+
+      // Busca o promo_item pela ref
+      const promoItem = await queryOne(
+        "SELECT id, display_name FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]
+      );
+      if (!promoItem) return { resultado: `Não encontrei o produto ref ${ref} na promoção.` };
+
+      // Busca foto da cor (case-insensitive, parcial)
+      const photo = await queryOne(
+        "SELECT id, color, mime_type, data FROM promo_photos WHERE promo_item_id = $1 AND LOWER(color) LIKE '%' || LOWER($2) || '%' ORDER BY color LIMIT 1",
+        [promoItem.id, cor]
+      );
+
+      if (!photo) {
+        // Lista as cores disponíveis pra Lê informar
+        const available = await queryAll(
+          "SELECT DISTINCT color FROM promo_photos WHERE promo_item_id = $1 ORDER BY color", [promoItem.id]
+        );
+        const coresList = available.map(c => c.color).filter(Boolean);
+        if (coresList.length === 0) return { resultado: `Não temos fotos cadastradas desse produto.` };
+        return { resultado: `Não temos foto na cor "${cor}". As cores com foto são: ${coresList.join(', ')}.` };
+      }
+
+      // Envia a foto via WhatsApp
+      if (deps.wa?.connected && customerPhone) {
+        try {
+          const buffer = Buffer.from(photo.data, 'base64');
+          const caption = `${promoItem.display_name} — ${photo.color}\nRef: ${ref}`;
+          const waResult = await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
+
+          const msgId = waResult?._waId || deps.genId();
+          const mediaId = 'img_' + msgId;
+          await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+            [mediaId, photo.mime_type, photo.data]);
+          await queryRun(
+            "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
+            [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
+          );
+          await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+            [`📷 ${promoItem.display_name} — ${photo.color}`, conversationId]);
+
+          if (deps.broadcast) {
+            deps.broadcast('new_message', {
+              conversation: { id: conversationId, last_message: `📷 ${promoItem.display_name} — ${photo.color}`, last_message_from_me: true },
+              message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
+            });
+          }
+        } catch (e) {
+          console.error(`⚠️ Erro ao enviar foto cor ${cor}:`, e.message);
+          return { resultado: `Erro ao enviar a foto: ${e.message}` };
+        }
+      }
+
+      return { resultado: `Foto da cor ${photo.color} enviada!`, cor_enviada: photo.color, produto: promoItem.display_name };
+    }
+
+    case 'verificar_estoque': {
+      const { ref } = toolInput;
+      const variants = await erp.getProductVariants(ref);
+      if (variants.length === 0) return { resultado: 'Produto sem estoque no momento.' };
+
+      const disponveis = variants.filter(v => parseInt(v.stock) > 0).map(v => ({
+        id: v.id,
+        sku: v.sku,
+        nome: v.name,
+        tamanho: v.size || '-',
+        cor: v.color || '-',
+        preco: `R$ ${parseFloat(v.price).toFixed(2)}`,
+        estoque: parseInt(v.stock),
+      }));
+
+      if (disponveis.length === 0) return { resultado: 'Todas as variações deste produto estão esgotadas.' };
+      return { variacoes_disponiveis: disponveis, total: disponveis.length };
+    }
+
+    case 'adicionar_carrinho': {
+      const { product_id, nome, sku, preco } = toolInput;
+      const cart = getCart(conversationId);
+      const existing = cart.items.find(i => i.product_id === product_id);
+      if (existing) {
+        existing.quantity++;
+      } else {
+        cart.items.push({ product_id, name: nome, sku, price: preco, quantity: 1 });
+      }
+      const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
+      return {
+        carrinho: cart.items.map(i => ({ nome: i.name, quantidade: i.quantity, preco_unitario: `R$ ${i.price.toFixed(2)}`, subtotal: `R$ ${(i.price * i.quantity).toFixed(2)}` })),
+        total: `R$ ${total.toFixed(2)}`,
+        mensagem: `"${nome}" adicionado ao carrinho!`,
+      };
+    }
+
+    case 'ver_carrinho': {
+      const cart = getCart(conversationId);
+      if (cart.items.length === 0) return { carrinho: [], total: 'R$ 0,00', mensagem: 'Carrinho vazio.' };
+      const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
+      return {
+        carrinho: cart.items.map(i => ({ nome: i.name, quantidade: i.quantity, preco_unitario: `R$ ${i.price.toFixed(2)}`, subtotal: `R$ ${(i.price * i.quantity).toFixed(2)}` })),
+        total: `R$ ${total.toFixed(2)}`,
+      };
+    }
+
+    case 'remover_carrinho': {
+      const { product_id } = toolInput;
+      const cart = getCart(conversationId);
+      cart.items = cart.items.filter(i => i.product_id !== product_id);
+      const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
+      return { carrinho: cart.items.map(i => ({ nome: i.name, quantidade: i.quantity })), total: `R$ ${total.toFixed(2)}`, mensagem: 'Item removido.' };
+    }
+
+    case 'finalizar_venda': {
+      const { forma_pagamento } = toolInput;
+      const cart = getCart(conversationId);
+      if (cart.items.length === 0) return { erro: 'Carrinho vazio. Adicione itens antes de finalizar.' };
+
+      try {
+        // Busca cliente no ERP pelo telefone
+        let customerId = null;
+        if (customerPhone) {
+          const customer = await erp.findCustomerByPhone(customerPhone);
+          if (customer) customerId = customer.id;
+        }
+
+        const sale = await erp.createSale({
+          store_id: 'loja4',
+          customer_id: customerId,
+          customer_name: customerName || 'Cliente WhatsApp',
+          customer_phone: customerPhone || '',
+          seller_name: 'Lê (IA)',
+          seller_id: '',
+          items: cart.items,
+          payment_method: forma_pagamento,
+          discount: 0,
+          discount_type: 'fixed',
+          discount_label: '',
+        });
+
+        // Gera e envia cupom via WhatsApp
+        if (deps.wa?.connected && customerPhone) {
+          try {
+            const receiptBuffer = generateReceiptImage(sale, 'Lê (IA)', customerName || 'Cliente');
+            const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\nObrigado pela compra! 🖤`;
+            const cupomResult = await deps.wa.sendImage(customerPhone, receiptBuffer, caption, { isBot: true });
+
+            // Salva no histórico
+            const msgId = cupomResult?._waId || deps.genId();
+            const mediaId = 'img_' + msgId;
+            await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+              [mediaId, 'image/png', receiptBuffer.toString('base64')]);
+            await queryRun(
+              "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
+              [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}`, `/media/${mediaId}`]
+            );
+            const displayText = `🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}`;
+            await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+              [displayText, conversationId]);
+
+            if (deps.broadcast) {
+              deps.broadcast('new_message', {
+                conversation: { id: conversationId, last_message: displayText, last_message_from_me: true },
+                message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
+              });
+            }
+          } catch (e) {
+            console.error('⚠️ Erro ao enviar cupom:', e.message);
+          }
+        }
+
+        // Limpa carrinho
+        carts.delete(conversationId);
+
+        return {
+          sucesso: true,
+          venda: {
+            cupom: sale.cupom,
+            total: `R$ ${sale.total.toFixed(2)}`,
+            itens: sale.items.length,
+            pagamento: forma_pagamento === 'pix' ? 'PIX' : 'Cartão de Crédito',
+          },
+          mensagem: 'Venda registrada e cupom enviado com sucesso!',
+        };
+      } catch (e) {
+        console.error('❌ Erro ao finalizar venda:', e.message);
+        return { erro: 'Erro ao registrar a venda. Vou transferir para uma colega resolver.', transferir: true };
+      }
+    }
+
+    default:
+      return { erro: `Ferramenta "${toolName}" não encontrada.` };
+  }
+}
+
+// ─── Histórico de conversa ───
 async function getConversationHistory(conversationId) {
   const msgs = await queryAll(
     "SELECT from_me, sender, content, media_type FROM messages WHERE conversation_id = $1 ORDER BY timestamp DESC LIMIT 20",
@@ -112,12 +517,13 @@ async function getConversationHistory(conversationId) {
   return msgs.reverse().map(m => ({
     role: m.from_me ? 'assistant' : 'user',
     content: m.media_type === 'audio' ? '[Cliente enviou um áudio]' :
-             m.media_type === 'image' ? '[Cliente enviou uma foto]' :
+             m.media_type === 'image' ? (m.from_me ? '[Foto enviada ao cliente]' : '[Cliente enviou uma foto]') :
              m.content || '[mensagem vazia]',
   }));
 }
 
-async function generateResponse(conversationId, customerMessage, customerName, mediaType) {
+// ─── Geração de resposta com Tool Use ───
+async function generateResponse(conversationId, customerMessage, customerName, mediaType, customerPhone) {
   try {
     const history = await getConversationHistory(conversationId);
 
@@ -141,12 +547,10 @@ async function generateResponse(conversationId, customerMessage, customerName, m
               source: { type: 'base64', media_type: mediaRow.mime_type || 'image/jpeg', data: mediaRow.data },
             };
             userContent = caption || 'Cliente enviou esta foto. Analise o que tem na foto e responda sobre isso.';
-            console.log('🖼️ Imagem carregada do banco pra IA analisar');
           } else {
             userContent = caption || '[Cliente enviou uma foto que não consegui ver. Peça pra descrever o que quer.]';
           }
         } catch (e) {
-          console.error('Erro ao carregar imagem pra IA:', e.message);
           userContent = caption || '[Cliente enviou uma foto. Peça pra descrever o que quer.]';
         }
       } else {
@@ -160,15 +564,13 @@ async function generateResponse(conversationId, customerMessage, customerName, m
       : { role: 'user', content: userContent };
 
     if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
-      // Substitui a última mensagem do usuário (que pode ser o placeholder "[Cliente enviou uma foto]")
-      // pela versão com a imagem real, para não ser descartada pela limpeza de roles consecutivos
       messages[messages.length - 1] = newMsg;
     } else {
       messages.push(newMsg);
     }
 
+    // Limpa: primeiro msg deve ser user, sem roles consecutivos
     while (messages.length > 0 && messages[0].role !== 'user') messages.shift();
-
     const cleaned = [];
     for (const msg of messages) {
       if (cleaned.length === 0 || cleaned[cleaned.length - 1].role !== msg.role) {
@@ -177,11 +579,7 @@ async function generateResponse(conversationId, customerMessage, customerName, m
     }
     if (cleaned.length === 0) cleaned.push({ role: 'user', content: userContent });
 
-    const productCtx = '';
-    const systemWithProducts = SYSTEM_PROMPT + productCtx;
-
-    const startTime = Date.now();
-
+    // API key
     let apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       try {
@@ -191,52 +589,91 @@ async function generateResponse(conversationId, customerMessage, customerName, m
     }
     if (!apiKey) return { text: null, shouldTransfer: true };
 
-    const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey.trim(),
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 200,
-        temperature: 0.9,
-        system: systemWithProducts,
-        messages: cleaned,
-      }),
-    });
-    if (!apiRes.ok) throw new Error(`API Anthropic retornou ${apiRes.status}: ${apiRes.statusText}`);
-    const response = await apiRes.json();
-    if (response.error) throw new Error(JSON.stringify(response.error));
+    const startTime = Date.now();
+    const context = { conversationId, customerPhone, customerName };
+
+    // Tool use loop (max 8 iterações)
+    let currentMessages = cleaned;
+    let finalText = null;
+    let shouldTransfer = false;
+
+    for (let i = 0; i < 8; i++) {
+      const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey.trim(),
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 400,
+          temperature: 0.7,
+          system: SYSTEM_PROMPT,
+          messages: currentMessages,
+          tools: TOOLS,
+        }),
+      });
+
+      if (!apiRes.ok) throw new Error(`API Anthropic retornou ${apiRes.status}: ${apiRes.statusText}`);
+      const response = await apiRes.json();
+      if (response.error) throw new Error(JSON.stringify(response.error));
+
+      // Processa blocos da resposta
+      const textBlocks = [];
+      const toolUseBlocks = [];
+
+      for (const block of (response.content || [])) {
+        if (block.type === 'text') textBlocks.push(block.text);
+        if (block.type === 'tool_use') toolUseBlocks.push(block);
+      }
+
+      // Se tem texto, captura
+      if (textBlocks.length > 0) {
+        finalText = textBlocks.join('\n');
+      }
+
+      // Se não tem tool_use, terminamos
+      if (toolUseBlocks.length === 0) break;
+
+      // Executa tools e monta resultado
+      const toolResults = [];
+      for (const toolBlock of toolUseBlocks) {
+        console.log(`🔧 Lê chamou: ${toolBlock.name}(${JSON.stringify(toolBlock.input)})`);
+        const result = await executeTool(toolBlock.name, toolBlock.input, context);
+        console.log(`🔧 Resultado: ${JSON.stringify(result).slice(0, 200)}`);
+
+        if (result.transferir) shouldTransfer = true;
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolBlock.id,
+          content: JSON.stringify(result),
+        });
+      }
+
+      // Adiciona a resposta do assistant e os resultados das tools
+      currentMessages = [
+        ...currentMessages,
+        { role: 'assistant', content: response.content },
+        { role: 'user', content: toolResults },
+      ];
+    }
+
+    // Processa texto final
+    if (finalText) {
+      if (finalText.includes('[TRANSFERIR]')) shouldTransfer = true;
+      finalText = finalText.replace('[TRANSFERIR]', '').trim();
+    }
+
     const responseTime = Date.now() - startTime;
-
-    const text = (response.content?.[0]?.text) || '';
-    const shouldTransfer = text.includes('[TRANSFERIR]');
-    const cleanText = text.replace('[TRANSFERIR]', '').trim();
-
     await recordMetric(conversationId, responseTime, shouldTransfer);
 
-    return { text: cleanText, shouldTransfer };
+    return { text: finalText, shouldTransfer };
   } catch (e) {
     console.error('❌ Erro IA:', e.message);
     return { text: null, shouldTransfer: true };
   }
-}
-
-async function getProductContext(message) {
-  try {
-    const terms = message.toLowerCase();
-    const keywords = ['calça', 'blusa', 'vestido', 'short', 'camisa', 'camiseta', 'saia', 'conjunto', 'macacão', 'casaco', 'jaqueta', 'moletom', 'blazer', 'bermuda', 'trico', 'cargo', 'jeans'];
-    const found = keywords.filter(k => terms.includes(k));
-    if (found.length === 0) return '';
-    const products = await erp.searchProducts(found[0]);
-    if (products.length === 0) return '';
-    const top5 = products.slice(0, 5);
-    let ctx = '\n\n[PRODUTOS NO ESTOQUE]:\n';
-    top5.forEach(p => { ctx += `- ${p.name} | R$ ${parseFloat(p.price).toFixed(2)} | Tam: ${p.size || 'variados'} | Estoque: ${p.total_stock}\n`; });
-    return ctx;
-  } catch { return ''; }
 }
 
 async function recordMetric(conversationId, responseTimeMs, transferred) {
@@ -258,4 +695,4 @@ async function isAgentEnabled() {
   } catch { return false; }
 }
 
-module.exports = { generateResponse, isAgentEnabled, recordMetric };
+module.exports = { generateResponse, isAgentEnabled, recordMetric, init };

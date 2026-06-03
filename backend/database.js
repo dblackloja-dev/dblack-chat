@@ -5,9 +5,10 @@ const connString = process.env.DATABASE_URL || process.env.NEON_URL || process.e
 const pool = new Pool({
   connectionString: connString,
   ssl: connString && !connString.includes('localhost') ? { rejectUnauthorized: false } : false,
-  max: 10,
+  max: 20,                       // Mais conexões (era 10, muito pouco com IA + webhooks)
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
+  statement_timeout: 15000,      // Mata queries travadas após 15s
 });
 
 // Retry automático em caso de erro de conexão
@@ -183,6 +184,69 @@ async function initDB() {
 
   // Adiciona coluna real_phone se não existir (migração LID)
   await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS real_phone TEXT");
+
+  // Tabela de itens em promoção (Semana de Oportunidade)
+  await queryRun(`
+    CREATE TABLE IF NOT EXISTS promo_items (
+      id TEXT PRIMARY KEY,
+      ref TEXT NOT NULL,
+      category TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // Fotos dos produtos da promoção (múltiplas por ref, uma por cor)
+  await queryRun(`
+    CREATE TABLE IF NOT EXISTS promo_photos (
+      id TEXT PRIMARY KEY,
+      promo_item_id TEXT NOT NULL REFERENCES promo_items(id) ON DELETE CASCADE,
+      color TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+      data TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // ─── ÍNDICES DE PERFORMANCE ───
+  // Sem índices, TODA query faz full table scan — isso é o que deixa o chat lento
+  const indexes = [
+    // Conversas — usados em quase toda query
+    "CREATE INDEX IF NOT EXISTS idx_conv_status ON conversations (status)",
+    "CREATE INDEX IF NOT EXISTS idx_conv_phone ON conversations (phone)",
+    "CREATE INDEX IF NOT EXISTS idx_conv_last_msg ON conversations (last_message_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_conv_status_last_msg ON conversations (status, last_message_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_conv_started ON conversations (started_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_conv_agent ON conversations (agent_id)",
+    // Mensagens — pesadas, muitas linhas
+    "CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages (conversation_id, timestamp ASC)",
+    "CREATE INDEX IF NOT EXISTS idx_msg_timestamp ON messages (timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_msg_content_trgm ON messages USING gin (content gin_trgm_ops)",
+    // Tags
+    "CREATE INDEX IF NOT EXISTS idx_tags_conv ON conversation_tags (conversation_id)",
+    // Métricas IA
+    "CREATE INDEX IF NOT EXISTS idx_ai_metrics_conv ON ai_metrics (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS idx_ai_metrics_date ON ai_metrics (created_at DESC)",
+    // Media
+    "CREATE INDEX IF NOT EXISTS idx_media_created ON media_files (created_at DESC)",
+    // Promoção
+    "CREATE INDEX IF NOT EXISTS idx_promo_active ON promo_items (active, category)",
+    "CREATE INDEX IF NOT EXISTS idx_promo_photos_item ON promo_photos (promo_item_id)",
+    // Settings
+    "CREATE INDEX IF NOT EXISTS idx_settings_key ON chat_settings (key)",
+  ];
+
+  // Habilita extensão pg_trgm para busca ILIKE com índice (se disponível)
+  try { await queryRun("CREATE EXTENSION IF NOT EXISTS pg_trgm"); } catch {}
+
+  for (const idx of indexes) {
+    try { await queryRun(idx); } catch (e) {
+      // Ignora erros (ex: pg_trgm não disponível no plano free)
+      if (!e.message.includes('already exists')) console.log('⚠️ Índice ignorado:', e.message.slice(0, 80));
+    }
+  }
+  console.log('📊 Índices de performance criados');
 
   console.log('✅ D\'Black Chat — Banco inicializado!');
 }

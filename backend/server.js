@@ -22,12 +22,15 @@ const uploadVideo = multer({ storage: multer.memoryStorage(), limits: { fileSize
 const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 const aiAgent = require('./ai-agent');
+const { generateReceiptImage, generateReceiptText } = require('./receipt');
 
 // Valida que JWT_SECRET foi definido no .env (nunca usar fallback hardcoded)
 if (!process.env.JWT_SECRET) {
   console.error('❌ ERRO FATAL: JWT_SECRET não definido no .env! O servidor não vai iniciar sem isso.');
   process.exit(1);
 }
+
+const compression = require('compression');
 
 const app = express();
 const server = http.createServer(app);
@@ -36,6 +39,9 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 // Confia no proxy reverso do Railway/Vercel (necessário para rate limit funcionar corretamente)
 app.set('trust proxy', 1);
+
+// Compressão gzip — reduz tamanho das respostas JSON em ~70%
+app.use(compression());
 
 // Headers de segurança (CSP, X-Frame-Options, etc.)
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
@@ -64,14 +70,38 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Serve mídia salva no banco — protegido por IDs longos e aleatórios (ex: evo_AC71BC721C...)
 // Não exige token JWT para evitar problemas de expiração em <img src> e <audio src>
+// Cache de mídia em memória (evita query no banco pra cada imagem que aparece no chat)
+const mediaCache = new Map();
+const MEDIA_CACHE_MAX = 100; // máx 100 itens
+const MEDIA_CACHE_TTL = 600000; // 10 min
+
 app.get('/media/:id', async (req, res) => {
   try {
-    const file = await queryOne("SELECT mime_type, data FROM media_files WHERE id = $1", [req.params.id]);
+    const id = req.params.id;
+
+    // Verifica cache em memória
+    const cached = mediaCache.get(id);
+    if (cached && Date.now() < cached.expires) {
+      res.set('Content-Type', cached.mime);
+      res.set('Content-Length', cached.buffer.length);
+      res.set('Cache-Control', 'public, max-age=604800, immutable'); // 7 dias (mídia não muda)
+      return res.send(cached.buffer);
+    }
+
+    const file = await queryOne("SELECT mime_type, data FROM media_files WHERE id = $1", [id]);
     if (!file) return res.status(404).send('Not found');
     const buffer = Buffer.from(file.data, 'base64');
+
+    // Salva no cache (limpa se muito grande)
+    if (mediaCache.size >= MEDIA_CACHE_MAX) {
+      const oldest = mediaCache.keys().next().value;
+      mediaCache.delete(oldest);
+    }
+    mediaCache.set(id, { buffer, mime: file.mime_type, expires: Date.now() + MEDIA_CACHE_TTL });
+
     res.set('Content-Type', file.mime_type);
     res.set('Content-Length', buffer.length);
-    res.set('Cache-Control', 'private, max-age=86400');
+    res.set('Cache-Control', 'public, max-age=604800, immutable');
     res.send(buffer);
   } catch (e) { res.status(500).send('Error'); }
 });
@@ -176,6 +206,9 @@ function broadcast(event, data) {
 const wa = new WhatsAppEvolution();
 let currentQR = null;
 let currentPairingCode = null;
+
+// Inicializa agente IA com dependências
+aiAgent.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 
 // Webhook da Evolution API — protegido com chave secreta (opcional)
 // Configure WEBHOOK_SECRET no .env para ativar. Na URL do webhook da Evolution, adicione ?secret=SUA_CHAVE
@@ -285,48 +318,51 @@ wa.on('message', (msg) => {
 
       // ─── AGENTE DE IA "Lê" ───
       // Responde automaticamente se: IA ativa + conversa aguardando (sem atendente humano)
+      // IMPORTANTE: roda FORA da fila para não bloquear mensagens de outros clientes
       if (conv.status === 'aguardando') {
         const aiEnabled = await aiAgent.isAgentEnabled();
         if (aiEnabled) {
-          try {
-            const aiResponse = await aiAgent.generateResponse(conv.id, msg.content, msg.pushName, msg.mediaType);
-            if (aiResponse.text) {
-              // Envia resposta via WhatsApp
-              const aiWaResult = await wa.sendMessage(msg.phone, aiResponse.text, { isBot: true });
+          const aiConvId = conv.id;
+          const aiPhone = msg.phone;
+          const aiPushName = msg.pushName;
+          const aiContent = msg.content;
+          const aiMediaType = msg.mediaType;
 
-              // Salva no banco com ID do WhatsApp para rastrear entrega/leitura
-              const aiMsgId = aiWaResult?._waId || genId();
-              await queryRun(
-                "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
-                [aiMsgId, conv.id, 'Lê (IA)', aiResponse.text]
-              );
-              await queryRun(
-                "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
-                [aiResponse.text, conv.id]
-              );
-
-              // Notifica atendentes
-              broadcast('new_message', {
-                conversation: { ...conv, last_message: aiResponse.text, last_message_from_me: true },
-                message: { id: aiMsgId, conversation_id: conv.id, from_me: true, sender: 'Lê (IA)', content: aiResponse.text, timestamp: new Date().toISOString() },
-              });
-
-              console.log(`🤖 Lê respondeu para ${msg.pushName || msg.phone}`);
-
-              // Se precisa transferir, marca a conversa
-              if (aiResponse.shouldTransfer) {
-                console.log(`🔀 Lê transferindo ${msg.pushName || msg.phone} para atendente humano`);
-                // Mantém como aguardando mas adiciona flag
+          // Processa IA em background (não bloqueia a fila)
+          setImmediate(async () => {
+            try {
+              const aiResponse = await aiAgent.generateResponse(aiConvId, aiContent, aiPushName, aiMediaType, aiPhone);
+              if (aiResponse.text) {
+                const aiWaResult = await wa.sendMessage(aiPhone, aiResponse.text, { isBot: true });
+                const aiMsgId = aiWaResult?._waId || genId();
+                await queryRun(
+                  "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
+                  [aiMsgId, aiConvId, 'Lê (IA)', aiResponse.text]
+                );
                 await queryRun(
                   "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
-                  ['🔀 IA transferiu para atendente', conv.id]
+                  [aiResponse.text, aiConvId]
                 );
-                broadcast('conversation_updated', { ...conv, last_message: '🔀 IA transferiu para atendente' });
+                const freshConv = await queryOne("SELECT * FROM conversations WHERE id = $1", [aiConvId]);
+                broadcast('new_message', {
+                  conversation: freshConv || { id: aiConvId, last_message: aiResponse.text, last_message_from_me: true },
+                  message: { id: aiMsgId, conversation_id: aiConvId, from_me: true, sender: 'Lê (IA)', content: aiResponse.text, timestamp: new Date().toISOString() },
+                });
+                console.log(`🤖 Lê respondeu para ${aiPushName || aiPhone}`);
+
+                if (aiResponse.shouldTransfer) {
+                  console.log(`🔀 Lê transferindo ${aiPushName || aiPhone} para atendente humano`);
+                  await queryRun(
+                    "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+                    ['🔀 IA transferiu para atendente', aiConvId]
+                  );
+                  broadcast('conversation_updated', { ...freshConv, last_message: '🔀 IA transferiu para atendente' });
+                }
               }
+            } catch (e) {
+              console.error('❌ Erro IA ao responder:', e.message);
             }
-          } catch (e) {
-            console.error('❌ Erro IA ao responder:', e.message);
-          }
+          });
         }
       }
 
@@ -389,7 +425,13 @@ app.get('/api/users', auth, async (req, res) => {
 // ═══════════════════════════════════
 app.get('/api/conversations', auth, async (req, res) => {
   try {
-    const convs = await queryAll("SELECT * FROM conversations ORDER BY last_message_at DESC");
+    // Só carrega conversas ativas + finalizadas dos últimos 2 dias (não precisa de 10 mil conversas antigas)
+    const convs = await queryAll(
+      `SELECT * FROM conversations
+       WHERE status != 'finalizado' OR finished_at > NOW() - INTERVAL '2 days'
+       ORDER BY last_message_at DESC
+       LIMIT 200`
+    );
     res.json(convs);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -449,8 +491,11 @@ app.put('/api/conversations/:id/real-phone', auth, async (req, res) => {
 // ═══════════════════════════════════
 app.get('/api/messages/:conversationId', auth, async (req, res) => {
   try {
+    // Carrega últimas 100 mensagens (conversas longas não precisam carregar tudo)
     const msgs = await queryAll(
-      "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY timestamp ASC",
+      `SELECT * FROM (
+        SELECT * FROM messages WHERE conversation_id = $1 ORDER BY timestamp DESC LIMIT 100
+      ) sub ORDER BY timestamp ASC`,
       [req.params.conversationId]
     );
     // Marca como lido — mas NÃO se for admin (admin só monitora)
@@ -789,12 +834,12 @@ app.get('/api/conversations/history/:phone', auth, async (req, res) => {
 app.get('/api/messages/search', auth, async (req, res) => {
   try {
     const { q } = req.query;
-    if (!q || q.length < 2) return res.json([]);
+    if (!q || q.length < 3) return res.json([]); // Mínimo 3 chars (reduz queries pesadas)
     const msgs = await queryAll(
       `SELECT m.*, c.customer_push_name, c.phone FROM messages m
        JOIN conversations c ON m.conversation_id = c.id
        WHERE m.content ILIKE $1
-       ORDER BY m.timestamp DESC LIMIT 50`,
+       ORDER BY m.timestamp DESC LIMIT 30`,
       [`%${q}%`]
     );
     res.json(msgs);
@@ -973,17 +1018,103 @@ app.delete('/api/ai-agents/:id', auth, async (req, res) => {
 });
 
 // ═══════════════════════════════════
+// ═══  PROMOÇÃO (Semana de Oportunidade) ═══
+// ═══════════════════════════════════
+app.get('/api/promo-items', auth, async (req, res) => {
+  try { res.json(await queryAll("SELECT * FROM promo_items ORDER BY category, display_name")); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/promo-items', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { ref, category, display_name } = req.body;
+    if (!ref || !category || !display_name) return res.status(400).json({ error: 'ref, category e display_name são obrigatórios' });
+    const id = genId();
+    await queryRun("INSERT INTO promo_items (id, ref, category, display_name) VALUES ($1,$2,$3,$4)", [id, ref, category, display_name]);
+    res.json({ id, ref, category, display_name, active: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/promo-items/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { category, display_name, active } = req.body;
+    await queryRun("UPDATE promo_items SET category = COALESCE($1, category), display_name = COALESCE($2, display_name), active = COALESCE($3, active) WHERE id = $4",
+      [category, display_name, active, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/promo-items/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    await queryRun("DELETE FROM promo_items WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Fotos da promoção (múltiplas por produto/cor)
+app.get('/api/promo-items/:id/photos', auth, async (req, res) => {
+  try {
+    const photos = await queryAll("SELECT id, promo_item_id, color, mime_type, created_at FROM promo_photos WHERE promo_item_id = $1 ORDER BY color", [req.params.id]);
+    res.json(photos);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/promo-items/:id/photos', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { color, image } = req.body; // image = base64 string
+    if (!image) return res.status(400).json({ error: 'image (base64) é obrigatório' });
+    const id = genId();
+    const mime = image.startsWith('/9j/') ? 'image/jpeg' : image.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
+    await queryRun("INSERT INTO promo_photos (id, promo_item_id, color, mime_type, data) VALUES ($1,$2,$3,$4,$5)",
+      [id, req.params.id, color || '', mime, image]);
+    res.json({ id, promo_item_id: req.params.id, color: color || '', mime_type: mime });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/promo-photos/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    await queryRun("DELETE FROM promo_photos WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Serve foto da promo (público, pra IA enviar)
+app.get('/api/promo-photos/:id/image', async (req, res) => {
+  try {
+    const photo = await queryOne("SELECT mime_type, data FROM promo_photos WHERE id = $1", [req.params.id]);
+    if (!photo) return res.status(404).json({ error: 'Foto não encontrada' });
+    const buffer = Buffer.from(photo.data, 'base64');
+    res.set('Content-Type', photo.mime_type);
+    res.set('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════
 // ═══  DASHBOARD / RELATÓRIOS     ═══
 // ═══════════════════════════════════
+// Cache simples do dashboard (evita 5+ queries pesadas a cada request)
+let dashboardCache = { data: null, expires: 0 };
+
 app.get('/api/dashboard', auth, async (req, res) => {
   try {
+    // Cache de 10 segundos — evita múltiplos atendentes disparando a mesma query
+    if (dashboardCache.data && Date.now() < dashboardCache.expires) {
+      return res.json(dashboardCache.data);
+    }
+
     const todayStr = today();
     const [totalConvs, todayConvs, waitingConvs, activeConvs, totalMsgsToday] = await Promise.all([
       queryOne("SELECT COUNT(*) as c FROM conversations"),
       queryOne("SELECT COUNT(*) as c FROM conversations WHERE started_at::date = $1", [todayStr]),
       queryOne("SELECT COUNT(*) as c FROM conversations WHERE status = 'aguardando'"),
       queryOne("SELECT COUNT(*) as c FROM conversations WHERE status = 'atendendo'"),
-      queryOne("SELECT COUNT(*) as c FROM messages WHERE timestamp::date = $1", [todayStr]),
+      queryOne("SELECT COUNT(*) as c FROM messages WHERE timestamp >= $1::date", [todayStr]),
     ]);
     // Vendas do dia no ERP
     let todaySales = { count: 0, total: 0 };
@@ -996,7 +1127,7 @@ app.get('/api/dashboard', auth, async (req, res) => {
       "SELECT agent_name, COUNT(*) as total FROM conversations WHERE status = 'finalizado' AND finished_at::date = $1 AND agent_name IS NOT NULL GROUP BY agent_name ORDER BY total DESC LIMIT 5",
       [todayStr]
     );
-    res.json({
+    const result = {
       total_conversations: parseInt(totalConvs.c),
       today_conversations: parseInt(todayConvs.c),
       waiting: parseInt(waitingConvs.c),
@@ -1004,7 +1135,9 @@ app.get('/api/dashboard', auth, async (req, res) => {
       today_messages: parseInt(totalMsgsToday.c),
       today_sales: todaySales,
       top_agents: topAgents,
-    });
+    };
+    dashboardCache = { data: result, expires: Date.now() + 10000 };
+    res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1025,15 +1158,16 @@ app.get('/api/reports', auth, async (req, res) => {
 // Contatos do Chat (clientes que mandaram mensagem)
 app.get('/api/contacts', auth, async (req, res) => {
   try {
+    // Removida subquery correlacionada (N+1) — agora usa só agregação simples
     const contacts = await queryAll(`
       SELECT phone, MAX(customer_push_name) as customer_push_name,
              COUNT(DISTINCT id) as total_conversations,
-             (SELECT COUNT(*) FROM messages m JOIN conversations c2 ON m.conversation_id = c2.id WHERE c2.phone = conversations.phone AND m.from_me = false) as total_messages,
              MIN(started_at) as first_contact,
              MAX(last_message_at) as last_contact
       FROM conversations
       GROUP BY phone
       ORDER BY MAX(last_message_at) DESC
+      LIMIT 500
     `);
     res.json(contacts);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1176,165 +1310,7 @@ app.post('/api/erp/sales', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Gera cupom não fiscal como imagem
-function generateReceiptImage(sale, sellerName, customerName) {
-  const W = 420;
-  const pad = 24;
-  const lh = 24;
-  // Fonte que funciona em Linux (Railway) e Windows
-  const F = 'DejaVu Sans, Arial, sans-serif';
-
-  // Calcula altura
-  const itemCount = sale.items.length;
-  const H = 280 + (itemCount * 52) + (sale.discount > 0 ? 28 : 0);
-
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext('2d');
-
-  // Fundo
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, W, H);
-
-  let y = pad;
-  const cx = W / 2;
-  const r = W - pad;
-
-  const line = () => {
-    ctx.strokeStyle = '#CCCCCC';
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(r, y); ctx.stroke();
-    ctx.setLineDash([]);
-    y += 12;
-  };
-
-  // Cabeçalho
-  ctx.fillStyle = '#000';
-  ctx.font = `bold 20px ${F}`;
-  ctx.textAlign = 'center';
-  ctx.fillText("D'BLACK STORE", cx, y); y += lh;
-  ctx.font = `11px ${F}`;
-  ctx.fillStyle = '#666';
-  ctx.fillText('CUPOM NÃO FISCAL', cx, y); y += 8;
-  line();
-
-  // Info
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#333';
-  ctx.font = `12px ${F}`;
-  const now = new Date();
-  const dataStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  ctx.fillText(`Data: ${dataStr}`, pad, y);
-  ctx.textAlign = 'right';
-  ctx.fillText(`Vendedor: ${sellerName}`, r, y); y += 18;
-  if (customerName) {
-    ctx.textAlign = 'left';
-    ctx.fillText(`Cliente: ${customerName}`, pad, y); y += 18;
-  }
-  if (sale.cupom) {
-    ctx.textAlign = 'left';
-    ctx.fillText(`Cupom: ${sale.cupom}`, pad, y); y += 18;
-  }
-  line();
-
-  // Itens
-  for (const item of sale.items) {
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#000';
-    ctx.font = `bold 12px ${F}`;
-    ctx.fillText(`${item.quantity}x ${item.name}`, pad, y);
-    ctx.textAlign = 'right';
-    ctx.font = `bold 12px ${F}`;
-    ctx.fillText(`R$ ${(item.price * item.quantity).toFixed(2)}`, r, y); y += 18;
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#888';
-    ctx.font = `10px ${F}`;
-    ctx.fillText(`SKU: ${item.sku || '-'}  |  R$ ${item.price.toFixed(2)} cada`, pad + 8, y); y += 22;
-  }
-  line();
-
-  // Subtotal
-  ctx.fillStyle = '#333';
-  ctx.font = `13px ${F}`;
-  ctx.textAlign = 'left';
-  ctx.fillText('Subtotal:', pad, y);
-  ctx.textAlign = 'right';
-  ctx.fillText(`R$ ${sale.subtotal.toFixed(2)}`, r, y); y += lh;
-
-  // Desconto
-  if (sale.discount > 0) {
-    ctx.fillStyle = '#CC0000';
-    ctx.font = `13px ${F}`;
-    ctx.textAlign = 'left';
-    ctx.fillText('Desconto:', pad, y);
-    ctx.textAlign = 'right';
-    ctx.fillText(`- R$ ${sale.discount.toFixed(2)}`, r, y); y += lh;
-  }
-
-  // Total
-  ctx.fillStyle = '#000';
-  ctx.font = `bold 18px ${F}`;
-  ctx.textAlign = 'left';
-  ctx.fillText('TOTAL:', pad, y);
-  ctx.textAlign = 'right';
-  ctx.fillText(`R$ ${sale.total.toFixed(2)}`, r, y); y += lh + 4;
-
-  // Pagamento
-  const payLabels = { pix: 'PIX', dinheiro: 'Dinheiro', credito: 'Cartão Crédito', debito: 'Cartão Débito', crediario: 'Crediário' };
-  ctx.font = `12px ${F}`;
-  ctx.fillStyle = '#333';
-  ctx.textAlign = 'left';
-  ctx.fillText(`Pagamento: ${payLabels[sale.payment_method] || sale.payment_method}`, pad, y); y += 8;
-  line();
-
-  // Rodapé
-  y += 4;
-  ctx.fillStyle = '#000';
-  ctx.font = `bold 12px ${F}`;
-  ctx.textAlign = 'center';
-  ctx.fillText('Obrigado pela preferencia!', cx, y); y += 18;
-  ctx.font = `10px ${F}`;
-  ctx.fillStyle = '#666';
-  ctx.fillText("D'Black Store — @d_blackloja", cx, y);
-
-  return canvas.toBuffer('image/png');
-}
-
-// Gera cupom não fiscal como texto formatado para WhatsApp
-function generateReceiptText(sale, sellerName, customerName) {
-  const payLabels = { pix: 'PIX', dinheiro: 'Dinheiro', credito: 'Cartão Crédito', debito: 'Cartão Débito', crediario: 'Crediário' };
-  const now = new Date();
-  const data = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-  let text = `━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `    🖤 *D'BLACK STORE*\n`;
-  text += `     CUPOM NÃO FISCAL\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `📅 ${data}\n`;
-  text += `👤 Vendedor: ${sellerName}\n`;
-  if (customerName) text += `🙋 Cliente: ${customerName}\n`;
-  if (sale.cupom) text += `🧾 Cupom: ${sale.cupom}\n`;
-  text += `────────────────────\n`;
-  text += `*ITENS:*\n\n`;
-
-  for (const item of sale.items) {
-    text += `▸ ${item.quantity}x ${item.name}\n`;
-    text += `   SKU: ${item.sku || '-'} | R$ ${item.price.toFixed(2)} cada\n`;
-    text += `   *Subtotal: R$ ${(item.price * item.quantity).toFixed(2)}*\n\n`;
-  }
-
-  text += `────────────────────\n`;
-  text += `Subtotal: R$ ${sale.subtotal.toFixed(2)}\n`;
-  if (sale.discount > 0) {
-    text += `Desconto: - R$ ${sale.discount.toFixed(2)}\n`;
-  }
-  text += `\n💰 *TOTAL: R$ ${sale.total.toFixed(2)}*\n`;
-  text += `💳 Pagamento: ${payLabels[sale.payment_method] || sale.payment_method}\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `  Obrigado pela preferência! 🛍️\n`;
-  text += `  *D'Black Store* — @d_blackloja`;
-
-  return text;
-}
+// Receipt functions moved to receipt.js (shared with ai-agent.js)
 
 // ═══════════════════════════════════
 // ═══  START                      ═══
