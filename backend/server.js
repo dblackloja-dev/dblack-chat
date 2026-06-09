@@ -415,11 +415,13 @@ wa.on('message', (msg) => {
           } catch (e) { console.error('Erro ao enviar saudação:', e.message); }
         }
       } else {
-        // Atualiza conversa existente
+        // Atualiza conversa existente — se finalizada, reabre como aguardando
+        const reopen = conv.status === 'finalizado' ? ", status = 'aguardando', assigned_to = NULL" : '';
         await queryRun(
-          "UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW(), last_message_from_me = false, customer_push_name = COALESCE(NULLIF($2, ''), customer_push_name), real_phone = COALESCE(NULLIF($4, ''), real_phone) WHERE id = $3",
+          `UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW(), last_message_from_me = false, customer_push_name = COALESCE(NULLIF($2, ''), customer_push_name), real_phone = COALESCE(NULLIF($4, ''), real_phone)${reopen} WHERE id = $3`,
           [msg.content, msg.pushName || '', conv.id, msg.realPhone || '']
         );
+        if (conv.status === 'finalizado') console.log(`🔄 Conversa ${conv.phone} reaberta (era finalizada)`);
         conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
       }
 
