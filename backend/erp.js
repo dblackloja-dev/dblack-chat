@@ -155,7 +155,8 @@ async function listUsers() {
   return erpQuery("SELECT id, name, email, role, store_id, active, avatar FROM users WHERE active = true ORDER BY name");
 }
 
-// Busca produtos do ERP por lista de refs (para promoção), com estoque da loja online
+// Busca produtos do ERP por lista de refs (para promoção)
+// Não filtra por estoque — o estoque promo é controlado separadamente
 async function getProductsByRefs(refs, storeId = 'loja4') {
   if (!refs.length) return [];
   const placeholders = refs.map((_, i) => `$${i + 1}`).join(',');
@@ -168,7 +169,6 @@ async function getProductsByRefs(refs, storeId = 'loja4') {
      LEFT JOIN stock s ON s.product_id = p.id
      WHERE p.active = true AND p.ref IN (${placeholders})
      GROUP BY p.id
-     HAVING COALESCE(SUM(CASE WHEN s.stock_id = ${storeParam} THEN s.quantity ELSE 0 END), 0) > 0
      ORDER BY p.ref, p.name`,
     [...refs, storeId]
   );

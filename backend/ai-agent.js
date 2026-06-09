@@ -426,21 +426,18 @@ async function executeTool(toolName, toolInput, context) {
       }
 
       const disponveis = variants.filter(v => {
-        if (parseInt(v.stock) <= 0) return false;
-        if (stockMode === 'erp') return true;
         if (stockMode === 'grid') {
           const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
           const ps = promoStockMap[key];
-          if (ps) return (ps.limit - ps.sold) > 0;
-          return false;
+          return ps ? (ps.limit - ps.sold) > 0 : false;
         }
         if (stockMode === 'photo') {
           const cor = (v.color || '').toLowerCase();
           const ps = promoStockMap[cor];
-          if (ps) return (ps.limit - ps.sold) > 0;
-          return false;
+          return ps ? (ps.limit - ps.sold) > 0 : false;
         }
-        return true;
+        // Modo ERP: usa estoque do ERP
+        return parseInt(v.stock) > 0;
       }).map(v => {
         let estoquePromo = null;
         if (stockMode === 'grid') {
@@ -460,7 +457,7 @@ async function executeTool(toolName, toolInput, context) {
           cor: v.color || '-',
           preco: `R$ ${(promoPrice || parseFloat(v.price)).toFixed(2)}`,
           ...(promoPrice ? { preco_original: `R$ ${parseFloat(v.price).toFixed(2)}` } : {}),
-          estoque: estoquePromo !== null ? Math.min(parseInt(v.stock), estoquePromo) : parseInt(v.stock),
+          estoque: estoquePromo !== null ? estoquePromo : parseInt(v.stock),
         };
       });
 
