@@ -248,14 +248,14 @@ app.post('/api/webhook/asaas', async (req, res) => {
 
     const cartItems = JSON.parse(pending.cart_data);
 
-    // Incrementa stock_sold nas cores vendidas
+    // Incrementa stock_sold nas combinações cor+tamanho vendidas
     for (const item of cartItems) {
-      if (item.color) {
+      if (item.ref) {
         await queryRun(
-          `UPDATE promo_photos SET stock_sold = stock_sold + $1
+          `UPDATE promo_stock SET stock_sold = stock_sold + $1
            WHERE promo_item_id IN (SELECT id FROM promo_items WHERE LOWER(ref) = LOWER($2))
-             AND LOWER(color) = LOWER($3) AND stock_limit > 0`,
-          [item.quantity || 1, item.ref || '', item.color]
+             AND LOWER(color) = LOWER($3) AND LOWER(size) = LOWER($4) AND stock_limit > 0`,
+          [item.quantity || 1, item.ref, item.color || '', item.size || '']
         );
       }
     }
@@ -1211,6 +1211,46 @@ app.delete('/api/promo-photos/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
     await queryRun("DELETE FROM promo_photos WHERE id = $1", [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Estoque promo por cor+tamanho
+app.get('/api/promo-items/:id/stock', auth, async (req, res) => {
+  try {
+    const rows = await queryAll("SELECT * FROM promo_stock WHERE promo_item_id = $1 ORDER BY color, size", [req.params.id]);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/promo-items/:id/stock', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { color, size, stock_limit } = req.body;
+    if (!color && !size) return res.status(400).json({ error: 'cor ou tamanho obrigatório' });
+    const id = genId();
+    await queryRun(
+      "INSERT INTO promo_stock (id, promo_item_id, color, size, stock_limit) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (promo_item_id, color, size) DO UPDATE SET stock_limit = $5",
+      [id, req.params.id, color || '', size || '', parseInt(stock_limit) || 0]
+    );
+    const row = await queryOne("SELECT * FROM promo_stock WHERE promo_item_id = $1 AND color = $2 AND size = $3", [req.params.id, color || '', size || '']);
+    res.json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/promo-stock/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { stock_limit } = req.body;
+    await queryRun("UPDATE promo_stock SET stock_limit = $1 WHERE id = $2", [parseInt(stock_limit) || 0, req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/promo-stock/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    await queryRun("DELETE FROM promo_stock WHERE id = $1", [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

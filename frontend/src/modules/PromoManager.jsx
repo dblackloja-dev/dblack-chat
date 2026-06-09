@@ -13,8 +13,12 @@ export default function PromoManager() {
   const [promoPrice, setPromoPrice] = useState('');
   const [expandedItem, setExpandedItem] = useState(null); // id do item expandido pra ver fotos
   const [photos, setPhotos] = useState({}); // { promoItemId: [photo, ...] }
+  const [stockData, setStockData] = useState({}); // { promoItemId: [stock, ...] }
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoColor, setPhotoColor] = useState('');
+  const [newStockColor, setNewStockColor] = useState('');
+  const [newStockSize, setNewStockSize] = useState('');
+  const [newStockLimit, setNewStockLimit] = useState('');
   const fileInputRef = useRef(null);
   const searchTimeout = useRef(null);
 
@@ -99,11 +103,18 @@ export default function PromoManager() {
     if (expandedItem === itemId) { setExpandedItem(null); return; }
     setExpandedItem(itemId);
     setPhotoColor('');
+    setNewStockColor(''); setNewStockSize(''); setNewStockLimit('');
     if (!photos[itemId]) {
       try {
         const p = await api.getPromoPhotos(itemId);
         setPhotos(prev => ({ ...prev, [itemId]: p }));
       } catch { setPhotos(prev => ({ ...prev, [itemId]: [] })); }
+    }
+    if (!stockData[itemId]) {
+      try {
+        const s = await api.getPromoStock(itemId);
+        setStockData(prev => ({ ...prev, [itemId]: s }));
+      } catch { setStockData(prev => ({ ...prev, [itemId]: [] })); }
     }
   };
 
@@ -382,6 +393,96 @@ export default function PromoManager() {
                               })}
                             </div>
                           )}
+
+                          {/* Grade de estoque por cor + tamanho */}
+                          <div style={{ marginTop: 16, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
+                            <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                              Estoque por Cor + Tamanho
+                            </div>
+
+                            {/* Adicionar nova combinação */}
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+                              <input
+                                style={{ ...inputStyle, width: 110, padding: '6px 10px', fontSize: 13 }}
+                                placeholder="Cor"
+                                value={newStockColor}
+                                onChange={e => setNewStockColor(e.target.value)}
+                              />
+                              <input
+                                style={{ ...inputStyle, width: 70, padding: '6px 10px', fontSize: 13 }}
+                                placeholder="Tam"
+                                value={newStockSize}
+                                onChange={e => setNewStockSize(e.target.value)}
+                              />
+                              <input
+                                style={{ ...inputStyle, width: 60, padding: '6px 10px', fontSize: 13, textAlign: 'center' }}
+                                placeholder="Qtd"
+                                type="number"
+                                min="0"
+                                value={newStockLimit}
+                                onChange={e => setNewStockLimit(e.target.value)}
+                              />
+                              <button
+                                onClick={async () => {
+                                  if (!newStockColor && !newStockSize) return;
+                                  try {
+                                    const s = await api.addPromoStock(item.id, { color: newStockColor, size: newStockSize, stock_limit: parseInt(newStockLimit) || 0 });
+                                    setStockData(prev => {
+                                      const existing = (prev[item.id] || []).filter(x => !(x.color === s.color && x.size === s.size));
+                                      return { ...prev, [item.id]: [...existing, s] };
+                                    });
+                                    setNewStockColor(''); setNewStockSize(''); setNewStockLimit('');
+                                  } catch (err) { alert(err.message); }
+                                }}
+                                style={{ ...btnStyle, padding: '6px 12px', background: '#1eba8a', color: '#0d1b18', fontSize: 12 }}
+                              >
+                                +
+                              </button>
+                            </div>
+
+                            {/* Tabela de estoque */}
+                            {(stockData[item.id] || []).length > 0 && (
+                              <div style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 60px 40px', padding: '6px 10px', background: 'rgba(255,255,255,0.06)', fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>
+                                  <span>Cor</span><span>Tamanho</span><span>Limite</span><span>Vendido</span><span></span>
+                                </div>
+                                {(stockData[item.id] || []).map(s => {
+                                  const restante = (s.stock_limit || 0) - (s.stock_sold || 0);
+                                  const esg = s.stock_limit > 0 && restante <= 0;
+                                  return (
+                                    <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 60px 40px', padding: '6px 10px', borderTop: '1px solid rgba(255,255,255,0.05)', alignItems: 'center', opacity: esg ? 0.4 : 1 }}>
+                                      <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>{s.color || '-'}</span>
+                                      <span style={{ color: '#fff', fontSize: 12 }}>{s.size || '-'}</span>
+                                      <input
+                                        type="number" min="0"
+                                        defaultValue={s.stock_limit || 0}
+                                        style={{ width: 50, padding: '2px 4px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12, textAlign: 'center' }}
+                                        onBlur={async (e) => {
+                                          const val = parseInt(e.target.value) || 0;
+                                          if (val !== (s.stock_limit || 0)) {
+                                            try {
+                                              await api.updatePromoStock(s.id, { stock_limit: val });
+                                              setStockData(prev => ({ ...prev, [item.id]: (prev[item.id] || []).map(x => x.id === s.id ? { ...x, stock_limit: val } : x) }));
+                                            } catch (err) { alert(err.message); }
+                                          }
+                                        }}
+                                      />
+                                      <span style={{ color: esg ? '#ea0038' : 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: esg ? 700 : 400 }}>{s.stock_sold || 0}</span>
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            await api.deletePromoStock(s.id);
+                                            setStockData(prev => ({ ...prev, [item.id]: (prev[item.id] || []).filter(x => x.id !== s.id) }));
+                                          } catch (err) { alert(err.message); }
+                                        }}
+                                        style={{ background: 'none', border: 'none', color: '#ea0038', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+                                      >X</button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

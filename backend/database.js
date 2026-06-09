@@ -227,6 +227,19 @@ async function initDB() {
     )
   `);
 
+  // Estoque promocional por cor + tamanho
+  await queryRun(`
+    CREATE TABLE IF NOT EXISTS promo_stock (
+      id TEXT PRIMARY KEY,
+      promo_item_id TEXT NOT NULL REFERENCES promo_items(id) ON DELETE CASCADE,
+      color TEXT NOT NULL DEFAULT '',
+      size TEXT NOT NULL DEFAULT '',
+      stock_limit INTEGER DEFAULT 0,
+      stock_sold INTEGER DEFAULT 0,
+      UNIQUE(promo_item_id, color, size)
+    )
+  `);
+
   // ─── ÍNDICES DE PERFORMANCE ───
   // Sem índices, TODA query faz full table scan — isso é o que deixa o chat lento
   const indexes = [

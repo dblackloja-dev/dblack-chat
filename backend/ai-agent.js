@@ -160,10 +160,11 @@ const TOOLS = [
         ref: { type: 'string', description: 'Código de referência do produto (ref)' },
         nome: { type: 'string', description: 'Nome do produto para exibição' },
         cor: { type: 'string', description: 'Cor escolhida pelo cliente' },
+        tamanho: { type: 'string', description: 'Tamanho escolhido pelo cliente (P, M, G, GG, etc)' },
         sku: { type: 'string', description: 'SKU do produto' },
         preco: { type: 'number', description: 'Preço unitário' },
       },
-      required: ['product_id', 'ref', 'nome', 'cor', 'sku', 'preco'],
+      required: ['product_id', 'ref', 'nome', 'cor', 'tamanho', 'sku', 'preco'],
     },
   },
   {
@@ -393,31 +394,34 @@ async function executeTool(toolName, toolInput, context) {
       const promoItem = await queryOne("SELECT id, promo_price FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]);
       const promoPrice = promoItem?.promo_price ? parseFloat(promoItem.promo_price) : null;
 
-      // Estoque promo por cor (se configurado, limita a venda)
-      let promoStockByColor = {};
+      // Estoque promo por cor+tamanho (se configurado, limita a venda)
+      let promoStockMap = {};
       if (promoItem) {
-        const promoPhotos = await queryAll(
-          "SELECT color, stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 AND stock_limit > 0",
+        const promoStockRows = await queryAll(
+          "SELECT color, size, stock_limit, stock_sold FROM promo_stock WHERE promo_item_id = $1 AND stock_limit > 0",
           [promoItem.id]
         );
-        for (const pp of promoPhotos) {
-          promoStockByColor[pp.color.toLowerCase()] = { limit: pp.stock_limit, sold: pp.stock_sold || 0 };
+        for (const ps of promoStockRows) {
+          const key = `${(ps.color || '').toLowerCase()}|${(ps.size || '').toLowerCase()}`;
+          promoStockMap[key] = { limit: ps.stock_limit, sold: ps.stock_sold || 0 };
         }
       }
 
+      const hasPromoStock = Object.keys(promoStockMap).length > 0;
+
       const disponveis = variants.filter(v => {
         if (parseInt(v.stock) <= 0) return false;
-        // Se tem limite promo por cor, verifica
-        const cor = (v.color || '').toLowerCase();
-        if (promoStockByColor[cor]) {
-          const restante = promoStockByColor[cor].limit - promoStockByColor[cor].sold;
-          if (restante <= 0) return false;
-        }
-        return true;
+        if (!hasPromoStock) return true;
+        // Verifica estoque promo por cor+tamanho
+        const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
+        const ps = promoStockMap[key];
+        if (ps) return (ps.limit - ps.sold) > 0;
+        // Se não tem entrada específica, não está na promo (bloqueia)
+        return false;
       }).map(v => {
-        const cor = (v.color || '').toLowerCase();
-        const promoStock = promoStockByColor[cor];
-        const estoquePromo = promoStock ? promoStock.limit - promoStock.sold : null;
+        const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
+        const ps = promoStockMap[key];
+        const estoquePromo = ps ? ps.limit - ps.sold : null;
         return {
           id: v.id,
           sku: v.sku,
@@ -435,13 +439,13 @@ async function executeTool(toolName, toolInput, context) {
     }
 
     case 'adicionar_carrinho': {
-      const { product_id, ref, nome, cor, sku, preco } = toolInput;
+      const { product_id, ref, nome, cor, tamanho, sku, preco } = toolInput;
       const cart = getCart(conversationId);
       const existing = cart.items.find(i => i.product_id === product_id);
       if (existing) {
         existing.quantity++;
       } else {
-        cart.items.push({ product_id, ref: ref || '', name: nome, color: cor || '', sku, price: preco, quantity: 1 });
+        cart.items.push({ product_id, ref: ref || '', name: nome, color: cor || '', size: tamanho || '', sku, price: preco, quantity: 1 });
       }
       const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
       return {

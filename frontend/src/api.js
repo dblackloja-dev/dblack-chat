@@ -196,6 +196,10 @@ const api = {
   addPromoPhoto: (promoItemId, data) => request(`/promo-items/${promoItemId}/photos`, { method: 'POST', body: data }),
   updatePromoPhoto: (photoId, data) => request(`/promo-photos/${photoId}`, { method: 'PUT', body: data }),
   deletePromoPhoto: (photoId) => request(`/promo-photos/${photoId}`, { method: 'DELETE' }),
+  getPromoStock: (promoItemId) => request(`/promo-items/${promoItemId}/stock`),
+  addPromoStock: (promoItemId, data) => request(`/promo-items/${promoItemId}/stock`, { method: 'POST', body: data }),
+  updatePromoStock: (stockId, data) => request(`/promo-stock/${stockId}`, { method: 'PUT', body: data }),
+  deletePromoStock: (stockId) => request(`/promo-stock/${stockId}`, { method: 'DELETE' }),
 
   // ERP — Vendas
   searchProducts: (q) => request(`/erp/products?q=${encodeURIComponent(q)}`),
