@@ -704,7 +704,7 @@ async function generateResponse(conversationId, customerMessage, customerName, m
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6-20250514',
+          model: 'claude-sonnet-4-20250514',
           max_tokens: 550,
           temperature: 0.7,
           system: SYSTEM_PROMPT,
