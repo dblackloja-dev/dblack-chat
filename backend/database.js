@@ -209,6 +209,24 @@ async function initDB() {
     )
   `);
 
+  // Pagamentos pendentes via Asaas (PIX / Cartão)
+  await queryRun(`
+    CREATE TABLE IF NOT EXISTS pending_payments (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      customer_phone TEXT NOT NULL,
+      customer_name TEXT,
+      asaas_charge_id TEXT NOT NULL,
+      asaas_customer_id TEXT,
+      payment_method TEXT NOT NULL,
+      amount NUMERIC(10,2) NOT NULL,
+      cart_data JSONB NOT NULL,
+      status TEXT DEFAULT 'PENDING',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      confirmed_at TIMESTAMPTZ
+    )
+  `);
+
   // ─── ÍNDICES DE PERFORMANCE ───
   // Sem índices, TODA query faz full table scan — isso é o que deixa o chat lento
   const indexes = [

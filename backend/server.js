@@ -210,6 +210,115 @@ let currentPairingCode = null;
 // Inicializa agente IA com dependências
 aiAgent.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 
+// ─── Webhook do Asaas — confirma pagamento, registra no ERP, envia cupom ───
+const asaas = require('./asaas');
+const { generateReceiptImage } = require('./receipt');
+
+app.post('/api/webhook/asaas', async (req, res) => {
+  // Valida token de autenticação do Asaas
+  const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
+  if (webhookToken) {
+    const received = req.headers['asaas-access-token'] || req.query.token;
+    if (received !== webhookToken) {
+      console.log('⛔ Webhook Asaas rejeitado — token inválido');
+      return res.status(403).json({ error: 'Não autorizado' });
+    }
+  }
+  res.json({ ok: true }); // responde rápido
+  try {
+    const { event, payment } = req.body;
+    if (!payment?.id) return;
+
+    // Só processa confirmações de pagamento
+    const confirmed = ['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'];
+    if (!confirmed.includes(event)) {
+      if (event === 'PAYMENT_OVERDUE' || event === 'PAYMENT_DELETED' || event === 'PAYMENT_REFUNDED') {
+        await queryRun("UPDATE pending_payments SET status = $1 WHERE asaas_charge_id = $2", [event.replace('PAYMENT_', ''), payment.id]);
+      }
+      return;
+    }
+
+    console.log(`💰 Asaas: pagamento ${payment.id} confirmado!`);
+
+    // Busca pagamento pendente
+    const pending = await queryOne("SELECT * FROM pending_payments WHERE asaas_charge_id = $1 AND status = 'PENDING'", [payment.id]);
+    if (!pending) { console.log('⚠️ Pagamento não encontrado ou já processado:', payment.id); return; }
+
+    // Marca como confirmado
+    await queryRun("UPDATE pending_payments SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1", [pending.id]);
+
+    const cartItems = JSON.parse(pending.cart_data);
+
+    // Busca cliente no ERP
+    let customerId = null;
+    if (pending.customer_phone) {
+      const customer = await erp.findCustomerByPhone(pending.customer_phone);
+      if (customer) customerId = customer.id;
+    }
+
+    // Cria venda no ERP
+    const sale = await erp.createSale({
+      store_id: 'loja4',
+      customer_id: customerId,
+      customer_name: pending.customer_name || 'Cliente WhatsApp',
+      customer_phone: pending.customer_phone || '',
+      seller_name: 'Lê (IA)',
+      seller_id: '',
+      items: cartItems,
+      payment_method: pending.payment_method,
+      discount: 0,
+      discount_type: 'fixed',
+      discount_label: '',
+    });
+
+    console.log(`✅ Venda ${sale.cupom} criada no ERP — R$ ${sale.total.toFixed(2)}`);
+
+    // Envia cupom e confirmação via WhatsApp
+    if (wa.connected && pending.customer_phone) {
+      try {
+        // Mensagem de confirmação
+        const confirmMsg = pending.payment_method === 'pix'
+          ? `Pagamento via PIX confirmado! R$ ${sale.total.toFixed(2)}`
+          : `Pagamento via cartão confirmado! R$ ${sale.total.toFixed(2)}`;
+        await wa.sendText(pending.customer_phone, confirmMsg, { isBot: true });
+
+        const confirmMsgId = genId();
+        await queryRun(
+          "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+          [confirmMsgId, pending.conversation_id, 'Lê (IA)', confirmMsg]
+        );
+
+        // Envia cupom
+        const receiptBuffer = generateReceiptImage(sale, 'Lê (IA)', pending.customer_name || 'Cliente');
+        const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\nObrigado pela compra! 🖤`;
+        const cupomResult = await wa.sendImage(pending.customer_phone, receiptBuffer, caption, { isBot: true });
+
+        const msgId = cupomResult?._waId || genId();
+        const mediaId = 'img_' + msgId;
+        await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+          [mediaId, 'image/png', receiptBuffer.toString('base64')]);
+        await queryRun(
+          "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
+          [msgId, pending.conversation_id, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
+        );
+
+        const displayText = `🧾 Pagamento confirmado — R$ ${sale.total.toFixed(2)}`;
+        await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+          [displayText, pending.conversation_id]);
+
+        if (broadcast) {
+          broadcast('new_message', {
+            conversation: { id: pending.conversation_id, last_message: displayText, last_message_from_me: true },
+            message: { id: msgId, conversation_id: pending.conversation_id, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
+          });
+        }
+      } catch (e) {
+        console.error('⚠️ Erro ao enviar confirmação/cupom:', e.message);
+      }
+    }
+  } catch (e) { console.error('❌ Erro webhook Asaas:', e.message); }
+});
+
 // Webhook da Evolution API — protegido com chave secreta (opcional)
 // Configure WEBHOOK_SECRET no .env para ativar. Na URL do webhook da Evolution, adicione ?secret=SUA_CHAVE
 app.post('/api/webhook/evolution', async (req, res) => {
@@ -1028,20 +1137,21 @@ app.get('/api/promo-items', auth, async (req, res) => {
 app.post('/api/promo-items', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    const { ref, category, display_name } = req.body;
+    const { ref, category, display_name, promo_price } = req.body;
     if (!ref || !category || !display_name) return res.status(400).json({ error: 'ref, category e display_name são obrigatórios' });
     const id = genId();
-    await queryRun("INSERT INTO promo_items (id, ref, category, display_name) VALUES ($1,$2,$3,$4)", [id, ref, category, display_name]);
-    res.json({ id, ref, category, display_name, active: true });
+    const price = promo_price ? parseFloat(promo_price) : null;
+    await queryRun("INSERT INTO promo_items (id, ref, category, display_name, promo_price) VALUES ($1,$2,$3,$4,$5)", [id, ref, category, display_name, price]);
+    res.json({ id, ref, category, display_name, promo_price: price, active: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/api/promo-items/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    const { category, display_name, active } = req.body;
-    await queryRun("UPDATE promo_items SET category = COALESCE($1, category), display_name = COALESCE($2, display_name), active = COALESCE($3, active) WHERE id = $4",
-      [category, display_name, active, req.params.id]);
+    const { category, display_name, active, promo_price } = req.body;
+    await queryRun("UPDATE promo_items SET category = COALESCE($1, category), display_name = COALESCE($2, display_name), active = COALESCE($3, active), promo_price = COALESCE($4, promo_price) WHERE id = $5",
+      [category, display_name, active, promo_price !== undefined ? (promo_price ? parseFloat(promo_price) : null) : undefined, req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

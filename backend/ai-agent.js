@@ -1,6 +1,7 @@
 // Agente de IA "Lê" — D'Black Store (Vendedora com Tool Use)
 const { queryAll, queryOne, queryRun } = require('./database');
 const erp = require('./erp');
+const asaas = require('./asaas');
 const { generateReceiptImage, generateReceiptText } = require('./receipt');
 require('dotenv').config();
 
@@ -66,8 +67,11 @@ FLUXO DE VENDA:
 5. Quando o cliente escolher tamanho e cor, use adicionar_carrinho para adicionar ao carrinho
 6. Pergunte se quer ver mais alguma coisa ou se quer finalizar
 7. Para finalizar, pergunte: "vai ser no PIX ou no cartão de crédito?"
-8. Use finalizar_venda com a forma de pagamento escolhida. O cupom será enviado automaticamente.
-9. Após a venda, agradeça e diga que qualquer coisa é só chamar
+8. Depois que o cliente escolher, peça o CPF: "para gerar o pagamento, preciso do seu CPF"
+9. Use finalizar_venda com a forma de pagamento e o CPF
+10. Se for PIX: o QR Code e o código copia-cola serão enviados automaticamente. Diga ao cliente para escanear o QR Code ou copiar o código PIX. Assim que o pagamento for confirmado, o cupom será enviado automaticamente.
+11. Se for cartão: o link de pagamento será enviado automaticamente. Diga ao cliente para clicar no link e finalizar. Pode parcelar em até 6x. Assim que o pagamento for confirmado, o cupom será enviado automaticamente.
+12. Após enviar o pagamento, diga que assim que confirmar o pagamento, o cupom será enviado. Fique disponível caso o cliente tenha dúvida.
 
 REGRAS DE VENDA:
 - SEMPRE use as ferramentas para consultar produtos e estoque. NUNCA invente preço, tamanho ou disponibilidade
@@ -178,13 +182,14 @@ const TOOLS = [
   },
   {
     name: 'finalizar_venda',
-    description: 'Finaliza a compra criando a venda no sistema e enviando o cupom automaticamente via WhatsApp. Use quando o cliente confirmar a compra e a forma de pagamento.',
+    description: 'Gera o pagamento (PIX com QR Code ou link de cartão) e envia ao cliente via WhatsApp. A venda só é registrada no sistema quando o pagamento é confirmado. Use quando o cliente confirmar a compra, a forma de pagamento E informar o CPF.',
     input_schema: {
       type: 'object',
       properties: {
         forma_pagamento: { type: 'string', enum: ['pix', 'credito'], description: 'Forma de pagamento: "pix" ou "credito"' },
+        cpf: { type: 'string', description: 'CPF do cliente (apenas números ou formatado)' },
       },
-      required: ['forma_pagamento'],
+      required: ['forma_pagamento', 'cpf'],
     },
   },
 ];
@@ -219,11 +224,13 @@ async function executeTool(toolName, toolInput, context) {
       for (const p of products) {
         if (!grouped[p.ref]) {
           const promoItem = promoItems.find(pi => pi.ref === p.ref);
+          const promoPrice = promoItem?.promo_price ? parseFloat(promoItem.promo_price) : null;
           grouped[p.ref] = {
             ref: p.ref,
             promoItemId: promoItem?.id,
             nome: promoItem?.display_name || p.name.replace(/\s+(P|M|G|GG|EXG|G1|G2|G3|\d{2})$/i, '').trim(),
-            preco: parseFloat(p.price),
+            preco: promoPrice || parseFloat(p.price),
+            precoOriginal: promoPrice ? parseFloat(p.price) : null,
             foto: p.photo,
             tamanhos: new Set(),
             cores: new Set(),
@@ -237,6 +244,7 @@ async function executeTool(toolName, toolInput, context) {
         ref: g.ref,
         nome: g.nome,
         preco: `R$ ${g.preco.toFixed(2)}`,
+        ...(g.precoOriginal ? { preco_original: `R$ ${g.precoOriginal.toFixed(2)}` } : {}),
         tamanhos: [...g.tamanhos].join(', ') || 'variados',
         cores: [...g.cores].join(', ') || 'variadas',
       }));
@@ -255,7 +263,8 @@ async function executeTool(toolName, toolInput, context) {
               for (const photo of promoPhotos) {
                 const buffer = Buffer.from(photo.data, 'base64');
                 const colorLabel = photo.color ? ` — ${photo.color}` : '';
-                const caption = `${g.nome}${colorLabel}\n💰 R$ ${g.preco.toFixed(2)}\nRef: ${g.ref}`;
+                const precoLabel = g.precoOriginal ? `💰 R$ ${g.preco.toFixed(2)} (de R$ ${g.precoOriginal.toFixed(2)})` : `💰 R$ ${g.preco.toFixed(2)}`;
+                const caption = `${g.nome}${colorLabel}\n${precoLabel}\nRef: ${g.ref}`;
                 const waResult = await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
 
                 const msgId = waResult?._waId || deps.genId();
@@ -283,7 +292,8 @@ async function executeTool(toolName, toolInput, context) {
               const response = await fetch(photoUrl);
               if (response.ok) {
                 const buffer = Buffer.from(await response.arrayBuffer());
-                const caption = `${g.nome}\n💰 R$ ${g.preco.toFixed(2)}\nRef: ${g.ref}`;
+                const precoLabelErp = g.precoOriginal ? `💰 R$ ${g.preco.toFixed(2)} (de R$ ${g.precoOriginal.toFixed(2)})` : `💰 R$ ${g.preco.toFixed(2)}`;
+                const caption = `${g.nome}\n${precoLabelErp}\nRef: ${g.ref}`;
                 const waResult = await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
 
                 const msgId = waResult?._waId || deps.genId();
@@ -377,13 +387,18 @@ async function executeTool(toolName, toolInput, context) {
       const variants = await erp.getProductVariants(ref);
       if (variants.length === 0) return { resultado: 'Produto sem estoque no momento.' };
 
+      // Busca preço promo se existir
+      const promoItem = await queryOne("SELECT promo_price FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]);
+      const promoPrice = promoItem?.promo_price ? parseFloat(promoItem.promo_price) : null;
+
       const disponveis = variants.filter(v => parseInt(v.stock) > 0).map(v => ({
         id: v.id,
         sku: v.sku,
         nome: v.name,
         tamanho: v.size || '-',
         cor: v.color || '-',
-        preco: `R$ ${parseFloat(v.price).toFixed(2)}`,
+        preco: `R$ ${(promoPrice || parseFloat(v.price)).toFixed(2)}`,
+        ...(promoPrice ? { preco_original: `R$ ${parseFloat(v.price).toFixed(2)}` } : {}),
         estoque: parseInt(v.stock),
       }));
 
@@ -427,79 +442,130 @@ async function executeTool(toolName, toolInput, context) {
     }
 
     case 'finalizar_venda': {
-      const { forma_pagamento } = toolInput;
+      const { forma_pagamento, cpf } = toolInput;
       const cart = getCart(conversationId);
       if (cart.items.length === 0) return { erro: 'Carrinho vazio. Adicione itens antes de finalizar.' };
 
       try {
-        // Busca cliente no ERP pelo telefone
-        let customerId = null;
-        if (customerPhone) {
-          const customer = await erp.findCustomerByPhone(customerPhone);
-          if (customer) customerId = customer.id;
+        // Valida estoque antes de finalizar
+        const semEstoque = [];
+        for (const item of cart.items) {
+          const stockRows = await erp.erpQuery(
+            "SELECT COALESCE(SUM(quantity), 0) AS qty FROM stock WHERE stock_id = 'loja4' AND product_id = $1",
+            [item.product_id]
+          );
+          const disponivel = parseInt(stockRows[0]?.qty) || 0;
+          if (disponivel < item.quantity) {
+            semEstoque.push({ nome: item.name, pedido: item.quantity, disponivel });
+          }
+        }
+        if (semEstoque.length > 0) {
+          const lista = semEstoque.map(s => `${s.nome} (pedido: ${s.pedido}, disponível: ${s.disponivel})`).join('; ');
+          return { erro: `Estoque insuficiente para: ${lista}. Verifique com o cliente se quer ajustar.` };
         }
 
-        const sale = await erp.createSale({
-          store_id: 'loja4',
-          customer_id: customerId,
-          customer_name: customerName || 'Cliente WhatsApp',
-          customer_phone: customerPhone || '',
-          seller_name: 'Lê (IA)',
-          seller_id: '',
-          items: cart.items,
-          payment_method: forma_pagamento,
-          discount: 0,
-          discount_type: 'fixed',
-          discount_label: '',
-        });
+        const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
+        const descricao = cart.items.map(i => `${i.name} x${i.quantity}`).join(', ');
 
-        // Gera e envia cupom via WhatsApp
+        // Cria/busca cliente no Asaas (CPF obrigatório para cobrança)
+        const asaasCustomer = await asaas.findOrCreateCustomer(
+          customerName || 'Cliente WhatsApp',
+          customerPhone,
+          cpf
+        );
+
+        let charge;
+        if (forma_pagamento === 'pix') {
+          charge = await asaas.createPixCharge(asaasCustomer.id, total, `D'Black Store — ${descricao}`);
+        } else {
+          charge = await asaas.createCardCharge(asaasCustomer.id, total, `D'Black Store — ${descricao}`);
+        }
+
+        // Salva pagamento pendente no banco
+        const paymentId = deps.genId();
+        await queryRun(
+          `INSERT INTO pending_payments (id, conversation_id, customer_phone, customer_name, asaas_charge_id, asaas_customer_id, payment_method, amount, cart_data)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [paymentId, conversationId, customerPhone || '', customerName || 'Cliente WhatsApp', charge.chargeId, asaasCustomer.id, forma_pagamento, total, JSON.stringify(cart.items)]
+        );
+
+        // Envia QR Code do PIX ou link de pagamento via WhatsApp
         if (deps.wa?.connected && customerPhone) {
           try {
-            const receiptBuffer = generateReceiptImage(sale, 'Lê (IA)', customerName || 'Cliente');
-            const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\nObrigado pela compra! 🖤`;
-            const cupomResult = await deps.wa.sendImage(customerPhone, receiptBuffer, caption, { isBot: true });
+            if (forma_pagamento === 'pix' && charge.pixQrCodeBase64) {
+              // Envia imagem do QR Code
+              const qrBuffer = Buffer.from(charge.pixQrCodeBase64, 'base64');
+              const caption = `💰 PIX — R$ ${total.toFixed(2)}\n\nEscaneie o QR Code ou copie o código abaixo`;
+              const waResult = await deps.wa.sendImage(customerPhone, qrBuffer, caption, { isBot: true });
 
-            // Salva no histórico
-            const msgId = cupomResult?._waId || deps.genId();
-            const mediaId = 'img_' + msgId;
-            await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
-              [mediaId, 'image/png', receiptBuffer.toString('base64')]);
-            await queryRun(
-              "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
-              [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}`, `/media/${mediaId}`]
-            );
-            const displayText = `🧾 Cupom enviado — R$ ${sale.total.toFixed(2)}`;
-            await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
-              [displayText, conversationId]);
+              const msgId = waResult?._waId || deps.genId();
+              const mediaId = 'img_' + msgId;
+              await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+                [mediaId, 'image/png', charge.pixQrCodeBase64]);
+              await queryRun(
+                "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
+                [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
+              );
 
-            if (deps.broadcast) {
-              deps.broadcast('new_message', {
-                conversation: { id: conversationId, last_message: displayText, last_message_from_me: true },
-                message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
-              });
+              // Envia copia-cola do PIX
+              if (charge.pixCode) {
+                await deps.wa.sendText(customerPhone, charge.pixCode, { isBot: true });
+                const pixMsgId = deps.genId();
+                await queryRun(
+                  "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+                  [pixMsgId, conversationId, 'Lê (IA)', charge.pixCode]
+                );
+              }
+
+              await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+                [`💰 PIX enviado — R$ ${total.toFixed(2)}`, conversationId]);
+
+              if (deps.broadcast) {
+                deps.broadcast('new_message', {
+                  conversation: { id: conversationId, last_message: `💰 PIX enviado — R$ ${total.toFixed(2)}`, last_message_from_me: true },
+                  message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
+                });
+              }
+            } else {
+              // Cartão — envia link de pagamento
+              const linkMsg = `💳 Link de pagamento — R$ ${total.toFixed(2)}\n\n${charge.invoiceUrl}\n\nPode parcelar em até 6x!`;
+              await deps.wa.sendText(customerPhone, linkMsg, { isBot: true });
+              const linkMsgId = deps.genId();
+              await queryRun(
+                "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+                [linkMsgId, conversationId, 'Lê (IA)', linkMsg]
+              );
+              await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+                [`💳 Link enviado — R$ ${total.toFixed(2)}`, conversationId]);
+
+              if (deps.broadcast) {
+                deps.broadcast('new_message', {
+                  conversation: { id: conversationId, last_message: `💳 Link enviado — R$ ${total.toFixed(2)}`, last_message_from_me: true },
+                  message: { id: linkMsgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: linkMsg, timestamp: new Date().toISOString() },
+                });
+              }
             }
           } catch (e) {
-            console.error('⚠️ Erro ao enviar cupom:', e.message);
+            console.error('⚠️ Erro ao enviar pagamento:', e.message);
           }
         }
 
-        // Limpa carrinho
-        carts.delete(conversationId);
+        // NÃO limpa carrinho ainda — só quando o pagamento for confirmado
+        // Marca o carrinho como "aguardando pagamento"
+        cart.paymentId = paymentId;
+        cart.chargeId = charge.chargeId;
 
+        const metodo = forma_pagamento === 'pix' ? 'PIX (QR Code e código copia-cola enviados)' : 'Cartão de Crédito (link de pagamento enviado)';
         return {
           sucesso: true,
-          venda: {
-            cupom: sale.cupom,
-            total: `R$ ${sale.total.toFixed(2)}`,
-            itens: sale.items.length,
-            pagamento: forma_pagamento === 'pix' ? 'PIX' : 'Cartão de Crédito',
-          },
-          mensagem: 'Venda registrada e cupom enviado com sucesso!',
+          aguardando_pagamento: true,
+          total: `R$ ${total.toFixed(2)}`,
+          forma_pagamento: metodo,
+          mensagem: `Pagamento gerado! ${forma_pagamento === 'pix' ? 'QR Code e código PIX enviados.' : 'Link de pagamento enviado.'} Assim que o pagamento for confirmado, a venda será registrada automaticamente e o cupom será enviado.`,
         };
       } catch (e) {
-        console.error('❌ Erro ao finalizar venda:', e.message);
-        return { erro: 'Erro ao registrar a venda. Vou transferir para uma colega resolver.', transferir: true };
+        console.error('❌ Erro ao gerar pagamento:', e.message);
+        return { erro: 'Erro ao gerar o pagamento. Vou transferir para uma colega resolver.', transferir: true };
       }
     }
 
@@ -606,8 +672,8 @@ async function generateResponse(conversationId, customerMessage, customerName, m
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 400,
+          model: 'claude-sonnet-4-6-20250514',
+          max_tokens: 550,
           temperature: 0.7,
           system: SYSTEM_PROMPT,
           messages: currentMessages,

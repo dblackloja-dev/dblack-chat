@@ -159,17 +159,18 @@ async function listUsers() {
 async function getProductsByRefs(refs, storeId = 'loja4') {
   if (!refs.length) return [];
   const placeholders = refs.map((_, i) => `$${i + 1}`).join(',');
+  const storeParam = `$${refs.length + 1}`;
   return erpQuery(
     `SELECT p.id, p.sku, p.name, p.brand, p.category, p.size, p.color,
             p.price, p.ref, p.photo,
-            COALESCE(SUM(CASE WHEN s.stock_id = '${storeId}' THEN s.quantity ELSE 0 END), 0) AS stock
+            COALESCE(SUM(CASE WHEN s.stock_id = ${storeParam} THEN s.quantity ELSE 0 END), 0) AS stock
      FROM products p
      LEFT JOIN stock s ON s.product_id = p.id
      WHERE p.active = true AND p.ref IN (${placeholders})
      GROUP BY p.id
-     HAVING COALESCE(SUM(CASE WHEN s.stock_id = '${storeId}' THEN s.quantity ELSE 0 END), 0) > 0
+     HAVING COALESCE(SUM(CASE WHEN s.stock_id = ${storeParam} THEN s.quantity ELSE 0 END), 0) > 0
      ORDER BY p.ref, p.name`,
-    refs
+    [...refs, storeId]
   );
 }
 

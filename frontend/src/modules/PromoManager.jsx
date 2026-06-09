@@ -10,6 +10,7 @@ export default function PromoManager() {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [category, setCategory] = useState('');
+  const [promoPrice, setPromoPrice] = useState('');
   const [expandedItem, setExpandedItem] = useState(null); // id do item expandido pra ver fotos
   const [photos, setPhotos] = useState({}); // { promoItemId: [photo, ...] }
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -68,10 +69,12 @@ export default function PromoManager() {
         ref: product.ref,
         category: cat,
         display_name: product.name,
+        promo_price: promoPrice ? parseFloat(promoPrice) : null,
       });
       setItems(prev => [...prev, item]);
       setSearchQuery('');
       setSearchResults([]);
+      setPromoPrice('');
     } catch (e) { alert(e.message); }
   };
 
@@ -162,6 +165,15 @@ export default function PromoManager() {
             value={category}
             onChange={e => setCategory(e.target.value)}
           />
+          <input
+            style={{ ...inputStyle, width: 140 }}
+            placeholder="Preco promo (R$)"
+            type="number"
+            step="0.01"
+            min="0"
+            value={promoPrice}
+            onChange={e => setPromoPrice(e.target.value)}
+          />
         </div>
 
         {searching && <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>Buscando...</p>}
@@ -229,9 +241,27 @@ export default function PromoManager() {
                           <div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{item.display_name}</div>
                           <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
                             Ref: {item.ref}
+                            {item.promo_price ? ` | R$ ${parseFloat(item.promo_price).toFixed(2)}` : ' | Sem preco promo'}
                             {photos[item.id] && ` | ${photos[item.id].length} foto(s)`}
                           </div>
                         </div>
+
+                        <input
+                          style={{ width: 90, padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 13, textAlign: 'center' }}
+                          placeholder="R$ promo"
+                          type="number"
+                          step="0.01"
+                          defaultValue={item.promo_price || ''}
+                          onBlur={async (e) => {
+                            const val = e.target.value ? parseFloat(e.target.value) : null;
+                            if (val !== (item.promo_price ? parseFloat(item.promo_price) : null)) {
+                              try {
+                                await api.updatePromoItem(item.id, { promo_price: val });
+                                setItems(prev => prev.map(i => i.id === item.id ? { ...i, promo_price: val } : i));
+                              } catch (err) { alert(err.message); }
+                            }
+                          }}
+                        />
 
                         <button onClick={() => togglePhotos(item.id)} style={{
                           ...btnStyle, padding: '6px 12px',
