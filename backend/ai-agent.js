@@ -394,34 +394,63 @@ async function executeTool(toolName, toolInput, context) {
       const promoItem = await queryOne("SELECT id, promo_price FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]);
       const promoPrice = promoItem?.promo_price ? parseFloat(promoItem.promo_price) : null;
 
-      // Estoque promo por cor+tamanho (se configurado, limita a venda)
+      // Estoque promo: primeiro tenta grade cor+tamanho, fallback para fotos (só cor)
       let promoStockMap = {};
+      let stockMode = 'erp'; // 'grid' = promo_stock, 'photo' = promo_photos, 'erp' = sem limite promo
       if (promoItem) {
+        // 1) Tenta grade cor+tamanho
         const promoStockRows = await queryAll(
           "SELECT color, size, stock_limit, stock_sold FROM promo_stock WHERE promo_item_id = $1 AND stock_limit > 0",
           [promoItem.id]
         );
-        for (const ps of promoStockRows) {
-          const key = `${(ps.color || '').toLowerCase()}|${(ps.size || '').toLowerCase()}`;
-          promoStockMap[key] = { limit: ps.stock_limit, sold: ps.stock_sold || 0 };
+        if (promoStockRows.length > 0) {
+          stockMode = 'grid';
+          for (const ps of promoStockRows) {
+            const key = `${(ps.color || '').toLowerCase()}|${(ps.size || '').toLowerCase()}`;
+            promoStockMap[key] = { limit: ps.stock_limit, sold: ps.stock_sold || 0 };
+          }
+        } else {
+          // 2) Fallback: estoque por cor nas fotos
+          const promoPhotos = await queryAll(
+            "SELECT color, stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 AND stock_limit > 0",
+            [promoItem.id]
+          );
+          if (promoPhotos.length > 0) {
+            stockMode = 'photo';
+            for (const pp of promoPhotos) {
+              promoStockMap[pp.color.toLowerCase()] = { limit: pp.stock_limit, sold: pp.stock_sold || 0 };
+            }
+          }
         }
       }
 
-      const hasPromoStock = Object.keys(promoStockMap).length > 0;
-
       const disponveis = variants.filter(v => {
         if (parseInt(v.stock) <= 0) return false;
-        if (!hasPromoStock) return true;
-        // Verifica estoque promo por cor+tamanho
-        const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
-        const ps = promoStockMap[key];
-        if (ps) return (ps.limit - ps.sold) > 0;
-        // Se não tem entrada específica, não está na promo (bloqueia)
-        return false;
+        if (stockMode === 'erp') return true;
+        if (stockMode === 'grid') {
+          const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
+          const ps = promoStockMap[key];
+          if (ps) return (ps.limit - ps.sold) > 0;
+          return false;
+        }
+        if (stockMode === 'photo') {
+          const cor = (v.color || '').toLowerCase();
+          const ps = promoStockMap[cor];
+          if (ps) return (ps.limit - ps.sold) > 0;
+          return false;
+        }
+        return true;
       }).map(v => {
-        const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
-        const ps = promoStockMap[key];
-        const estoquePromo = ps ? ps.limit - ps.sold : null;
+        let estoquePromo = null;
+        if (stockMode === 'grid') {
+          const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
+          const ps = promoStockMap[key];
+          estoquePromo = ps ? ps.limit - ps.sold : null;
+        } else if (stockMode === 'photo') {
+          const cor = (v.color || '').toLowerCase();
+          const ps = promoStockMap[cor];
+          estoquePromo = ps ? ps.limit - ps.sold : null;
+        }
         return {
           id: v.id,
           sku: v.sku,
