@@ -194,6 +194,7 @@ const api = {
   deletePromoItem: (id) => request(`/promo-items/${id}`, { method: 'DELETE' }),
   getPromoPhotos: (promoItemId) => request(`/promo-items/${promoItemId}/photos`),
   addPromoPhoto: (promoItemId, data) => request(`/promo-items/${promoItemId}/photos`, { method: 'POST', body: data }),
+  updatePromoPhoto: (photoId, data) => request(`/promo-photos/${photoId}`, { method: 'PUT', body: data }),
   deletePromoPhoto: (photoId) => request(`/promo-photos/${photoId}`, { method: 'DELETE' }),
 
   // ERP — Vendas

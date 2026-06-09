@@ -248,6 +248,18 @@ app.post('/api/webhook/asaas', async (req, res) => {
 
     const cartItems = JSON.parse(pending.cart_data);
 
+    // Incrementa stock_sold nas cores vendidas
+    for (const item of cartItems) {
+      if (item.color) {
+        await queryRun(
+          `UPDATE promo_photos SET stock_sold = stock_sold + $1
+           WHERE promo_item_id IN (SELECT id FROM promo_items WHERE LOWER(ref) = LOWER($2))
+             AND LOWER(color) = LOWER($3) AND stock_limit > 0`,
+          [item.quantity || 1, item.ref || '', item.color]
+        );
+      }
+    }
+
     // Busca cliente no ERP
     let customerId = null;
     if (pending.customer_phone) {
@@ -1166,7 +1178,7 @@ app.delete('/api/promo-items/:id', auth, async (req, res) => {
 // Fotos da promoção (múltiplas por produto/cor)
 app.get('/api/promo-items/:id/photos', auth, async (req, res) => {
   try {
-    const photos = await queryAll("SELECT id, promo_item_id, color, mime_type, created_at FROM promo_photos WHERE promo_item_id = $1 ORDER BY color", [req.params.id]);
+    const photos = await queryAll("SELECT id, promo_item_id, color, mime_type, stock_limit, stock_sold, created_at FROM promo_photos WHERE promo_item_id = $1 ORDER BY color", [req.params.id]);
     res.json(photos);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1180,7 +1192,18 @@ app.post('/api/promo-items/:id/photos', auth, async (req, res) => {
     const mime = image.startsWith('/9j/') ? 'image/jpeg' : image.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
     await queryRun("INSERT INTO promo_photos (id, promo_item_id, color, mime_type, data) VALUES ($1,$2,$3,$4,$5)",
       [id, req.params.id, color || '', mime, image]);
-    res.json({ id, promo_item_id: req.params.id, color: color || '', mime_type: mime });
+    res.json({ id, promo_item_id: req.params.id, color: color || '', mime_type: mime, stock_limit: 0, stock_sold: 0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/promo-photos/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { stock_limit } = req.body;
+    if (stock_limit !== undefined) {
+      await queryRun("UPDATE promo_photos SET stock_limit = $1 WHERE id = $2", [parseInt(stock_limit) || 0, req.params.id]);
+    }
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

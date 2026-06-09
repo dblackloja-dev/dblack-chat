@@ -325,31 +325,61 @@ export default function PromoManager() {
                             </p>
                           ) : (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                              {(photos[item.id] || []).map(photo => (
+                              {(photos[item.id] || []).map(photo => {
+                                const restante = (photo.stock_limit || 0) - (photo.stock_sold || 0);
+                                const esgotado = photo.stock_limit > 0 && restante <= 0;
+                                return (
                                 <div key={photo.id} style={{
                                   borderRadius: 8, overflow: 'hidden',
-                                  border: '1px solid rgba(255,255,255,0.1)',
+                                  border: esgotado ? '2px solid #ea0038' : '1px solid rgba(255,255,255,0.1)',
                                   background: 'rgba(0,0,0,0.3)',
-                                  width: 130,
+                                  width: 140,
+                                  opacity: esgotado ? 0.5 : 1,
                                 }}>
                                   <img
                                     src={`${API_BASE}/api/promo-photos/${photo.id}/image`}
                                     alt={photo.color || 'Foto'}
-                                    style={{ width: 130, height: 130, objectFit: 'cover', display: 'block' }}
+                                    style={{ width: 140, height: 140, objectFit: 'cover', display: 'block' }}
                                   />
-                                  <div style={{ padding: '6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>
-                                      {photo.color || 'Sem cor'}
-                                    </span>
-                                    <button
-                                      onClick={() => deletePhoto(photo.id, item.id)}
-                                      style={{ background: 'none', border: 'none', color: '#ea0038', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
-                                    >
-                                      X
-                                    </button>
+                                  <div style={{ padding: '6px 8px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                      <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>
+                                        {photo.color || 'Sem cor'}
+                                      </span>
+                                      <button
+                                        onClick={() => deletePhoto(photo.id, item.id)}
+                                        style={{ background: 'none', border: 'none', color: '#ea0038', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                                      >
+                                        X
+                                      </button>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>Estoque:</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        defaultValue={photo.stock_limit || 0}
+                                        style={{ width: 40, padding: '2px 4px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12, textAlign: 'center' }}
+                                        onBlur={async (e) => {
+                                          const val = parseInt(e.target.value) || 0;
+                                          if (val !== (photo.stock_limit || 0)) {
+                                            try {
+                                              await api.updatePromoPhoto(photo.id, { stock_limit: val });
+                                              setPhotos(prev => ({ ...prev, [item.id]: (prev[item.id] || []).map(p => p.id === photo.id ? { ...p, stock_limit: val } : p) }));
+                                            } catch (err) { alert(err.message); }
+                                          }
+                                        }}
+                                      />
+                                    </div>
+                                    {photo.stock_limit > 0 && (
+                                      <div style={{ fontSize: 11, marginTop: 2, color: esgotado ? '#ea0038' : '#1eba8a', fontWeight: 600 }}>
+                                        {esgotado ? 'ESGOTADO' : `${photo.stock_sold || 0} vendido(s), ${restante} restante(s)`}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>

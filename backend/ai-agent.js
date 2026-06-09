@@ -157,11 +157,13 @@ const TOOLS = [
       type: 'object',
       properties: {
         product_id: { type: 'string', description: 'ID do produto específico (tamanho/cor)' },
+        ref: { type: 'string', description: 'Código de referência do produto (ref)' },
         nome: { type: 'string', description: 'Nome do produto para exibição' },
+        cor: { type: 'string', description: 'Cor escolhida pelo cliente' },
         sku: { type: 'string', description: 'SKU do produto' },
         preco: { type: 'number', description: 'Preço unitário' },
       },
-      required: ['product_id', 'nome', 'sku', 'preco'],
+      required: ['product_id', 'ref', 'nome', 'cor', 'sku', 'preco'],
     },
   },
   {
@@ -387,33 +389,59 @@ async function executeTool(toolName, toolInput, context) {
       const variants = await erp.getProductVariants(ref);
       if (variants.length === 0) return { resultado: 'Produto sem estoque no momento.' };
 
-      // Busca preço promo se existir
-      const promoItem = await queryOne("SELECT promo_price FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]);
+      // Busca preço promo e estoque promo por cor
+      const promoItem = await queryOne("SELECT id, promo_price FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]);
       const promoPrice = promoItem?.promo_price ? parseFloat(promoItem.promo_price) : null;
 
-      const disponveis = variants.filter(v => parseInt(v.stock) > 0).map(v => ({
-        id: v.id,
-        sku: v.sku,
-        nome: v.name,
-        tamanho: v.size || '-',
-        cor: v.color || '-',
-        preco: `R$ ${(promoPrice || parseFloat(v.price)).toFixed(2)}`,
-        ...(promoPrice ? { preco_original: `R$ ${parseFloat(v.price).toFixed(2)}` } : {}),
-        estoque: parseInt(v.stock),
-      }));
+      // Estoque promo por cor (se configurado, limita a venda)
+      let promoStockByColor = {};
+      if (promoItem) {
+        const promoPhotos = await queryAll(
+          "SELECT color, stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 AND stock_limit > 0",
+          [promoItem.id]
+        );
+        for (const pp of promoPhotos) {
+          promoStockByColor[pp.color.toLowerCase()] = { limit: pp.stock_limit, sold: pp.stock_sold || 0 };
+        }
+      }
+
+      const disponveis = variants.filter(v => {
+        if (parseInt(v.stock) <= 0) return false;
+        // Se tem limite promo por cor, verifica
+        const cor = (v.color || '').toLowerCase();
+        if (promoStockByColor[cor]) {
+          const restante = promoStockByColor[cor].limit - promoStockByColor[cor].sold;
+          if (restante <= 0) return false;
+        }
+        return true;
+      }).map(v => {
+        const cor = (v.color || '').toLowerCase();
+        const promoStock = promoStockByColor[cor];
+        const estoquePromo = promoStock ? promoStock.limit - promoStock.sold : null;
+        return {
+          id: v.id,
+          sku: v.sku,
+          nome: v.name,
+          tamanho: v.size || '-',
+          cor: v.color || '-',
+          preco: `R$ ${(promoPrice || parseFloat(v.price)).toFixed(2)}`,
+          ...(promoPrice ? { preco_original: `R$ ${parseFloat(v.price).toFixed(2)}` } : {}),
+          estoque: estoquePromo !== null ? Math.min(parseInt(v.stock), estoquePromo) : parseInt(v.stock),
+        };
+      });
 
       if (disponveis.length === 0) return { resultado: 'Todas as variações deste produto estão esgotadas.' };
       return { variacoes_disponiveis: disponveis, total: disponveis.length };
     }
 
     case 'adicionar_carrinho': {
-      const { product_id, nome, sku, preco } = toolInput;
+      const { product_id, ref, nome, cor, sku, preco } = toolInput;
       const cart = getCart(conversationId);
       const existing = cart.items.find(i => i.product_id === product_id);
       if (existing) {
         existing.quantity++;
       } else {
-        cart.items.push({ product_id, name: nome, sku, price: preco, quantity: 1 });
+        cart.items.push({ product_id, ref: ref || '', name: nome, color: cor || '', sku, price: preco, quantity: 1 });
       }
       const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
       return {
