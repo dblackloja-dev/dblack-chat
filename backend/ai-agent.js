@@ -62,9 +62,8 @@ Pergunte se o cliente quer ver as peças em oferta da Semana de Oportunidade. Di
 FLUXO DE VENDA:
 1. Depois que souber nome/cidade, avise da Semana de Oportunidade
 2. Use listar_categorias_promo e apresente as categorias disponíveis
-3. Quando o cliente escolher uma categoria, use buscar_ofertas para buscar os produtos. As fotos serão enviadas automaticamente. Depois descreva brevemente os produtos e preços em texto.
-4. Quando o cliente escolher um produto, use verificar_estoque para checar os tamanhos e cores disponíveis. Informe as opções ao cliente.
-4b. Se o cliente perguntar de uma cor específica ("tem na cor azul?", "como fica em preto?", "quero ver a vermelha"), use enviar_foto_cor para enviar a foto daquela cor. Isso funciona com qualquer produto que tenha fotos cadastradas.
+3. Quando o cliente escolher uma categoria, use buscar_ofertas para buscar os produtos. NÃO envie fotos. Descreva os produtos disponíveis com nome, cores disponíveis e preço em texto.
+4. Quando o cliente demonstrar interesse em um produto, pergunte qual cor e tamanho quer. Use verificar_estoque para confirmar disponibilidade.
 5. Quando o cliente escolher tamanho e cor, use adicionar_carrinho para adicionar ao carrinho
 6. Pergunte se quer ver mais alguma coisa ou se quer finalizar
 7. Para finalizar, pergunte: "vai ser no PIX ou no cartão de crédito?"
@@ -73,6 +72,8 @@ FLUXO DE VENDA:
 10. Se for PIX: o QR Code e o código copia-cola serão enviados automaticamente. Diga ao cliente para escanear o QR Code ou copiar o código PIX. Assim que o pagamento for confirmado, o cupom será enviado automaticamente.
 11. Se for cartão: o link de pagamento será enviado automaticamente. Diga ao cliente para clicar no link e finalizar. Pode parcelar em até 6x. Assim que o pagamento for confirmado, o cupom será enviado automaticamente.
 12. Após enviar o pagamento, diga que assim que confirmar o pagamento, o cupom será enviado. Fique disponível caso o cliente tenha dúvida.
+
+IMPORTANTE: NUNCA envie fotos ao cliente. Toda comunicação é por texto. Descreva os produtos, cores e tamanhos por escrito.
 
 REGRAS DE VENDA:
 - SEMPRE use as ferramentas para consultar produtos e estoque. NUNCA invente preço, tamanho ou disponibilidade
@@ -99,6 +100,7 @@ FOTOS RECEBIDAS:
 - 90% das fotos são prints do Instagram @d_blackloja com a Sra. D'Black (Letícia) ou Sr. D'Black (Denilson) vestindo looks
 - Comente sobre a PEÇA (cor, estilo), não sobre a pessoa
 - Se o cliente mandar foto de uma peça que quer, tente identificar e use buscar_ofertas para encontrar
+- NUNCA envie fotos de volta. Responda sempre por texto.
 
 ÁUDIOS: diga que está com problema no áudio e peça para enviar por escrito
 
@@ -119,25 +121,13 @@ const TOOLS = [
   },
   {
     name: 'buscar_ofertas',
-    description: 'Busca os produtos em promoção de uma categoria. Envia automaticamente as fotos dos produtos para o cliente via WhatsApp. Use quando o cliente escolher uma categoria.',
+    description: 'Busca os produtos em promoção de uma categoria. Retorna nome, cores, tamanhos e preço de cada produto. Use quando o cliente escolher uma categoria.',
     input_schema: {
       type: 'object',
       properties: {
         categoria: { type: 'string', description: 'Nome da categoria (ex: "Calças", "Blusas", "Vestidos")' },
       },
       required: ['categoria'],
-    },
-  },
-  {
-    name: 'enviar_foto_cor',
-    description: 'Envia a foto de uma cor específica de um produto para o cliente via WhatsApp. Use quando o cliente perguntar sobre uma cor específica (ex: "tem em preto?", "quero ver a azul", "como fica na cor vermelha?").',
-    input_schema: {
-      type: 'object',
-      properties: {
-        ref: { type: 'string', description: 'Código de referência do produto (ref)' },
-        cor: { type: 'string', description: 'Nome da cor que o cliente quer ver (ex: "Preto", "Azul", "Vermelho")' },
-      },
-      required: ['ref', 'cor'],
     },
   },
   {
@@ -253,137 +243,7 @@ async function executeTool(toolName, toolInput, context) {
         cores: [...g.cores].join(', ') || 'variadas',
       }));
 
-      // Envia fotos via WhatsApp (side-effect)
-      if (deps.wa?.connected && customerPhone) {
-        for (const g of Object.values(grouped)) {
-          try {
-            // Primeiro tenta fotos cadastradas na promoção (por cor)
-            const promoPhotos = g.promoItemId
-              ? await queryAll("SELECT id, color, mime_type, data FROM promo_photos WHERE promo_item_id = $1 ORDER BY color", [g.promoItemId])
-              : [];
-
-            if (promoPhotos.length > 0) {
-              // Envia cada foto (uma por cor)
-              for (const photo of promoPhotos) {
-                const buffer = Buffer.from(photo.data, 'base64');
-                const colorLabel = photo.color ? ` — ${photo.color}` : '';
-                const precoLabel = g.precoOriginal ? `💰 R$ ${g.preco.toFixed(2)} (de R$ ${g.precoOriginal.toFixed(2)})` : `💰 R$ ${g.preco.toFixed(2)}`;
-                const caption = `${g.nome}${colorLabel}\n${precoLabel}\nRef: ${g.ref}`;
-                const waResult = await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
-
-                const msgId = waResult?._waId || deps.genId();
-                const mediaId = 'img_' + msgId;
-                await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
-                  [mediaId, photo.mime_type, photo.data]);
-                await queryRun(
-                  "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
-                  [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
-                );
-                await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
-                  [`📷 ${g.nome}${colorLabel}`, conversationId]);
-
-                if (deps.broadcast) {
-                  deps.broadcast('new_message', {
-                    conversation: { id: conversationId, last_message: `📷 ${g.nome}${colorLabel}`, last_message_from_me: true },
-                    message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
-                  });
-                }
-              }
-            } else if (g.foto) {
-              // Fallback: foto do ERP
-              const uploadsUrl = process.env.ERP_UPLOADS_URL || '';
-              const photoUrl = g.foto.startsWith('http') ? g.foto : `${uploadsUrl}/${g.foto}`;
-              const response = await fetch(photoUrl);
-              if (response.ok) {
-                const buffer = Buffer.from(await response.arrayBuffer());
-                const precoLabelErp = g.precoOriginal ? `💰 R$ ${g.preco.toFixed(2)} (de R$ ${g.precoOriginal.toFixed(2)})` : `💰 R$ ${g.preco.toFixed(2)}`;
-                const caption = `${g.nome}\n${precoLabelErp}\nRef: ${g.ref}`;
-                const waResult = await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
-
-                const msgId = waResult?._waId || deps.genId();
-                const mediaId = 'img_' + msgId;
-                await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
-                  [mediaId, 'image/jpeg', buffer.toString('base64')]);
-                await queryRun(
-                  "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
-                  [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
-                );
-                await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
-                  [`📷 ${g.nome}`, conversationId]);
-
-                if (deps.broadcast) {
-                  deps.broadcast('new_message', {
-                    conversation: { id: conversationId, last_message: `📷 ${g.nome}`, last_message_from_me: true },
-                    message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
-                  });
-                }
-              }
-            }
-          } catch (e) {
-            console.error(`⚠️ Erro ao enviar foto do produto ${g.ref}:`, e.message);
-          }
-        }
-      }
-
-      return { ofertas, total: ofertas.length, mensagem: `Encontrei ${ofertas.length} produto(s) na categoria ${categoria}. As fotos foram enviadas.` };
-    }
-
-    case 'enviar_foto_cor': {
-      const { ref, cor } = toolInput;
-
-      // Busca o promo_item pela ref
-      const promoItem = await queryOne(
-        "SELECT id, display_name FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]
-      );
-      if (!promoItem) return { resultado: `Não encontrei o produto ref ${ref} na promoção.` };
-
-      // Busca foto da cor (case-insensitive, parcial)
-      const photo = await queryOne(
-        "SELECT id, color, mime_type, data FROM promo_photos WHERE promo_item_id = $1 AND LOWER(color) LIKE '%' || LOWER($2) || '%' ORDER BY color LIMIT 1",
-        [promoItem.id, cor]
-      );
-
-      if (!photo) {
-        // Lista as cores disponíveis pra Lê informar
-        const available = await queryAll(
-          "SELECT DISTINCT color FROM promo_photos WHERE promo_item_id = $1 ORDER BY color", [promoItem.id]
-        );
-        const coresList = available.map(c => c.color).filter(Boolean);
-        if (coresList.length === 0) return { resultado: `Não temos fotos cadastradas desse produto.` };
-        return { resultado: `Não temos foto na cor "${cor}". As cores com foto são: ${coresList.join(', ')}.` };
-      }
-
-      // Envia a foto via WhatsApp
-      if (deps.wa?.connected && customerPhone) {
-        try {
-          const buffer = Buffer.from(photo.data, 'base64');
-          const caption = `${promoItem.display_name} — ${photo.color}\nRef: ${ref}`;
-          const waResult = await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
-
-          const msgId = waResult?._waId || deps.genId();
-          const mediaId = 'img_' + msgId;
-          await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
-            [mediaId, photo.mime_type, photo.data]);
-          await queryRun(
-            "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
-            [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
-          );
-          await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
-            [`📷 ${promoItem.display_name} — ${photo.color}`, conversationId]);
-
-          if (deps.broadcast) {
-            deps.broadcast('new_message', {
-              conversation: { id: conversationId, last_message: `📷 ${promoItem.display_name} — ${photo.color}`, last_message_from_me: true },
-              message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
-            });
-          }
-        } catch (e) {
-          console.error(`⚠️ Erro ao enviar foto cor ${cor}:`, e.message);
-          return { resultado: `Erro ao enviar a foto: ${e.message}` };
-        }
-      }
-
-      return { resultado: `Foto da cor ${photo.color} enviada!`, cor_enviada: photo.color, produto: promoItem.display_name };
+      return { ofertas, total: ofertas.length, mensagem: `Encontrei ${ofertas.length} produto(s) na categoria ${categoria}. Descreva os produtos por texto.` };
     }
 
     case 'verificar_estoque': {
