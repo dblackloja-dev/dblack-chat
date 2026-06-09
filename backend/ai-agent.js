@@ -248,17 +248,15 @@ async function executeTool(toolName, toolInput, context) {
     case 'verificar_estoque': {
       const { ref } = toolInput;
       const variants = await erp.getProductVariants(ref);
-      if (variants.length === 0) return { resultado: 'Produto sem estoque no momento.' };
 
-      // Busca preço promo e estoque promo por cor
+      // Busca preço promo e estoque promo
       const promoItem = await queryOne("SELECT id, promo_price FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]);
       const promoPrice = promoItem?.promo_price ? parseFloat(promoItem.promo_price) : null;
 
-      // Estoque promo: primeiro tenta grade cor+tamanho, fallback para fotos (só cor)
+      // Estoque promo: grade cor+tamanho > fotos por cor > ERP
       let promoStockMap = {};
-      let stockMode = 'erp'; // 'grid' = promo_stock, 'photo' = promo_photos, 'erp' = sem limite promo
+      let stockMode = 'erp';
       if (promoItem) {
-        // 1) Tenta grade cor+tamanho
         const promoStockRows = await queryAll(
           "SELECT color, size, stock_limit, stock_sold FROM promo_stock WHERE promo_item_id = $1 AND stock_limit > 0",
           [promoItem.id]
@@ -267,10 +265,9 @@ async function executeTool(toolName, toolInput, context) {
           stockMode = 'grid';
           for (const ps of promoStockRows) {
             const key = `${(ps.color || '').toLowerCase()}|${(ps.size || '').toLowerCase()}`;
-            promoStockMap[key] = { limit: ps.stock_limit, sold: ps.stock_sold || 0 };
+            promoStockMap[key] = { limit: ps.stock_limit, sold: ps.stock_sold || 0, color: ps.color, size: ps.size };
           }
         } else {
-          // 2) Fallback: estoque por cor nas fotos
           const promoPhotos = await queryAll(
             "SELECT color, stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 AND stock_limit > 0",
             [promoItem.id]
@@ -278,11 +275,39 @@ async function executeTool(toolName, toolInput, context) {
           if (promoPhotos.length > 0) {
             stockMode = 'photo';
             for (const pp of promoPhotos) {
-              promoStockMap[pp.color.toLowerCase()] = { limit: pp.stock_limit, sold: pp.stock_sold || 0 };
+              promoStockMap[pp.color.toLowerCase()] = { limit: pp.stock_limit, sold: pp.stock_sold || 0, color: pp.color };
             }
           }
         }
       }
+
+      // Se produto no ERP não tem variações de cor/tamanho mas tem estoque promo,
+      // gera variações virtuais a partir do estoque promo
+      const erpTemVariacoes = variants.some(v => v.color || v.size);
+      const baseVariant = variants[0]; // produto base do ERP (para pegar id, sku, price)
+
+      if (!erpTemVariacoes && stockMode !== 'erp' && baseVariant) {
+        const disponveis = [];
+        for (const [key, ps] of Object.entries(promoStockMap)) {
+          const restante = ps.limit - ps.sold;
+          if (restante <= 0) continue;
+          disponveis.push({
+            id: baseVariant.id,
+            sku: baseVariant.sku,
+            nome: baseVariant.name,
+            tamanho: ps.size || 'Único',
+            cor: ps.color || '-',
+            preco: `R$ ${(promoPrice || parseFloat(baseVariant.price)).toFixed(2)}`,
+            ...(promoPrice ? { preco_original: `R$ ${parseFloat(baseVariant.price).toFixed(2)}` } : {}),
+            estoque: restante,
+          });
+        }
+        if (disponveis.length === 0) return { resultado: 'Todas as variações deste produto estão esgotadas.' };
+        return { variacoes_disponiveis: disponveis, total: disponveis.length };
+      }
+
+      // Fluxo normal: produto com variações no ERP
+      if (variants.length === 0) return { resultado: 'Produto sem estoque no momento.' };
 
       const disponveis = variants.filter(v => {
         if (stockMode === 'grid') {
@@ -295,7 +320,6 @@ async function executeTool(toolName, toolInput, context) {
           const ps = promoStockMap[cor];
           return ps ? (ps.limit - ps.sold) > 0 : false;
         }
-        // Modo ERP: usa estoque do ERP
         return parseInt(v.stock) > 0;
       }).map(v => {
         let estoquePromo = null;

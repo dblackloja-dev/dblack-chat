@@ -155,7 +155,7 @@ async function listUsers() {
   return erpQuery("SELECT id, name, email, role, store_id, active, avatar FROM users WHERE active = true ORDER BY name");
 }
 
-// Busca produtos do ERP por lista de refs (para promoção)
+// Busca produtos do ERP por lista de refs OU SKUs (para promoção)
 // Não filtra por estoque — o estoque promo é controlado separadamente
 async function getProductsByRefs(refs, storeId = 'loja4') {
   if (!refs.length) return [];
@@ -163,25 +163,25 @@ async function getProductsByRefs(refs, storeId = 'loja4') {
   const storeParam = `$${refs.length + 1}`;
   return erpQuery(
     `SELECT p.id, p.sku, p.name, p.brand, p.category, p.size, p.color,
-            p.price, p.ref, p.photo,
+            p.price, COALESCE(NULLIF(p.ref, ''), p.sku) AS ref, p.photo,
             COALESCE(SUM(CASE WHEN s.stock_id = ${storeParam} THEN s.quantity ELSE 0 END), 0) AS stock
      FROM products p
      LEFT JOIN stock s ON s.product_id = p.id
-     WHERE p.active = true AND p.ref IN (${placeholders})
+     WHERE p.active = true AND (p.ref IN (${placeholders}) OR p.sku IN (${placeholders}))
      GROUP BY p.id
      ORDER BY p.ref, p.name`,
     [...refs, storeId]
   );
 }
 
-// Todas as variantes (tamanho/cor) de um ref com estoque na loja online
+// Todas as variantes (tamanho/cor) de um ref OU SKU
 async function getProductVariants(ref, storeId = 'loja4') {
   return erpQuery(
     `SELECT p.id, p.sku, p.name, p.size, p.color, p.price, p.photo,
             COALESCE(SUM(CASE WHEN s.stock_id = $2 THEN s.quantity ELSE 0 END), 0) AS stock
      FROM products p
      LEFT JOIN stock s ON s.product_id = p.id
-     WHERE p.active = true AND p.ref = $1
+     WHERE p.active = true AND (p.ref = $1 OR p.sku = $1)
      GROUP BY p.id
      ORDER BY p.size, p.color`,
     [ref, storeId]
