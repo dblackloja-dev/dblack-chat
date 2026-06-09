@@ -212,7 +212,6 @@ aiAgent.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 
 // ─── Webhook do Asaas — confirma pagamento, registra no ERP, envia cupom ───
 const asaas = require('./asaas');
-const { generateReceiptImage } = require('./receipt');
 
 app.post('/api/webhook/asaas', async (req, res) => {
   // Valida token de autenticação do Asaas
