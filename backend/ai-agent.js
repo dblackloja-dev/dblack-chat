@@ -451,7 +451,7 @@ async function executeTool(toolName, toolInput, context) {
 
               // Envia copia-cola do PIX
               if (charge.pixCode) {
-                await deps.wa.sendText(customerPhone, charge.pixCode, { isBot: true });
+                await deps.wa.sendMessage(customerPhone, charge.pixCode, { isBot: true });
                 const pixMsgId = deps.genId();
                 await queryRun(
                   "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
@@ -471,7 +471,7 @@ async function executeTool(toolName, toolInput, context) {
             } else {
               // Cartão — envia link de pagamento
               const linkMsg = `💳 Link de pagamento — R$ ${total.toFixed(2)}\n\n${charge.invoiceUrl}\n\nPode parcelar em até 6x!`;
-              await deps.wa.sendText(customerPhone, linkMsg, { isBot: true });
+              await deps.wa.sendMessage(customerPhone, linkMsg, { isBot: true });
               const linkMsgId = deps.genId();
               await queryRun(
                 "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",

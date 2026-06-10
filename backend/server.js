@@ -291,7 +291,7 @@ app.post('/api/webhook/asaas', async (req, res) => {
         const confirmMsg = pending.payment_method === 'pix'
           ? `Pagamento via PIX confirmado! R$ ${sale.total.toFixed(2)}`
           : `Pagamento via cartão confirmado! R$ ${sale.total.toFixed(2)}`;
-        await wa.sendText(pending.customer_phone, confirmMsg, { isBot: true });
+        await wa.sendMessage(pending.customer_phone, confirmMsg, { isBot: true });
 
         const confirmMsgId = genId();
         await queryRun(
