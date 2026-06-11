@@ -18,6 +18,9 @@ class WhatsAppEvolution extends EventEmitter {
     this.qrCode = null;
     this.pairingCode = null;
 
+    // Cache LID → número real (evita chamadas repetidas à API)
+    this.lidCache = new Map();
+
     // Contador de mensagens (só para monitoramento, sem bloqueio)
     this.msgCount = { hour: 0, day: 0, hourReset: Date.now(), dayReset: Date.now() };
   }
@@ -313,7 +316,13 @@ class WhatsAppEvolution extends EventEmitter {
         phone = jid; // Usa o JID completo (ex: 36232444825602@lid)
         // Tenta extrair número real do JID alternativo
         const altJid = remoteJidAlt.endsWith('@s.whatsapp.net') ? remoteJidAlt : (remoteJid.endsWith('@s.whatsapp.net') ? remoteJid : '');
-        if (altJid) realPhone = altJid.replace('@s.whatsapp.net', '');
+        if (altJid) {
+          realPhone = altJid.replace('@s.whatsapp.net', '');
+        } else {
+          // Resolve LID → número real via API
+          const resolved = await this.resolvePhoneFromLid(jid);
+          if (resolved) realPhone = resolved;
+        }
       } else {
         phone = jid.replace('@s.whatsapp.net', '');
       }
@@ -449,6 +458,41 @@ class WhatsAppEvolution extends EventEmitter {
       console.error('Erro ao baixar mídia:', e.message);
       return null;
     }
+  }
+
+  // Resolve LID para número real via Evolution API v2
+  async resolvePhoneFromLid(lid) {
+    if (!lid || !lid.endsWith('@lid')) return null;
+
+    // Checa cache primeiro
+    if (this.lidCache.has(lid)) return this.lidCache.get(lid);
+
+    try {
+      const result = await this.api('POST', 'chat/findContacts', { where: { id: lid } });
+      const contacts = Array.isArray(result) ? result : (result?.contacts || result?.data || []);
+      for (const contact of contacts) {
+        const num = contact.id?.replace('@s.whatsapp.net', '') || contact.number || contact.wuid?.replace('@s.whatsapp.net', '');
+        if (num && !num.includes('@lid') && num.length >= 10) {
+          this.lidCache.set(lid, num);
+          console.log(`🔗 LID resolvido: ${lid} → ${num}`);
+          return num;
+        }
+      }
+      // Tenta endpoint alternativo: chat/findContact (singular)
+      const single = await this.api('POST', 'chat/findContact', { number: lid });
+      const singleNum = single?.id?.replace('@s.whatsapp.net', '') || single?.number;
+      if (singleNum && !singleNum.includes('@lid') && singleNum.length >= 10) {
+        this.lidCache.set(lid, singleNum);
+        console.log(`🔗 LID resolvido (v2): ${lid} → ${singleNum}`);
+        return singleNum;
+      }
+    } catch (e) {
+      console.log(`⚠️ Não conseguiu resolver LID ${lid}:`, e.message);
+    }
+
+    // Marca no cache como null para não tentar de novo em cada mensagem
+    this.lidCache.set(lid, null);
+    return null;
   }
 
   // Busca foto de perfil do contato
