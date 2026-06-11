@@ -468,21 +468,19 @@ class WhatsAppEvolution extends EventEmitter {
     if (this.lidCache.has(lid)) return this.lidCache.get(lid);
 
     const isPhone = (s) => /^\d{10,15}$/.test(s);
+    const extractPhone = (jid) => {
+      if (!jid || !jid.endsWith('@s.whatsapp.net')) return null;
+      const num = jid.replace('@s.whatsapp.net', '');
+      return isPhone(num) ? num : null;
+    };
 
+    // Tenta chat/findContacts filtrando pelo remoteJid do LID
     try {
-      const result = await this.api('POST', 'chat/findContacts', { where: { id: lid } });
-      console.log(`🔍 findContacts raw (${lid}):`, JSON.stringify(result).slice(0, 500));
+      const result = await this.api('POST', 'chat/findContacts', { where: { remoteJid: lid } });
+      console.log(`🔍 findContacts by remoteJid (${lid}):`, JSON.stringify(result).slice(0, 500));
       const contacts = Array.isArray(result) ? result : (result?.contacts || result?.data || []);
       for (const contact of contacts) {
-        // Tenta todos os campos que podem conter o número real
-        const candidates = [
-          contact.id?.replace('@s.whatsapp.net', ''),
-          contact.number,
-          contact.wuid?.replace('@s.whatsapp.net', ''),
-          contact.phone,
-          contact.notify,
-        ].filter(Boolean);
-        const num = candidates.find(c => isPhone(c));
+        const num = extractPhone(contact.remoteJid) || extractPhone(contact.id);
         if (num) {
           this.lidCache.set(lid, num);
           console.log(`🔗 LID resolvido: ${lid} → ${num}`);
@@ -491,6 +489,32 @@ class WhatsAppEvolution extends EventEmitter {
       }
     } catch (e) {
       console.log(`⚠️ findContacts falhou (${lid}):`, e.message);
+    }
+
+    // Tenta chat/findChats para buscar conversa pelo LID
+    try {
+      const result = await this.api('POST', 'chat/findChats', { where: { remoteJid: lid } });
+      console.log(`🔍 findChats (${lid}):`, JSON.stringify(result).slice(0, 500));
+      const chats = Array.isArray(result) ? result : (result?.chats || result?.data || []);
+      for (const chat of chats) {
+        const num = extractPhone(chat.remoteJid) || extractPhone(chat.id);
+        if (num) {
+          this.lidCache.set(lid, num);
+          console.log(`🔗 LID resolvido via chat: ${lid} → ${num}`);
+          return num;
+        }
+        // Pode ter o número no campo contact dentro do chat
+        if (chat.contact) {
+          const cnum = extractPhone(chat.contact.remoteJid) || extractPhone(chat.contact.id);
+          if (cnum) {
+            this.lidCache.set(lid, cnum);
+            console.log(`🔗 LID resolvido via chat.contact: ${lid} → ${cnum}`);
+            return cnum;
+          }
+        }
+      }
+    } catch (e) {
+      console.log(`⚠️ findChats falhou (${lid}):`, e.message);
     }
 
     // Marca no cache como null para não tentar de novo em cada mensagem
