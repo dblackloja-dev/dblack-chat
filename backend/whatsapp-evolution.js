@@ -467,27 +467,30 @@ class WhatsAppEvolution extends EventEmitter {
     // Checa cache primeiro
     if (this.lidCache.has(lid)) return this.lidCache.get(lid);
 
+    const isPhone = (s) => /^\d{10,15}$/.test(s);
+
     try {
       const result = await this.api('POST', 'chat/findContacts', { where: { id: lid } });
+      console.log(`🔍 findContacts raw (${lid}):`, JSON.stringify(result).slice(0, 500));
       const contacts = Array.isArray(result) ? result : (result?.contacts || result?.data || []);
       for (const contact of contacts) {
-        const num = contact.id?.replace('@s.whatsapp.net', '') || contact.number || contact.wuid?.replace('@s.whatsapp.net', '');
-        if (num && !num.includes('@lid') && num.length >= 10) {
+        // Tenta todos os campos que podem conter o número real
+        const candidates = [
+          contact.id?.replace('@s.whatsapp.net', ''),
+          contact.number,
+          contact.wuid?.replace('@s.whatsapp.net', ''),
+          contact.phone,
+          contact.notify,
+        ].filter(Boolean);
+        const num = candidates.find(c => isPhone(c));
+        if (num) {
           this.lidCache.set(lid, num);
           console.log(`🔗 LID resolvido: ${lid} → ${num}`);
           return num;
         }
       }
-      // Tenta endpoint alternativo: chat/findContact (singular)
-      const single = await this.api('POST', 'chat/findContact', { number: lid });
-      const singleNum = single?.id?.replace('@s.whatsapp.net', '') || single?.number;
-      if (singleNum && !singleNum.includes('@lid') && singleNum.length >= 10) {
-        this.lidCache.set(lid, singleNum);
-        console.log(`🔗 LID resolvido (v2): ${lid} → ${singleNum}`);
-        return singleNum;
-      }
     } catch (e) {
-      console.log(`⚠️ Não conseguiu resolver LID ${lid}:`, e.message);
+      console.log(`⚠️ findContacts falhou (${lid}):`, e.message);
     }
 
     // Marca no cache como null para não tentar de novo em cada mensagem
