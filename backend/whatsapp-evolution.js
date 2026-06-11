@@ -316,13 +316,7 @@ class WhatsAppEvolution extends EventEmitter {
         phone = jid; // Usa o JID completo (ex: 36232444825602@lid)
         // Tenta extrair número real do JID alternativo
         const altJid = remoteJidAlt.endsWith('@s.whatsapp.net') ? remoteJidAlt : (remoteJid.endsWith('@s.whatsapp.net') ? remoteJid : '');
-        if (altJid) {
-          realPhone = altJid.replace('@s.whatsapp.net', '');
-        } else {
-          // Resolve LID → número real via API
-          const resolved = await this.resolvePhoneFromLid(jid);
-          if (resolved) realPhone = resolved;
-        }
+        if (altJid) realPhone = altJid.replace('@s.whatsapp.net', '');
       } else {
         phone = jid.replace('@s.whatsapp.net', '');
       }
@@ -467,55 +461,9 @@ class WhatsAppEvolution extends EventEmitter {
     // Checa cache primeiro
     if (this.lidCache.has(lid)) return this.lidCache.get(lid);
 
-    const isPhone = (s) => /^\d{10,15}$/.test(s);
-    const extractPhone = (jid) => {
-      if (!jid || !jid.endsWith('@s.whatsapp.net')) return null;
-      const num = jid.replace('@s.whatsapp.net', '');
-      return isPhone(num) ? num : null;
-    };
-
-    // Tenta chat/findContacts filtrando pelo remoteJid do LID
-    try {
-      const result = await this.api('POST', 'chat/findContacts', { where: { remoteJid: lid } });
-      console.log(`🔍 findContacts by remoteJid (${lid}):`, JSON.stringify(result).slice(0, 500));
-      const contacts = Array.isArray(result) ? result : (result?.contacts || result?.data || []);
-      for (const contact of contacts) {
-        const num = extractPhone(contact.remoteJid) || extractPhone(contact.id);
-        if (num) {
-          this.lidCache.set(lid, num);
-          console.log(`🔗 LID resolvido: ${lid} → ${num}`);
-          return num;
-        }
-      }
-    } catch (e) {
-      console.log(`⚠️ findContacts falhou (${lid}):`, e.message);
-    }
-
-    // Tenta chat/findChats para buscar conversa pelo LID
-    try {
-      const result = await this.api('POST', 'chat/findChats', { where: { remoteJid: lid } });
-      console.log(`🔍 findChats (${lid}):`, JSON.stringify(result).slice(0, 500));
-      const chats = Array.isArray(result) ? result : (result?.chats || result?.data || []);
-      for (const chat of chats) {
-        const num = extractPhone(chat.remoteJid) || extractPhone(chat.id);
-        if (num) {
-          this.lidCache.set(lid, num);
-          console.log(`🔗 LID resolvido via chat: ${lid} → ${num}`);
-          return num;
-        }
-        // Pode ter o número no campo contact dentro do chat
-        if (chat.contact) {
-          const cnum = extractPhone(chat.contact.remoteJid) || extractPhone(chat.contact.id);
-          if (cnum) {
-            this.lidCache.set(lid, cnum);
-            console.log(`🔗 LID resolvido via chat.contact: ${lid} → ${cnum}`);
-            return cnum;
-          }
-        }
-      }
-    } catch (e) {
-      console.log(`⚠️ findChats falhou (${lid}):`, e.message);
-    }
+    // Evolution API v2 com LID: findContacts e findChats retornam o próprio LID
+    // como remoteJid — não tem mapeamento LID→número real disponível via API.
+    // O número real só aparece se o webhook enviar remoteJidAlt com @s.whatsapp.net.
 
     // Marca no cache como null para não tentar de novo em cada mensagem
     this.lidCache.set(lid, null);
