@@ -11,7 +11,9 @@ function generateReceiptImage(sale, sellerName, customerName) {
   const F = 'DejaVu Sans, Arial, sans-serif';
 
   const itemCount = sale.items.length;
-  const H = 280 + (itemCount * 52) + (sale.discount > 0 ? 28 : 0);
+  const taxaEntrega = parseFloat(sale.taxa_entrega) || 0;
+  const tipoEntrega = sale.tipo_entrega || 'retirada';
+  const H = 280 + (itemCount * 52) + (sale.discount > 0 ? 28 : 0) + (taxaEntrega > 0 ? 28 : 0) + 24;
 
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
@@ -89,6 +91,15 @@ function generateReceiptImage(sale, sellerName, customerName) {
     ctx.fillText(`- R$ ${sale.discount.toFixed(2)}`, r, y); y += lh;
   }
 
+  if (taxaEntrega > 0) {
+    ctx.fillStyle = '#333';
+    ctx.font = `13px ${F}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('Entrega:', pad, y);
+    ctx.textAlign = 'right';
+    ctx.fillText(`R$ ${taxaEntrega.toFixed(2)}`, r, y); y += lh;
+  }
+
   ctx.fillStyle = '#000';
   ctx.font = `bold 18px ${F}`;
   ctx.textAlign = 'left';
@@ -99,7 +110,8 @@ function generateReceiptImage(sale, sellerName, customerName) {
   ctx.font = `12px ${F}`;
   ctx.fillStyle = '#333';
   ctx.textAlign = 'left';
-  ctx.fillText(`Pagamento: ${PAY_LABELS[sale.payment_method] || sale.payment_method}`, pad, y); y += 8;
+  const entregaLabel = tipoEntrega === 'entrega' ? '🚚 Entrega' : '🏪 Retirada na loja';
+  ctx.fillText(`Pagamento: ${PAY_LABELS[sale.payment_method] || sale.payment_method}  |  ${entregaLabel}`, pad, y); y += 8;
   line();
 
   y += 4;
@@ -136,13 +148,21 @@ function generateReceiptText(sale, sellerName, customerName) {
     text += `   *Subtotal: R$ ${(item.price * item.quantity).toFixed(2)}*\n\n`;
   }
 
+  const taxaEntrega = parseFloat(sale.taxa_entrega) || 0;
+  const tipoEntrega = sale.tipo_entrega || 'retirada';
+
   text += `────────────────────\n`;
   text += `Subtotal: R$ ${sale.subtotal.toFixed(2)}\n`;
   if (sale.discount > 0) {
     text += `Desconto: - R$ ${sale.discount.toFixed(2)}\n`;
   }
+  if (taxaEntrega > 0) {
+    text += `🚚 Entrega: R$ ${taxaEntrega.toFixed(2)}\n`;
+  }
   text += `\n💰 *TOTAL: R$ ${sale.total.toFixed(2)}*\n`;
   text += `💳 Pagamento: ${PAY_LABELS[sale.payment_method] || sale.payment_method}\n`;
+  const entregaLabel = tipoEntrega === 'entrega' ? '🚚 Entrega' : '🏪 Retirada na loja';
+  text += `📦 ${entregaLabel}\n`;
   text += `━━━━━━━━━━━━━━━━━━━━\n`;
   text += `  Obrigado pela preferência! 🛍️\n`;
   text += `  *D'Black Store* — @d_blackloja`;

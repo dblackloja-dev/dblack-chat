@@ -70,7 +70,7 @@ class WhatsAppEvolution extends EventEmitter {
   // Simula "digitando..." antes de enviar
   async sendPresence(phone, type = 'composing') {
     try {
-      await this.api('POST', 'chat/sendPresence', { ...this._sendTarget(phone), presence: type });
+      await this.api('POST', 'chat/sendPresence', { ...this._sendTarget(phone), presence: type, delay: 1000 });
     } catch {}
   }
 
@@ -106,14 +106,16 @@ class WhatsAppEvolution extends EventEmitter {
         this.emit('connected');
       } else {
         console.log('📱 WhatsApp (Evolution) estado:', state);
-        // Se está connecting, tenta de novo em 10s
-        if (state === 'connecting') {
+        // Retenta até conectar (close pode virar open depois que a Evolution carrega)
+        if (state === 'connecting' || state === 'close') {
           setTimeout(() => this.connect(), 10000);
         }
       }
       return status;
     } catch (e) {
       console.error('Erro ao verificar conexão Evolution:', e.message);
+      // Retenta em caso de erro de rede (Evolution ainda subindo)
+      setTimeout(() => this.connect(), 15000);
       return null;
     }
   }
@@ -158,6 +160,24 @@ class WhatsAppEvolution extends EventEmitter {
       console.error('Erro ao parear:', e.message);
       return null;
     }
+  }
+
+  // Envia botões interativos (máx 3 botões)
+  async sendButtons(phone, title, description, buttons, { isBot = false } = {}) {
+    if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
+    if (isBot) {
+      await this.sendPresence(phone, 'composing');
+      await this.humanDelay();
+    }
+    this.trackSend();
+    const result = await this.api('POST', 'message/sendButtons', {
+      ...this._sendTarget(phone),
+      title,
+      description,
+      buttons: buttons.map(b => ({ type: 'reply', buttonText: { displayText: b.text }, buttonId: b.id })),
+    });
+    result._waId = result?.key?.id || null;
+    return result;
   }
 
   // isBot: true = IA/saudação automática (usa delay + digitando pra parecer humano)
@@ -298,6 +318,12 @@ class WhatsAppEvolution extends EventEmitter {
     }
 
     if (event === 'messages.upsert') {
+      // Se recebeu mensagem, está conectado (corrige estado se necessário)
+      if (!this.connected) {
+        this.connected = true;
+        console.log('✅ WhatsApp conectado (detectado via mensagem recebida)');
+        this.emit('connected');
+      }
       const msg = body.data;
       if (!msg || msg.key?.fromMe) return;
       const jid = msg.key?.remoteJidAlt || msg.key?.remoteJid || '';
@@ -341,22 +367,22 @@ class WhatsAppEvolution extends EventEmitter {
       } else if (msgContent?.imageMessage) {
         content = msgContent.imageMessage.caption || '📷 Imagem';
         mediaType = 'image';
-        // Baixa mídia pela API da Evolution
-        mediaUrl = await this.downloadMedia(msg.key?.id);
+        // Baixa mídia pela API da Evolution (precisa do remoteJid)
+        mediaUrl = await this.downloadMedia(msg.key?.id, msg.key?.remoteJid);
       } else if (msgContent?.videoMessage) {
         content = msgContent.videoMessage.caption || '🎥 Vídeo';
         mediaType = 'video';
-        mediaUrl = await this.downloadMedia(msg.key?.id);
+        mediaUrl = await this.downloadMedia(msg.key?.id, msg.key?.remoteJid);
       } else if (msgContent?.audioMessage) {
         content = '🎵 Áudio';
         mediaType = 'audio';
-        mediaUrl = await this.downloadMedia(msg.key?.id);
+        mediaUrl = await this.downloadMedia(msg.key?.id, msg.key?.remoteJid);
       } else if (msgContent?.documentMessage) {
         const fileName = msgContent.documentMessage.fileName || 'Documento';
         content = '📄 ' + fileName;
         mediaType = 'document';
         try {
-          mediaUrl = await this.downloadMedia(msg.key?.id);
+          mediaUrl = await this.downloadMedia(msg.key?.id, msg.key?.remoteJid);
           console.log('📄 Documento baixado:', fileName, mediaUrl ? 'OK' : 'FALHOU');
         } catch (e) {
           console.error('Erro ao baixar documento:', e.message);
@@ -382,7 +408,7 @@ class WhatsAppEvolution extends EventEmitter {
         if (inner?.imageMessage) {
           content = inner.imageMessage.caption || '📷 Foto (visualização única)';
           mediaType = 'image';
-          mediaUrl = await this.downloadMedia(msg.key?.id);
+          mediaUrl = await this.downloadMedia(msg.key?.id, msg.key?.remoteJid);
         } else if (inner?.videoMessage) {
           content = '🎥 Vídeo (visualização única)';
           mediaType = 'video';
@@ -426,13 +452,24 @@ class WhatsAppEvolution extends EventEmitter {
   }
 
   // Baixa mídia pela API da Evolution e salva no banco
-  async downloadMedia(messageId) {
+  async downloadMedia(messageId, remoteJid) {
     if (!messageId) return null;
     try {
-      // Tenta o formato da Evolution v2
-      const result = await this.api('POST', 'chat/getBase64FromMediaMessage', {
-        message: { key: { id: messageId } },
+      // Aguarda a Evolution persistir a mensagem antes de baixar
+      await new Promise(r => setTimeout(r, 2000));
+      // Evolution v2: precisa do remoteJid no key para encontrar a mensagem
+      const key = { id: messageId };
+      if (remoteJid) key.remoteJid = remoteJid;
+      let result = await this.api('POST', 'chat/getBase64FromMediaMessage', {
+        message: { key },
       });
+      // Retry uma vez se não encontrou (pode demorar mais pra persistir)
+      if (!result?.base64 && !result?.data) {
+        await new Promise(r => setTimeout(r, 3000));
+        result = await this.api('POST', 'chat/getBase64FromMediaMessage', {
+          message: { key },
+        });
+      }
 
       const base64 = result?.base64 || result?.data;
       if (base64) {

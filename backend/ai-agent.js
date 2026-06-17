@@ -48,45 +48,59 @@ COMO VOCÊ ESCREVE:
 - Responda SOMENTE o que foi perguntado. Não jogue informações que o cliente não pediu
 
 PRIMEIRA INTERAÇÃO (só uma vez, UMA ÚNICA mensagem curta):
-"Oiiii, (bom dia/boa tarde/boa noite)! Tudo bem com você? Eu sou a Lê, assistente virtual da D'Black, estou aqui para agilizar o seu atendimento 🥰
+"Oiiii, (bom dia/boa tarde/boa noite)! Tudo bem? Eu sou a Lê, assistente virtual da D'Black 🥰
+
+Estou aqui para agilizar a compra das peças em oferta, em 5 minutinhos você finaliza sua compra comigo!
 
 Qual é o seu nome e de qual cidade você é?"
 
 IMPORTANTE: Mande APENAS UMA mensagem de saudação. NUNCA mande duas saudações seguidas.
 
 DEPOIS QUE O CLIENTE RESPONDER O NOME E CIDADE:
-Pergunte se o cliente quer ver as peças em oferta da Semana de Oportunidade. Diga algo como: "que legal, [nome]! Olha, estamos com a nossa Semana de Oportunidade com peças incríveis com preços especiais! Quer dar uma olhada?"
-- Se o cliente ACEITAR (sim, quero, manda, bora, etc): use listar_categorias_promo para ver as categorias e apresente as opções de forma natural (NÃO use bullet points, escreva em texto corrido).
-- Se o cliente RECUSAR (não, só queria tirar uma dúvida, quero falar com atendente, etc): diga "sem problemas!" e transfira para atendimento humano colocando [TRANSFERIR] no final.
+Pergunte: "[nome], você gostaria de realizar sua compra comigo ou prefere o atendimento das meninas do online?"
 
-FLUXO DE VENDA:
-1. Depois que souber nome/cidade, avise da Semana de Oportunidade
-2. Use listar_categorias_promo e apresente as categorias disponíveis
-3. Quando o cliente escolher uma categoria, use buscar_ofertas para buscar os produtos. NÃO envie fotos. Descreva os produtos disponíveis com nome, cores disponíveis e preço em texto.
-4. Quando o cliente demonstrar interesse em um produto, pergunte qual cor e tamanho quer. Use verificar_estoque para confirmar disponibilidade.
-5. Quando o cliente escolher tamanho e cor, use adicionar_carrinho para adicionar ao carrinho
-6. Pergunte se quer ver mais alguma coisa ou se quer finalizar
-7. Para finalizar, pergunte: "vai ser no PIX ou no cartão de crédito?"
-8. Depois que o cliente escolher, peça o CPF: "para gerar o pagamento, preciso do seu CPF"
-9. Use finalizar_venda com a forma de pagamento e o CPF
-10. Se for PIX: o QR Code e o código copia-cola serão enviados automaticamente. Diga ao cliente para escanear o QR Code ou copiar o código PIX. Assim que o pagamento for confirmado, o cupom será enviado automaticamente.
-11. Se for cartão: o link de pagamento será enviado automaticamente. Diga ao cliente para clicar no link e finalizar. Pode parcelar em até 6x. Assim que o pagamento for confirmado, o cupom será enviado automaticamente.
-12. Após enviar o pagamento, diga que assim que confirmar o pagamento, o cupom será enviado. Fique disponível caso o cliente tenha dúvida.
+- Se o cliente escolher COMPRAR COM VOCÊ (sim, quero, pode ser, com você, bora, etc): use listar_categorias_promo para ver as categorias e JÁ apresente as ofertas disponíveis de forma natural (NÃO use bullet points, escreva em texto corrido).
+- Se o cliente escolher ATENDIMENTO HUMANO (meninas, atendente, pessoa, etc): diga "sem problemas! vou te passar para a Kariny ou a Bruna" e transfira colocando [TRANSFERIR] no final.
 
-IMPORTANTE: NUNCA envie fotos ao cliente. Toda comunicação é por texto. Descreva os produtos, cores e tamanhos por escrito.
+FLUXO DE VENDA (tudo por texto, sem botões, sem fotos):
+1. Depois que souber nome/cidade, pergunte se quer comprar com você ou com as meninas
+2. Se escolher você, use listar_categorias_promo e apresente as categorias disponíveis
+3. Quando o cliente escolher uma categoria, use buscar_ofertas com o nome EXATO da categoria (que veio de listar_categorias_promo). Se o cliente pedir direto sem ver categorias, use listar_categorias_promo primeiro para saber os nomes corretos
+4. Apresente os produtos por TEXTO: nome, preço, cores disponíveis
+5. Pergunte qual cor o cliente quer
+6. Quando o cliente escolher a cor, use verificar_estoque (com a ref numérica do produto!) para ver tamanhos disponíveis
+7. Se o resultado mostrar tamanho "Único", NÃO pergunte tamanho — pule direto pra quantidade
+8. Se tiver tamanhos variados (P, M, G, etc), pergunte qual tamanho
+9. Pergunte a quantidade
+10. Use adicionar_carrinho para adicionar ao carrinho
+11. Pergunte se quer ver mais alguma coisa ou finalizar
+12. Para finalizar, pergunte: "vai ser entrega (R$7,00) ou retirada na loja (grátis)?"
+13. Pergunte: "vai ser no PIX ou no cartão de crédito?"
+14. Peça o CPF: "para gerar o pagamento, preciso do seu CPF"
+15. Use finalizar_venda com forma de pagamento, CPF e tipo de entrega
+16. Se for PIX: QR Code e código copia-cola são enviados automaticamente
+17. Se for cartão: link de pagamento enviado automaticamente (até 6x)
+18. Diga que assim que confirmar o pagamento, o cupom será enviado
 
 REGRAS DE VENDA:
 - SEMPRE use as ferramentas para consultar produtos e estoque. NUNCA invente preço, tamanho ou disponibilidade
+- NÃO envie fotos e NÃO use enviar_botoes nem enviar_fotos_produto. Tudo por texto
 - Se um tamanho/cor não tem estoque, avise e sugira as opções disponíveis
+- Se o verificar_estoque retornar tamanho "Único" para todas as variações, NÃO pergunte tamanho ao cliente. Pule direto pra quantidade
 - Se o cliente quiser mais de uma peça, adicione todas ao carrinho antes de finalizar
 - Use ver_carrinho se precisar lembrar o que já foi adicionado
+- SEMPRE pergunte se é entrega (R$7,00) ou retirada na loja (grátis) antes de finalizar
 
 REGRAS ABSOLUTAS:
-- LEIA o histórico antes de responder. NUNCA repita pergunta que já fez
+- LEIA TODO o histórico antes de responder. NUNCA repita informação, pergunta ou frase que já apareceu na conversa
+- Se já perguntou o nome, NÃO pergunte de novo. Se já apresentou as categorias, NÃO apresente de novo. Se já mostrou os produtos de uma categoria, NÃO mostre de novo a menos que o cliente peça
 - Se já sabe o nome, USE o nome
+- Se o cliente voltar a falar depois de um tempo, NÃO repita a saudação. Apenas retome de onde parou
 - Se perguntarem se é robô/IA, confirme que é uma assistente virtual e que está ali para agilizar o atendimento. Se o cliente preferir falar com uma pessoa, transfira [TRANSFERIR]
 - NUNCA fale coisas que não estão neste prompt
 - A loja só faz VENDA ONLINE, não separa peça — SÓ informe se o cliente perguntar
+- Confie nos resultados das ferramentas. Se a ferramenta diz que tem estoque, TEM. Se diz que não tem, NÃO TEM. NUNCA contradiga a ferramenta
+- NUNCA invente códigos de referência (ref). Use SEMPRE a ref que veio do resultado de buscar_ofertas. Ex: se buscar_ofertas retornou ref "50083", use "50083" nas outras ferramentas
 
 QUANDO TRANSFERIR (coloque [TRANSFERIR] no final):
 - Reclamação ou problema com pedido anterior
@@ -99,7 +113,6 @@ FOTOS RECEBIDAS:
 - 90% das fotos são prints do Instagram @d_blackloja com a Sra. D'Black (Letícia) ou Sr. D'Black (Denilson) vestindo looks
 - Comente sobre a PEÇA (cor, estilo), não sobre a pessoa
 - Se o cliente mandar foto de uma peça que quer, tente identificar e use buscar_ofertas para encontrar
-- NUNCA envie fotos de volta. Responda sempre por texto.
 
 ÁUDIOS: diga que está com problema no áudio e peça para enviar por escrito
 
@@ -130,8 +143,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'verificar_estoque',
-    description: 'Verifica os tamanhos e cores disponíveis de um produto específico. Use quando o cliente demonstrar interesse em um produto.',
+    name: 'enviar_fotos_produto',
+    description: 'Envia as fotos das cores disponíveis de um produto para o cliente via WhatsApp. Use a ref que veio do resultado de buscar_ofertas (ex: "50083"). NUNCA invente uma ref. Use APENAS UMA VEZ por produto, logo depois de buscar_ofertas. NÃO use de novo se já enviou as fotos antes na conversa.',
     input_schema: {
       type: 'object',
       properties: {
@@ -141,8 +154,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'verificar_estoque',
+    description: 'Verifica tamanhos e cores disponíveis. O parâmetro ref DEVE ser o código numérico retornado por buscar_ofertas ou enviar_fotos_produto (ex: "50083").',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Código numérico do produto retornado por buscar_ofertas (ex: "50083"). NÃO invente, copie exatamente do resultado anterior.' },
+      },
+      required: ['ref'],
+    },
+  },
+  {
     name: 'adicionar_carrinho',
-    description: 'Adiciona um produto ao carrinho do cliente. Use quando o cliente escolher tamanho e cor.',
+    description: 'Adiciona um produto ao carrinho do cliente. Use quando o cliente escolher cor, tamanho e quantidade.',
     input_schema: {
       type: 'object',
       properties: {
@@ -150,11 +174,36 @@ const TOOLS = [
         ref: { type: 'string', description: 'Código de referência do produto (ref)' },
         nome: { type: 'string', description: 'Nome do produto para exibição' },
         cor: { type: 'string', description: 'Cor escolhida pelo cliente' },
-        tamanho: { type: 'string', description: 'Tamanho escolhido pelo cliente (P, M, G, GG, etc)' },
+        tamanho: { type: 'string', description: 'Tamanho escolhido pelo cliente (P, M, G, GG, Único, etc)' },
         sku: { type: 'string', description: 'SKU do produto' },
         preco: { type: 'number', description: 'Preço unitário' },
+        quantidade: { type: 'number', description: 'Quantidade desejada (padrão 1)' },
       },
       required: ['product_id', 'ref', 'nome', 'cor', 'tamanho', 'sku', 'preco'],
+    },
+  },
+  {
+    name: 'enviar_botoes',
+    description: 'Envia uma mensagem com botões clicáveis para o cliente escolher (máximo 3 botões). Use para perguntar tamanho, quantidade, tipo de entrega ou forma de pagamento.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        titulo: { type: 'string', description: 'Título da mensagem (em negrito)' },
+        descricao: { type: 'string', description: 'Texto descritivo da mensagem' },
+        botoes: {
+          type: 'array',
+          description: 'Lista de botões (máximo 3). Cada botão tem "texto" (o que aparece) e "id" (identificador)',
+          items: {
+            type: 'object',
+            properties: {
+              texto: { type: 'string', description: 'Texto do botão' },
+              id: { type: 'string', description: 'ID do botão (ex: "tam_p", "qtd_1", "entrega")' },
+            },
+            required: ['texto', 'id'],
+          },
+        },
+      },
+      required: ['titulo', 'descricao', 'botoes'],
     },
   },
   {
@@ -175,14 +224,15 @@ const TOOLS = [
   },
   {
     name: 'finalizar_venda',
-    description: 'Gera o pagamento (PIX com QR Code ou link de cartão) e envia ao cliente via WhatsApp. A venda só é registrada no sistema quando o pagamento é confirmado. Use quando o cliente confirmar a compra, a forma de pagamento E informar o CPF.',
+    description: 'Gera o pagamento (PIX com QR Code ou link de cartão) e envia ao cliente via WhatsApp. A venda só é registrada no sistema quando o pagamento é confirmado. Use quando o cliente confirmar a compra, tipo de entrega, forma de pagamento E CPF.',
     input_schema: {
       type: 'object',
       properties: {
         forma_pagamento: { type: 'string', enum: ['pix', 'credito'], description: 'Forma de pagamento: "pix" ou "credito"' },
         cpf: { type: 'string', description: 'CPF do cliente (apenas números ou formatado)' },
+        tipo_entrega: { type: 'string', enum: ['entrega', 'retirada'], description: 'Tipo de entrega: "entrega" (R$7,00) ou "retirada" (grátis)' },
       },
-      required: ['forma_pagamento', 'cpf'],
+      required: ['forma_pagamento', 'cpf', 'tipo_entrega'],
     },
   },
 ];
@@ -201,24 +251,37 @@ async function executeTool(toolName, toolInput, context) {
 
     case 'buscar_ofertas': {
       const { categoria } = toolInput;
-      // Busca refs da promoção nesta categoria
-      const promoItems = await queryAll(
-        "SELECT id, ref, display_name FROM promo_items WHERE active = true AND LOWER(category) = LOWER($1)",
+      // Busca refs da promoção nesta categoria (exato ou aproximado)
+      let promoItems = await queryAll(
+        "SELECT id, ref, display_name, promo_price FROM promo_items WHERE active = true AND LOWER(category) = LOWER($1)",
         [categoria]
       );
-      if (promoItems.length === 0) return { resultado: `Não encontrei ofertas na categoria "${categoria}".` };
+      // Se não encontrou, tenta busca aproximada (LIKE)
+      if (promoItems.length === 0) {
+        promoItems = await queryAll(
+          "SELECT id, ref, display_name, promo_price FROM promo_items WHERE active = true AND LOWER(category) LIKE LOWER($1)",
+          [`%${categoria.replace(/s$/i, '')}%`]
+        );
+      }
+      if (promoItems.length === 0) {
+        // Retorna categorias disponíveis pra ajudar
+        const cats = await queryAll("SELECT DISTINCT category FROM promo_items WHERE active = true ORDER BY category");
+        return { resultado: `Não encontrei "${categoria}". Categorias disponíveis: ${cats.map(c => c.category).join(', ')}. Use o nome exato.` };
+      }
 
       const refs = promoItems.map(p => p.ref);
-      // Busca produtos do ERP com estoque
+      // Busca produtos do ERP
       const products = await erp.getProductsByRefs(refs);
 
-      // Agrupa por ref para mostrar 1 entrada por produto (com variações de tamanho/cor)
+      // Para cada ref, determina quais cores/tamanhos realmente estão disponíveis
+      // usando a mesma lógica de estoque do verificar_estoque
       const grouped = {};
       for (const p of products) {
-        if (!grouped[p.ref]) {
-          const promoItem = promoItems.find(pi => pi.ref === p.ref);
+        const refKey = (p.ref || '').toLowerCase();
+        if (!grouped[refKey]) {
+          const promoItem = promoItems.find(pi => pi.ref.toLowerCase() === refKey);
           const promoPrice = promoItem?.promo_price ? parseFloat(promoItem.promo_price) : null;
-          grouped[p.ref] = {
+          grouped[refKey] = {
             ref: p.ref,
             promoItemId: promoItem?.id,
             nome: promoItem?.display_name || p.name.replace(/\s+(P|M|G|GG|EXG|G1|G2|G3|\d{2})$/i, '').trim(),
@@ -227,22 +290,149 @@ async function executeTool(toolName, toolInput, context) {
             foto: p.photo,
             tamanhos: new Set(),
             cores: new Set(),
+            variants: [],
           };
         }
-        if (p.size) grouped[p.ref].tamanhos.add(p.size);
-        if (p.color) grouped[p.ref].cores.add(p.color);
+        grouped[refKey].variants.push(p);
       }
 
-      const ofertas = Object.values(grouped).map(g => ({
-        ref: g.ref,
-        nome: g.nome,
-        preco: `R$ ${g.preco.toFixed(2)}`,
-        ...(g.precoOriginal ? { preco_original: `R$ ${g.precoOriginal.toFixed(2)}` } : {}),
-        tamanhos: [...g.tamanhos].join(', ') || 'variados',
-        cores: [...g.cores].join(', ') || 'variadas',
-      }));
+      // Filtra cores/tamanhos por disponibilidade real (promo_stock ou ERP)
+      const ofertas = [];
+      for (const g of Object.values(grouped)) {
+        let stockMode = 'erp';
+        let promoStockMap = {};
 
-      return { ofertas, total: ofertas.length, mensagem: `Encontrei ${ofertas.length} produto(s) na categoria ${categoria}. Descreva os produtos por texto.` };
+        if (g.promoItemId) {
+          const promoStockRows = await queryAll(
+            "SELECT color, size, stock_limit, stock_sold FROM promo_stock WHERE promo_item_id = $1 AND stock_limit > 0",
+            [g.promoItemId]
+          );
+          if (promoStockRows.length > 0) {
+            stockMode = 'grid';
+            for (const ps of promoStockRows) {
+              const key = `${(ps.color || '').toLowerCase()}|${(ps.size || '').toLowerCase()}`;
+              promoStockMap[key] = { limit: ps.stock_limit, sold: ps.stock_sold || 0 };
+            }
+          } else {
+            const promoPhotos = await queryAll(
+              "SELECT color, stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 AND stock_limit > 0",
+              [g.promoItemId]
+            );
+            if (promoPhotos.length > 0) {
+              stockMode = 'photo';
+              for (const pp of promoPhotos) {
+                promoStockMap[pp.color.toLowerCase()] = { limit: pp.stock_limit, sold: pp.stock_sold || 0 };
+              }
+            }
+          }
+        }
+
+        // Filtra variantes com estoque real (promo_stock manda, NÃO cai no ERP)
+        if (stockMode === 'grid') {
+          // Mostra tamanhos/cores que têm estoque no grid promo
+          for (const [key, ps] of Object.entries(promoStockMap)) {
+            if ((ps.limit - ps.sold) > 0) {
+              const [cor, tam] = key.split('|');
+              if (tam) g.tamanhos.add(tam.toUpperCase());
+              if (cor) g.cores.add(cor.charAt(0).toUpperCase() + cor.slice(1));
+            }
+          }
+        } else if (stockMode === 'photo') {
+          // Mostra cores que têm estoque nas fotos promo
+          for (const [cor, ps] of Object.entries(promoStockMap)) {
+            if ((ps.limit - ps.sold) > 0) {
+              g.cores.add(cor.charAt(0).toUpperCase() + cor.slice(1));
+            }
+          }
+          // Tamanhos vêm do ERP (foto não controla tamanho)
+          for (const v of g.variants) {
+            if (v.size) g.tamanhos.add(v.size);
+          }
+        } else {
+          // Sem promo_stock: produto promo sem controle = indisponível
+          // (admin precisa cadastrar estoque promo)
+        }
+
+        // Só inclui produto se tem pelo menos 1 variação disponível
+        if (g.tamanhos.size > 0 || g.cores.size > 0) {
+          ofertas.push({
+            ref: g.ref,
+            nome: g.nome,
+            preco: `R$ ${g.preco.toFixed(2)}`,
+            ...(g.precoOriginal ? { preco_original: `R$ ${g.precoOriginal.toFixed(2)}` } : {}),
+            tamanhos: [...g.tamanhos].join(', ') || 'variados',
+            cores: [...g.cores].join(', ') || 'variadas',
+          });
+        }
+      }
+
+      if (ofertas.length === 0) return { resultado: `Todos os produtos da categoria "${categoria}" estão esgotados no momento.` };
+      return { ofertas, total: ofertas.length, instrucao: `Use enviar_fotos_produto com a ref de cada produto para enviar fotos. Exemplo: enviar_fotos_produto(ref: "${ofertas[0]?.ref}")` };
+    }
+
+    case 'enviar_fotos_produto': {
+      const { ref } = toolInput;
+
+      // Trava: não envia fotos do mesmo produto 2x na mesma conversa
+      const jaEnviou = await queryOne(
+        "SELECT id FROM messages WHERE conversation_id = $1 AND from_me = true AND content LIKE $2 AND media_type = 'image' LIMIT 1",
+        [conversationId, `%${ref}%`]
+      );
+      if (jaEnviou) return { sucesso: true, ref, ja_enviadas: true, instrucao: `Fotos deste produto já foram enviadas antes. NÃO envie de novo. Pergunte ao cliente qual cor quer. Use verificar_estoque com ref "${ref}" quando ele escolher.` };
+
+      const promoItem = await queryOne("SELECT id, display_name, promo_price FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]);
+      if (!promoItem) return { resultado: 'Produto não encontrado na promoção.' };
+
+      const photos = await queryAll(
+        "SELECT id, color, stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 AND stock_limit > 0 ORDER BY color",
+        [promoItem.id]
+      );
+      const disponiveis = photos.filter(p => (p.stock_limit - (p.stock_sold || 0)) > 0);
+      if (disponiveis.length === 0) return { resultado: 'Nenhuma cor disponível com estoque.' };
+
+      // Envia cada foto via WhatsApp
+      const preco = promoItem.promo_price ? `R$ ${parseFloat(promoItem.promo_price).toFixed(2)}` : '';
+      let enviadas = 0;
+      if (deps.wa && customerPhone) {
+        for (const photo of disponiveis) {
+          try {
+            const photoRow = await queryOne("SELECT data, mime_type FROM promo_photos WHERE id = $1", [photo.id]);
+            if (!photoRow?.data) continue;
+            const buffer = Buffer.from(photoRow.data, 'base64');
+            const restante = photo.stock_limit - (photo.stock_sold || 0);
+            const caption = `${promoItem.display_name} — ${photo.color.trim()}\n${preco}`;
+            await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
+
+            // Salva no histórico
+            const msgId = deps.genId();
+            const mediaId = 'promo_' + photo.id;
+            await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+              [mediaId, photoRow.mime_type || 'image/jpeg', photoRow.data]);
+            await queryRun(
+              "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
+              [msgId, conversationId, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
+            );
+            if (deps.broadcast) {
+              deps.broadcast('new_message', {
+                conversation: { id: conversationId },
+                message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
+              });
+            }
+            enviadas++;
+          } catch (e) {
+            console.error(`⚠️ Erro ao enviar foto ${photo.color}:`, e.message);
+          }
+        }
+      }
+
+      const coresEnviadas = disponiveis.map(p => p.color.trim()).join(', ');
+      return {
+        sucesso: true,
+        ref: ref,
+        fotos_enviadas: enviadas,
+        cores_disponiveis: coresEnviadas,
+        instrucao: `Fotos enviadas. Pergunte qual cor o cliente quer. Quando escolher, use verificar_estoque com ref "${ref}" para ver tamanhos.`
+      };
     }
 
     case 'verificar_estoque': {
@@ -281,24 +471,30 @@ async function executeTool(toolName, toolInput, context) {
         }
       }
 
-      // Se produto no ERP não tem variações de cor/tamanho mas tem estoque promo,
-      // gera variações virtuais a partir do estoque promo
-      const erpTemVariacoes = variants.some(v => v.color || v.size);
+      // Promo_stock manda — não cai no ERP para peças de oferta
       const baseVariant = variants[0]; // produto base do ERP (para pegar id, sku, price)
 
-      if (!erpTemVariacoes && stockMode !== 'erp' && baseVariant) {
+      if (stockMode === 'grid') {
+        // Grid promo: mostra apenas variações cadastradas com estoque
         const disponveis = [];
         for (const [key, ps] of Object.entries(promoStockMap)) {
           const restante = ps.limit - ps.sold;
           if (restante <= 0) continue;
+          // Tenta achar variante correspondente no ERP para pegar id/sku
+          const erpVariant = variants.find(v =>
+            (v.color || '').toLowerCase() === (ps.color || '').toLowerCase() &&
+            (v.size || '').toLowerCase() === (ps.size || '').toLowerCase()
+          ) || baseVariant;
+          const baseId = erpVariant?.id || baseVariant?.id;
+          const uniqueId = erpVariant?.id !== baseVariant?.id ? baseId : `${baseId}_${(ps.color || '').replace(/\s+/g, '').toLowerCase()}_${(ps.size || '').replace(/\s+/g, '').toLowerCase()}`;
           disponveis.push({
-            id: baseVariant.id,
-            sku: baseVariant.sku,
-            nome: baseVariant.name,
+            id: uniqueId,
+            sku: erpVariant?.sku || baseVariant?.sku,
+            nome: erpVariant?.name || baseVariant?.name,
             tamanho: ps.size || 'Único',
             cor: ps.color || '-',
-            preco: `R$ ${(promoPrice || parseFloat(baseVariant.price)).toFixed(2)}`,
-            ...(promoPrice ? { preco_original: `R$ ${parseFloat(baseVariant.price).toFixed(2)}` } : {}),
+            preco: `R$ ${(promoPrice || parseFloat(erpVariant?.price || baseVariant?.price || 0)).toFixed(2)}`,
+            ...(promoPrice ? { preco_original: `R$ ${parseFloat(erpVariant?.price || baseVariant?.price || 0).toFixed(2)}` } : {}),
             estoque: restante,
           });
         }
@@ -306,63 +502,96 @@ async function executeTool(toolName, toolInput, context) {
         return { variacoes_disponiveis: disponveis, total: disponveis.length };
       }
 
-      // Fluxo normal: produto com variações no ERP
-      if (variants.length === 0) return { resultado: 'Produto sem estoque no momento.' };
+      if (stockMode === 'photo') {
+        // Foto promo: filtra por cor com estoque
+        const coresDisponiveis = {};
+        for (const [cor, ps] of Object.entries(promoStockMap)) {
+          if ((ps.limit - ps.sold) > 0) coresDisponiveis[cor] = ps.limit - ps.sold;
+        }
+        // Se ERP tem variações com cor, filtra por cor
+        const erpTemCores = variants.some(v => v.color);
+        let disponveis;
+        if (erpTemCores) {
+          disponveis = variants.filter(v => {
+            const cor = (v.color || '').toLowerCase();
+            return coresDisponiveis[cor] > 0;
+          }).map(v => ({
+            id: v.id, sku: v.sku, nome: v.name,
+            tamanho: v.size || '-', cor: v.color || '-',
+            preco: `R$ ${(promoPrice || parseFloat(v.price)).toFixed(2)}`,
+            ...(promoPrice ? { preco_original: `R$ ${parseFloat(v.price).toFixed(2)}` } : {}),
+            estoque: coresDisponiveis[(v.color || '').toLowerCase()],
+          }));
+        } else {
+          // ERP sem variações de cor: gera variações virtuais a partir das fotos promo
+          // ID único por cor pra diferenciar no carrinho
+          disponveis = Object.entries(coresDisponiveis).map(([cor, estoque]) => ({
+            id: `${baseVariant?.id}_${cor.replace(/\s+/g, '').toLowerCase()}`, sku: baseVariant?.sku, nome: baseVariant?.name,
+            tamanho: 'Único', cor: cor.charAt(0).toUpperCase() + cor.slice(1),
+            preco: `R$ ${(promoPrice || parseFloat(baseVariant?.price || 0)).toFixed(2)}`,
+            ...(promoPrice ? { preco_original: `R$ ${parseFloat(baseVariant?.price || 0).toFixed(2)}` } : {}),
+            estoque,
+          }));
+        }
+        if (disponveis.length === 0) return { resultado: 'Todas as variações deste produto estão esgotadas.' };
+        return { variacoes_disponiveis: disponveis, total: disponveis.length };
+      }
 
-      const disponveis = variants.filter(v => {
-        if (stockMode === 'grid') {
-          const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
-          const ps = promoStockMap[key];
-          return ps ? (ps.limit - ps.sold) > 0 : false;
-        }
-        if (stockMode === 'photo') {
-          const cor = (v.color || '').toLowerCase();
-          const ps = promoStockMap[cor];
-          return ps ? (ps.limit - ps.sold) > 0 : false;
-        }
-        return parseInt(v.stock) > 0;
-      }).map(v => {
-        let estoquePromo = null;
-        if (stockMode === 'grid') {
-          const key = `${(v.color || '').toLowerCase()}|${(v.size || '').toLowerCase()}`;
-          const ps = promoStockMap[key];
-          estoquePromo = ps ? ps.limit - ps.sold : null;
-        } else if (stockMode === 'photo') {
-          const cor = (v.color || '').toLowerCase();
-          const ps = promoStockMap[cor];
-          estoquePromo = ps ? ps.limit - ps.sold : null;
-        }
-        return {
-          id: v.id,
-          sku: v.sku,
-          nome: v.name,
-          tamanho: v.size || '-',
-          cor: v.color || '-',
-          preco: `R$ ${(promoPrice || parseFloat(v.price)).toFixed(2)}`,
-          ...(promoPrice ? { preco_original: `R$ ${parseFloat(v.price).toFixed(2)}` } : {}),
-          estoque: estoquePromo !== null ? estoquePromo : parseInt(v.stock),
-        };
-      });
-
-      if (disponveis.length === 0) return { resultado: 'Todas as variações deste produto estão esgotadas.' };
-      return { variacoes_disponiveis: disponveis, total: disponveis.length };
+      // Sem promo_stock: produto promo sem controle de estoque cadastrado
+      return { resultado: 'Este produto ainda não teve o estoque da promoção configurado. Avise a equipe.' };
     }
 
     case 'adicionar_carrinho': {
-      const { product_id, ref, nome, cor, tamanho, sku, preco } = toolInput;
+      const { product_id, ref, nome, cor, tamanho, sku, preco, quantidade } = toolInput;
+      const qty = quantidade || 1;
       const cart = getCart(conversationId);
-      const existing = cart.items.find(i => i.product_id === product_id);
+      const existing = cart.items.find(i => i.product_id === product_id && i.color === (cor || '') && i.size === (tamanho || ''));
       if (existing) {
-        existing.quantity++;
+        existing.quantity += qty;
       } else {
-        cart.items.push({ product_id, ref: ref || '', name: nome, color: cor || '', size: tamanho || '', sku, price: preco, quantity: 1 });
+        cart.items.push({ product_id, ref: ref || '', name: nome, color: cor || '', size: tamanho || '', sku, price: preco, quantity: qty });
       }
       const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
       return {
-        carrinho: cart.items.map(i => ({ nome: i.name, quantidade: i.quantity, preco_unitario: `R$ ${i.price.toFixed(2)}`, subtotal: `R$ ${(i.price * i.quantity).toFixed(2)}` })),
+        carrinho: cart.items.map(i => ({ nome: i.name, cor: i.color || '-', tamanho: i.size || '-', quantidade: i.quantity, preco_unitario: `R$ ${i.price.toFixed(2)}`, subtotal: `R$ ${(i.price * i.quantity).toFixed(2)}` })),
         total: `R$ ${total.toFixed(2)}`,
         mensagem: `"${nome}" adicionado ao carrinho!`,
       };
+    }
+
+    case 'enviar_botoes': {
+      const { titulo, descricao, botoes } = toolInput;
+      if (!botoes || botoes.length === 0) return { erro: 'Nenhum botão informado.' };
+      if (botoes.length > 3) return { erro: 'Máximo 3 botões por mensagem.' };
+
+      if (deps.wa && customerPhone) {
+        try {
+          const btns = botoes.map(b => ({ text: b.texto, id: b.id }));
+          const waResult = await deps.wa.sendButtons(customerPhone, titulo, descricao, btns, { isBot: true });
+
+          // Salva no histórico
+          const msgId = waResult?._waId || deps.genId();
+          const btnTexts = botoes.map(b => b.texto).join(' | ');
+          const content = `${titulo}\n${descricao}\n[Botões: ${btnTexts}]`;
+          await queryRun(
+            "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+            [msgId, conversationId, 'Lê (IA)', content]
+          );
+          await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+            [content, conversationId]);
+          if (deps.broadcast) {
+            deps.broadcast('new_message', {
+              conversation: { id: conversationId, last_message: content, last_message_from_me: true },
+              message: { id: msgId, conversation_id: conversationId, from_me: true, sender: 'Lê (IA)', content, timestamp: new Date().toISOString() },
+            });
+          }
+          return { sucesso: true, mensagem: `Botões enviados: ${btnTexts}` };
+        } catch (e) {
+          console.error('⚠️ Erro ao enviar botões:', e.message);
+          return { erro: 'Não consegui enviar os botões. Pergunte por texto.' };
+        }
+      }
+      return { erro: 'WhatsApp não conectado.' };
     }
 
     case 'ver_carrinho': {
@@ -370,7 +599,7 @@ async function executeTool(toolName, toolInput, context) {
       if (cart.items.length === 0) return { carrinho: [], total: 'R$ 0,00', mensagem: 'Carrinho vazio.' };
       const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
       return {
-        carrinho: cart.items.map(i => ({ nome: i.name, quantidade: i.quantity, preco_unitario: `R$ ${i.price.toFixed(2)}`, subtotal: `R$ ${(i.price * i.quantity).toFixed(2)}` })),
+        carrinho: cart.items.map(i => ({ nome: i.name, cor: i.color || '-', tamanho: i.size || '-', quantidade: i.quantity, preco_unitario: `R$ ${i.price.toFixed(2)}`, subtotal: `R$ ${(i.price * i.quantity).toFixed(2)}` })),
         total: `R$ ${total.toFixed(2)}`,
       };
     }
@@ -380,34 +609,57 @@ async function executeTool(toolName, toolInput, context) {
       const cart = getCart(conversationId);
       cart.items = cart.items.filter(i => i.product_id !== product_id);
       const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
-      return { carrinho: cart.items.map(i => ({ nome: i.name, quantidade: i.quantity })), total: `R$ ${total.toFixed(2)}`, mensagem: 'Item removido.' };
+      return { carrinho: cart.items.map(i => ({ nome: i.name, cor: i.color || '-', quantidade: i.quantity })), total: `R$ ${total.toFixed(2)}`, mensagem: 'Item removido.' };
     }
 
     case 'finalizar_venda': {
-      const { forma_pagamento, cpf } = toolInput;
+      const { forma_pagamento, cpf, tipo_entrega } = toolInput;
       const cart = getCart(conversationId);
       if (cart.items.length === 0) return { erro: 'Carrinho vazio. Adicione itens antes de finalizar.' };
+      const taxaEntrega = tipo_entrega === 'entrega' ? 7.00 : 0;
 
       try {
-        // Valida estoque antes de finalizar
+        // Valida estoque no promo_stock antes de finalizar
         const semEstoque = [];
         for (const item of cart.items) {
-          const stockRows = await erp.erpQuery(
-            "SELECT COALESCE(SUM(quantity), 0) AS qty FROM stock WHERE stock_id = 'loja4' AND product_id = $1",
-            [item.product_id]
-          );
-          const disponivel = parseInt(stockRows[0]?.qty) || 0;
-          if (disponivel < item.quantity) {
-            semEstoque.push({ nome: item.name, pedido: item.quantity, disponivel });
+          const ref = item.ref || '';
+          const promoItem = ref ? await queryOne("SELECT id FROM promo_items WHERE active = true AND LOWER(ref) = LOWER($1)", [ref]) : null;
+          if (promoItem) {
+            // Verifica no promo_stock (grid: cor+tamanho, photo: só cor)
+            const gridRow = await queryOne(
+              "SELECT stock_limit, stock_sold FROM promo_stock WHERE promo_item_id = $1 AND LOWER(color) = LOWER($2) AND LOWER(size) = LOWER($3) AND stock_limit > 0",
+              [promoItem.id, item.color || '', item.size || '']
+            );
+            if (gridRow) {
+              const restante = gridRow.stock_limit - (gridRow.stock_sold || 0);
+              if (restante < item.quantity) {
+                semEstoque.push({ nome: item.name, pedido: item.quantity, disponivel: restante });
+              }
+            } else {
+              // Tenta foto (só por cor)
+              const photoRow = await queryOne(
+                "SELECT stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 AND LOWER(color) = LOWER($2) AND stock_limit > 0",
+                [promoItem.id, item.color || '']
+              );
+              if (photoRow) {
+                const restante = photoRow.stock_limit - (photoRow.stock_sold || 0);
+                if (restante < item.quantity) {
+                  semEstoque.push({ nome: item.name, pedido: item.quantity, disponivel: restante });
+                }
+              }
+              // Sem promo_stock: permite (já foi validado no verificar_estoque)
+            }
           }
+          // Produto sem ref promo: sem validação extra
         }
         if (semEstoque.length > 0) {
           const lista = semEstoque.map(s => `${s.nome} (pedido: ${s.pedido}, disponível: ${s.disponivel})`).join('; ');
           return { erro: `Estoque insuficiente para: ${lista}. Verifique com o cliente se quer ajustar.` };
         }
 
-        const total = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
-        const descricao = cart.items.map(i => `${i.name} x${i.quantity}`).join(', ');
+        const subtotal = cart.items.reduce((s, i) => s + i.price * i.quantity, 0);
+        const total = subtotal + taxaEntrega;
+        const descricao = cart.items.map(i => `${i.name} x${i.quantity}`).join(', ') + (taxaEntrega > 0 ? ' + Entrega' : '');
 
         // Cria/busca cliente no Asaas (CPF obrigatório para cobrança)
         const asaasCustomer = await asaas.findOrCreateCustomer(
@@ -426,9 +678,9 @@ async function executeTool(toolName, toolInput, context) {
         // Salva pagamento pendente no banco
         const paymentId = deps.genId();
         await queryRun(
-          `INSERT INTO pending_payments (id, conversation_id, customer_phone, customer_name, asaas_charge_id, asaas_customer_id, payment_method, amount, cart_data)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [paymentId, conversationId, customerPhone || '', customerName || 'Cliente WhatsApp', charge.chargeId, asaasCustomer.id, forma_pagamento, total, JSON.stringify(cart.items)]
+          `INSERT INTO pending_payments (id, conversation_id, customer_phone, customer_name, asaas_charge_id, asaas_customer_id, payment_method, amount, cart_data, tipo_entrega, taxa_entrega)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [paymentId, conversationId, customerPhone || '', customerName || 'Cliente WhatsApp', charge.chargeId, asaasCustomer.id, forma_pagamento, total, JSON.stringify(cart.items), tipo_entrega || 'retirada', taxaEntrega]
         );
 
         // Envia QR Code do PIX ou link de pagamento via WhatsApp
@@ -498,9 +750,12 @@ async function executeTool(toolName, toolInput, context) {
         cart.chargeId = charge.chargeId;
 
         const metodo = forma_pagamento === 'pix' ? 'PIX (QR Code e código copia-cola enviados)' : 'Cartão de Crédito (link de pagamento enviado)';
+        const entregaInfo = tipo_entrega === 'entrega' ? `Entrega: R$ 7,00` : 'Retirada na loja (grátis)';
         return {
           sucesso: true,
           aguardando_pagamento: true,
+          subtotal: `R$ ${subtotal.toFixed(2)}`,
+          entrega: entregaInfo,
           total: `R$ ${total.toFixed(2)}`,
           forma_pagamento: metodo,
           mensagem: `Pagamento gerado! ${forma_pagamento === 'pix' ? 'QR Code e código PIX enviados.' : 'Link de pagamento enviado.'} Assim que o pagamento for confirmado, a venda será registrada automaticamente e o cupom será enviado.`,
@@ -519,7 +774,7 @@ async function executeTool(toolName, toolInput, context) {
 // ─── Histórico de conversa ───
 async function getConversationHistory(conversationId) {
   const msgs = await queryAll(
-    "SELECT from_me, sender, content, media_type FROM messages WHERE conversation_id = $1 ORDER BY timestamp DESC LIMIT 20",
+    "SELECT from_me, sender, content, media_type FROM messages WHERE conversation_id = $1 ORDER BY timestamp DESC LIMIT 40",
     [conversationId]
   );
   return msgs.reverse().map(m => ({
@@ -615,7 +870,7 @@ async function generateResponse(conversationId, customerMessage, customerName, m
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-6',
-          max_tokens: 550,
+          max_tokens: 800,
           temperature: 0.7,
           system: SYSTEM_PROMPT,
           messages: currentMessages,

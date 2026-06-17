@@ -246,17 +246,27 @@ app.post('/api/webhook/asaas', async (req, res) => {
     // Marca como confirmado
     await queryRun("UPDATE pending_payments SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1", [pending.id]);
 
-    const cartItems = JSON.parse(pending.cart_data);
+    const cartItems = typeof pending.cart_data === 'string' ? JSON.parse(pending.cart_data) : pending.cart_data;
 
-    // Incrementa stock_sold nas combinações cor+tamanho vendidas
+    // Incrementa stock_sold nas combinações cor+tamanho vendidas (grid e photo)
     for (const item of cartItems) {
       if (item.ref) {
-        await queryRun(
+        // Tenta grid (cor+tamanho)
+        const gridResult = await queryRun(
           `UPDATE promo_stock SET stock_sold = stock_sold + $1
            WHERE promo_item_id IN (SELECT id FROM promo_items WHERE LOWER(ref) = LOWER($2))
              AND LOWER(color) = LOWER($3) AND LOWER(size) = LOWER($4) AND stock_limit > 0`,
           [item.quantity || 1, item.ref, item.color || '', item.size || '']
         );
+        // Se não atualizou grid, tenta photo (só cor)
+        if (gridResult.rowCount === 0 && item.color) {
+          await queryRun(
+            `UPDATE promo_photos SET stock_sold = stock_sold + $1
+             WHERE promo_item_id IN (SELECT id FROM promo_items WHERE LOWER(ref) = LOWER($2))
+               AND LOWER(color) = LOWER($3) AND stock_limit > 0`,
+            [item.quantity || 1, item.ref, item.color || '']
+          );
+        }
       }
     }
 
@@ -268,6 +278,7 @@ app.post('/api/webhook/asaas', async (req, res) => {
     }
 
     // Cria venda no ERP
+    const taxaEntrega = parseFloat(pending.taxa_entrega) || 0;
     const sale = await erp.createSale({
       store_id: 'loja4',
       customer_id: customerId,
@@ -281,6 +292,10 @@ app.post('/api/webhook/asaas', async (req, res) => {
       discount_type: 'fixed',
       discount_label: '',
     });
+    // Adiciona info de entrega no objeto sale pra o cupom
+    sale.taxa_entrega = taxaEntrega;
+    sale.tipo_entrega = pending.tipo_entrega || 'retirada';
+    if (taxaEntrega > 0) sale.total = sale.total + taxaEntrega;
 
     console.log(`✅ Venda ${sale.cupom} criada no ERP — R$ ${sale.total.toFixed(2)}`);
 
@@ -321,6 +336,29 @@ app.post('/api/webhook/asaas', async (req, res) => {
           broadcast('new_message', {
             conversation: { id: pending.conversation_id, last_message: displayText, last_message_from_me: true },
             message: { id: msgId, conversation_id: pending.conversation_id, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
+          });
+        }
+
+        // Envia link do formulário (entrega ou retirada)
+        const tipoEntrega = pending.tipo_entrega || 'retirada';
+        let formMsg;
+        if (tipoEntrega === 'entrega') {
+          formMsg = `📋 Para finalizarmos a entrega, preencha o formulário com seu endereço:\n\nhttps://dblack-entregas.vercel.app/formulario\n\nAssim que preenchermos, enviaremos sua encomenda! 🚚`;
+        } else {
+          formMsg = `📋 Para agilizar sua retirada, preencha o formulário abaixo:\n\nhttps://dblack-entregas.vercel.app/retirada\n\nAssim que estiver pronto, avisaremos você! 🏪`;
+        }
+        await wa.sendMessage(pending.customer_phone, formMsg, { isBot: true });
+        const formMsgId = genId();
+        await queryRun(
+          "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+          [formMsgId, pending.conversation_id, 'Lê (IA)', formMsg]
+        );
+        await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+          [formMsg, pending.conversation_id]);
+        if (broadcast) {
+          broadcast('new_message', {
+            conversation: { id: pending.conversation_id, last_message: formMsg, last_message_from_me: true },
+            message: { id: formMsgId, conversation_id: pending.conversation_id, from_me: true, sender: 'Lê (IA)', content: formMsg, timestamp: new Date().toISOString() },
           });
         }
       } catch (e) {
@@ -443,7 +481,22 @@ wa.on('message', (msg) => {
       // IMPORTANTE: roda FORA da fila para não bloquear mensagens de outros clientes
       if (conv.status === 'aguardando') {
         const aiEnabled = await aiAgent.isAgentEnabled();
+
+        // Modo teste: se ai_test_phones estiver configurado, só responde esses números
+        let aiAllowed = aiEnabled;
         if (aiEnabled) {
+          try {
+            const testRow = await queryOne("SELECT value FROM chat_settings WHERE key = 'ai_test_phones'");
+            if (testRow && testRow.value && testRow.value.trim()) {
+              const testPhones = testRow.value.split(',').map(p => p.trim().replace(/\D/g, ''));
+              const cleanPhone = (msg.phone || '').replace(/\D/g, '');
+              aiAllowed = testPhones.some(tp => cleanPhone.includes(tp) || tp.includes(cleanPhone.slice(-11)));
+              if (!aiAllowed) console.log(`🧪 Lê em modo teste — ignorando ${msg.phone} (não está na lista)`);
+            }
+          } catch (e) { /* sem config de teste = responde todos */ }
+        }
+
+        if (aiAllowed) {
           const aiConvId = conv.id;
           const aiPhone = msg.phone;
           const aiPushName = msg.pushName;
@@ -455,7 +508,16 @@ wa.on('message', (msg) => {
             try {
               const aiResponse = await aiAgent.generateResponse(aiConvId, aiContent, aiPushName, aiMediaType, aiPhone);
               if (aiResponse.text) {
-                const aiWaResult = await wa.sendMessage(aiPhone, aiResponse.text, { isBot: true });
+                let aiWaResult = await wa.sendMessage(aiPhone, aiResponse.text, { isBot: true });
+                // Retry se falhou (timeout, erro 500, etc)
+                if (!aiWaResult?.key?.id && (aiWaResult?.status >= 400 || aiWaResult?.error)) {
+                  console.log('⚠️ Retry envio da Lê para', aiPhone);
+                  await new Promise(r => setTimeout(r, 2000));
+                  aiWaResult = await wa.sendMessage(aiPhone, aiResponse.text, { isBot: false });
+                }
+                if (!aiWaResult?.key?.id && (aiWaResult?.status >= 400 || aiWaResult?.error)) {
+                  console.error('❌ Erro ao enviar resposta da Lê:', JSON.stringify(aiWaResult).slice(0, 300));
+                }
                 const aiMsgId = aiWaResult?._waId || genId();
                 await queryRun(
                   "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
@@ -547,12 +609,14 @@ app.get('/api/users', auth, async (req, res) => {
 // ═══════════════════════════════════
 app.get('/api/conversations', auth, async (req, res) => {
   try {
-    // Só carrega conversas ativas + finalizadas dos últimos 2 dias (não precisa de 10 mil conversas antigas)
+    // Todas as ativas (aguardando + atendendo) + finalizadas dos últimos 2 dias
     const convs = await queryAll(
       `SELECT * FROM conversations
-       WHERE status != 'finalizado' OR finished_at > NOW() - INTERVAL '2 days'
-       ORDER BY last_message_at DESC
-       LIMIT 200`
+       WHERE status IN ('aguardando', 'atendendo')
+       UNION ALL
+       SELECT * FROM conversations
+       WHERE status = 'finalizado' AND finished_at > NOW() - INTERVAL '2 days'
+       ORDER BY last_message_at DESC`
     );
     res.json(convs);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -877,6 +941,16 @@ app.get('/api/erp/customer-details/:phone', auth, async (req, res) => {
 // ═══  WHATSAPP STATUS            ═══
 // ═══════════════════════════════════
 app.get('/api/whatsapp/status', auth, async (req, res) => {
+  // Se acha que está offline, consulta a Evolution pra confirmar
+  if (!wa.connected) {
+    try {
+      const st = await wa.api('GET', 'instance/connectionState');
+      if (st?.instance?.state === 'open') {
+        wa.connected = true;
+        console.log('✅ WhatsApp reconectado (verificação de status)');
+      }
+    } catch {}
+  }
   res.json({ ...wa.getStatus(), qr: currentQR, pairingCode: currentPairingCode });
 });
 
