@@ -5,8 +5,8 @@ const connString = process.env.DATABASE_URL || process.env.NEON_URL || process.e
 const pool = new Pool({
   connectionString: connString,
   ssl: connString && !connString.includes('localhost') ? { rejectUnauthorized: false } : false,
-  max: 20,                       // Mais conexões (era 10, muito pouco com IA + webhooks)
-  idleTimeoutMillis: 30000,
+  max: 5,                        // Reduzido para não estourar limite do Neon (compartilhado com ERP + Ponto)
+  idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 10000,
   statement_timeout: 15000,      // Mata queries travadas após 15s
 });

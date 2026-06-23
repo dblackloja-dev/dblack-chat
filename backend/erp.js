@@ -5,8 +5,8 @@ require('dotenv').config();
 const erpPool = new Pool({
   connectionString: process.env.ERP_DATABASE_URL,
   ssl: { rejectUnauthorized: false },
-  max: 8,
-  idleTimeoutMillis: 30000,
+  max: 3,
+  idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 10000,
 });
 
