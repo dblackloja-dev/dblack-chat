@@ -120,6 +120,41 @@ class WhatsAppEvolution extends EventEmitter {
     }
   }
 
+  // Auto-reconexão: tenta gerar QR code quando desconecta
+  async _autoReconnect() {
+    if (this._reconnectTimer) return; // Já tem um timer rodando
+    this._reconnectAttempts = (this._reconnectAttempts || 0) + 1;
+    if (this._reconnectAttempts > 5) {
+      console.log('⚠️ Muitas tentativas de reconexão. Aguardando ação manual.');
+      return;
+    }
+    // Aguarda antes de tentar (10s na primeira, aumenta progressivamente)
+    const delay = Math.min(10000 * this._reconnectAttempts, 60000);
+    console.log(`🔄 Tentativa ${this._reconnectAttempts}/5 de reconexão em ${delay/1000}s...`);
+    this._reconnectTimer = setTimeout(async () => {
+      this._reconnectTimer = null;
+      try {
+        const result = await this.api('GET', 'instance/connect');
+        if (result?.base64) {
+          this.qrCode = result.base64;
+          this.emit('qr', result.base64);
+          console.log('📱 QR Code gerado automaticamente — escaneie para reconectar!');
+        } else if (result?.instance?.state === 'open') {
+          this.connected = true;
+          this._reconnectAttempts = 0;
+          this.emit('connected');
+          console.log('✅ WhatsApp reconectou automaticamente!');
+        } else {
+          // Tenta novamente
+          this._autoReconnect();
+        }
+      } catch (e) {
+        console.error('Erro na auto-reconexão:', e.message);
+        this._autoReconnect();
+      }
+    }, delay);
+  }
+
   async getQRCode() {
     try {
       const result = await this.api('GET', 'instance/connect');
@@ -259,13 +294,20 @@ class WhatsAppEvolution extends EventEmitter {
 
     if (event === 'connection.update') {
       const state = body.data?.state || body.data?.instance?.state;
+      const wasConnected = this.connected;
       this.connected = state === 'open';
       if (this.connected) {
         this.emit('connected');
+        this._reconnectAttempts = 0;
         console.log('✅ WhatsApp (Evolution) conectado!');
       } else {
         console.log('📱 WhatsApp estado:', state);
         this.emit('disconnected');
+        // Se estava conectado e caiu, tenta gerar novo QR automaticamente
+        if (wasConnected && (state === 'close' || state === 'connecting')) {
+          console.log('🔄 Desconectou — tentando gerar QR code automaticamente...');
+          this._autoReconnect();
+        }
       }
     }
 

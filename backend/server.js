@@ -405,7 +405,8 @@ wa.on('connected', () => {
 wa.on('disconnected', () => {
   currentQR = null;
   currentPairingCode = null;
-  broadcast('wa_status', { connected: false });
+  broadcast('wa_status', { connected: false, message: 'WhatsApp desconectou. Gerando novo QR code...' });
+  console.log('⚠️ WhatsApp desconectou — aguardando QR code automático...');
 });
 
 // Atualiza status de entrega das mensagens (enviado/entregue/lido)
