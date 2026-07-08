@@ -103,12 +103,17 @@ class WhatsAppEvolution extends EventEmitter {
       this.connected = state === 'open';
       if (this.connected) {
         console.log('✅ WhatsApp (Evolution) conectado!');
+        this._reconnectAttempts = 0;
         this.emit('connected');
       } else {
         console.log('📱 WhatsApp (Evolution) estado:', state);
-        // Retenta até conectar (close pode virar open depois que a Evolution carrega)
-        if (state === 'connecting' || state === 'close') {
+        if (state === 'connecting') {
+          // Aguarda a Evolution terminar de conectar
           setTimeout(() => this.connect(), 10000);
+        } else if (state === 'close') {
+          // Desconectado — tenta gerar QR code para reconexão
+          console.log('🔄 WhatsApp desconectado — solicitando QR code...');
+          this._autoReconnect();
         }
       }
       return status;
