@@ -97,6 +97,12 @@ class WhatsAppEvolution extends EventEmitter {
     return res.json();
   }
 
+  // Health check genérico (mesma interface do whatsapp-meta.js)
+  async checkHealth() {
+    const status = await this.api('GET', 'instance/connectionState');
+    return status?.instance?.state === 'open';
+  }
+
   async connect() {
     try {
       const status = await this.api('GET', 'instance/connectionState');

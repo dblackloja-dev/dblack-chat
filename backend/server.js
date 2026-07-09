@@ -203,7 +203,11 @@ function broadcast(event, data) {
 // ═══════════════════════════════════
 // ═══  WHATSAPP                   ═══
 // ═══════════════════════════════════
-const wa = new WhatsAppEvolution();
+// Provedor de WhatsApp: 'evolution' (não-oficial) ou 'meta' (API oficial Cloud)
+const WA_PROVIDER = (process.env.WA_PROVIDER || 'evolution').toLowerCase();
+const WhatsAppMeta = require('./whatsapp-meta');
+const wa = WA_PROVIDER === 'meta' ? new WhatsAppMeta() : new WhatsAppEvolution();
+console.log(`📡 Provedor WhatsApp: ${WA_PROVIDER}`);
 let currentQR = null;
 let currentPairingCode = null;
 
@@ -383,6 +387,24 @@ app.post('/api/webhook/evolution', async (req, res) => {
   try {
     await wa.processWebhook(req.body);
   } catch (e) { console.error('Webhook erro:', e.message); }
+});
+
+// Webhook da API oficial do Meta (Cloud API)
+// GET = verificação do endpoint (handshake exigido pelo Meta ao cadastrar o webhook)
+app.get('/api/webhook/meta', (req, res) => {
+  const verifyToken = process.env.META_WA_VERIFY_TOKEN;
+  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) {
+    console.log('✅ Webhook do Meta verificado!');
+    return res.send(req.query['hub.challenge']);
+  }
+  res.sendStatus(403);
+});
+
+app.post('/api/webhook/meta', async (req, res) => {
+  res.sendStatus(200); // responde rápido — Meta reenvia se demorar
+  try {
+    await wa.processWebhook(req.body);
+  } catch (e) { console.error('Webhook Meta erro:', e.message); }
 });
 
 wa.on('qr', async (qr) => {
@@ -945,14 +967,16 @@ app.delete('/api/messages/:id', auth, async (req, res) => {
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [msg.conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
 
-    // Apaga no WhatsApp via Evolution
-    try {
-      await wa.api('DELETE', 'chat/deleteMessageForEveryone', {
-        id: req.params.id,
-        fromMe: true,
-        remoteJid: conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net',
-      });
-    } catch (e) { console.log('Erro ao apagar no WhatsApp:', e.message); }
+    // Apaga no WhatsApp — só a Evolution suporta (API oficial do Meta não permite apagar pra todos)
+    if (typeof wa.api === 'function') {
+      try {
+        await wa.api('DELETE', 'chat/deleteMessageForEveryone', {
+          id: req.params.id,
+          fromMe: true,
+          remoteJid: conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net',
+        });
+      } catch (e) { console.log('Erro ao apagar no WhatsApp:', e.message); }
+    }
 
     // Marca como apagada no banco
     await queryRun("UPDATE messages SET content = '🚫 Mensagem apagada', media_type = NULL, media_url = NULL WHERE id = $1", [req.params.id]);
@@ -982,11 +1006,10 @@ app.get('/api/erp/customer-details/:phone', auth, async (req, res) => {
 // ═══  WHATSAPP STATUS            ═══
 // ═══════════════════════════════════
 app.get('/api/whatsapp/status', auth, async (req, res) => {
-  // Se acha que está offline, consulta a Evolution pra confirmar
+  // Se acha que está offline, consulta o provedor pra confirmar
   if (!wa.connected) {
     try {
-      const st = await wa.api('GET', 'instance/connectionState');
-      if (st?.instance?.state === 'open') {
+      if (await wa.checkHealth()) {
         wa.connected = true;
         console.log('✅ WhatsApp reconectado (verificação de status)');
       }
@@ -1655,12 +1678,11 @@ setInterval(async () => {
     console.log(`📊 Status: ${memMB}MB RAM | ${wsCount} WS conectados | Fila: ${msgQueue.size} | WhatsApp: ${wa.connected ? '✅' : '❌'}`);
   }
 
-  // Verifica se a Evolution está respondendo corretamente
+  // Verifica se o provedor está respondendo corretamente
   try {
-    const status = await wa.api('GET', 'instance/connectionState');
-    const state = status?.instance?.state;
-    if (state !== 'open' && wa.connected) {
-      console.log('⚠️ Evolution desconectou (state:', state, ') — reconectando...');
+    const healthy = await wa.checkHealth();
+    if (!healthy && wa.connected) {
+      console.log('⚠️ WhatsApp desconectou (health check) — reconectando...');
       wa.connected = false;
       broadcast('wa_status', { connected: false, message: 'WhatsApp desconectou. Tentando reconectar...' });
       if (!waDownSince) waDownSince = Date.now();
