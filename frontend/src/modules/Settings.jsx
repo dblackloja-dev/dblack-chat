@@ -15,7 +15,10 @@ export default function Settings() {
   useEffect(() => {
     Promise.all([
       api.getSettings().then(setSettings),
-      api.getWhatsAppStatus().then(setWaStatus),
+      api.getWhatsAppStatus().then(st => {
+        setWaStatus(st);
+        if (st.number) setPairPhone(prev => prev || st.number);
+      }),
       api.getUsers().then(setUsers),
     ]).catch(() => {}).finally(() => setLoading(false));
   }, []);

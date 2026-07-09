@@ -85,8 +85,9 @@ class WhatsAppEvolution extends EventEmitter {
     } catch (e) { console.error('Erro ao marcar como lido:', e.message); }
   }
 
-  async api(method, endpoint, body) {
-    const url = `${EVOLUTION_URL}/${endpoint}/${INSTANCE}`;
+  async api(method, endpoint, body, query) {
+    let url = `${EVOLUTION_URL}/${endpoint}/${INSTANCE}`;
+    if (query) url += `?${new URLSearchParams(query)}`;
     const opts = {
       method,
       headers: { 'apikey': EVOLUTION_KEY, 'Content-Type': 'application/json' },
@@ -104,6 +105,7 @@ class WhatsAppEvolution extends EventEmitter {
       if (this.connected) {
         console.log('✅ WhatsApp (Evolution) conectado!');
         this._reconnectAttempts = 0;
+        this._recoveryEmitted = false;
         this.emit('connected');
       } else {
         console.log('📱 WhatsApp (Evolution) estado:', state);
@@ -130,7 +132,11 @@ class WhatsAppEvolution extends EventEmitter {
     if (this._reconnectTimer) return; // Já tem um timer rodando
     this._reconnectAttempts = (this._reconnectAttempts || 0) + 1;
     if (this._reconnectAttempts > 5) {
-      console.log('⚠️ Muitas tentativas de reconexão. Aguardando ação manual.');
+      console.log('⚠️ Muitas tentativas de reconexão. Necessário parear com código (painel → Configurações).');
+      if (!this._recoveryEmitted) {
+        this._recoveryEmitted = true;
+        this.emit('recovery_needed');
+      }
       return;
     }
     // Aguarda antes de tentar (10s na primeira, aumenta progressivamente)
@@ -147,6 +153,7 @@ class WhatsAppEvolution extends EventEmitter {
         } else if (result?.instance?.state === 'open') {
           this.connected = true;
           this._reconnectAttempts = 0;
+        this._recoveryEmitted = false;
           this.emit('connected');
           console.log('✅ WhatsApp reconectou automaticamente!');
         } else {
@@ -178,22 +185,45 @@ class WhatsAppEvolution extends EventEmitter {
     }
   }
 
+  // Reconexão por pairing code — fluxo comprovado em 2026-07-09 (QR não conectava):
+  // 1. logout limpa credenciais velhas (obrigatório, senão pairingCode volta null)
+  // 2. aguarda ~3s e chama connect COM o número (?number=55319...)
+  // 3. o código expira rápido — digitar no celular imediatamente
   async startPairing(phone) {
     try {
       this.pairingCode = null;
       this.qrCode = null;
-      // Evolution v2: GET /instance/connect retorna QR
-      const result = await this.api('GET', 'instance/connect');
-      if (result?.base64) {
-        this.qrCode = result.base64;
-        this.emit('qr', result.base64);
-        console.log('📱 QR Code gerado pela Evolution');
+      const digits = String(phone || '').replace(/\D/g, '');
+      if (!digits) return null;
+
+      // Se a sessão está aberta, não derruba credenciais válidas
+      const status = await this.api('GET', 'instance/connectionState');
+      if (status?.instance?.state === 'open') {
+        this.connected = true;
+        this.emit('connected');
+        console.log('✅ Instância já conectada — pareamento desnecessário');
+        return null;
       }
-      if (result?.pairingCode) {
-        this.pairingCode = result.pairingCode;
-        this.emit('pairing_code', result.pairingCode);
-        console.log('🔢 Código de pareamento:', result.pairingCode);
-        return result.pairingCode;
+
+      console.log('🔐 Limpando credenciais antigas (logout)...');
+      await this.api('DELETE', 'instance/logout');
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Logo após logout/restart a Evolution pode retornar pairingCode null — retenta
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const result = await this.api('GET', 'instance/connect', null, { number: digits });
+        if (result?.pairingCode) {
+          this.pairingCode = result.pairingCode;
+          this.emit('pairing_code', result.pairingCode);
+          console.log('🔢 Código de pareamento (digite JÁ no celular):', result.pairingCode);
+          return result.pairingCode;
+        }
+        if (result?.base64) {
+          this.qrCode = result.base64;
+          this.emit('qr', result.base64);
+        }
+        console.log(`⏳ pairingCode null (tentativa ${attempt}/3) — aguardando Evolution...`);
+        await new Promise(r => setTimeout(r, 3000));
       }
       return null;
     } catch (e) {
@@ -304,6 +334,7 @@ class WhatsAppEvolution extends EventEmitter {
       if (this.connected) {
         this.emit('connected');
         this._reconnectAttempts = 0;
+        this._recoveryEmitted = false;
         console.log('✅ WhatsApp (Evolution) conectado!');
       } else {
         console.log('📱 WhatsApp estado:', state);

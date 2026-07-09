@@ -396,17 +396,57 @@ wa.on('pairing_code', (code) => {
   console.log('🔢 Código de pareamento enviado aos clientes:', code);
 });
 
+// ─── Alertas de queda do WhatsApp (via ntfy — fora do WhatsApp) ───
+// Espera 2 min antes do primeiro alerta (evita falso alarme em queda transitória),
+// depois re-alerta a cada 15 min enquanto estiver fora do ar.
+const { sendAlert } = require('./alert');
+let waDownSince = null;
+let waDownAlerted = false;
+let waAlertTimer = null;
+
+function scheduleDownAlert(delay = 120000) {
+  if (waAlertTimer) return;
+  waAlertTimer = setTimeout(async () => {
+    waAlertTimer = null;
+    if (wa.connected) { waDownSince = null; waDownAlerted = false; return; }
+    waDownAlerted = true;
+    const mins = Math.max(1, Math.round((Date.now() - (waDownSince || Date.now())) / 60000));
+    await sendAlert(
+      '🚨 WhatsApp do D\'Black Chat CAIU',
+      `Desconectado há ${mins} min. Clientes sem resposta!\n\nAbra o painel → Configurações → Parear, e digite o código no celular em Aparelhos conectados → Conectar com número de telefone.`
+    );
+    scheduleDownAlert(900000); // re-alerta em 15 min se continuar fora
+  }, delay);
+}
+
 wa.on('connected', () => {
   currentQR = null;
   currentPairingCode = null;
   broadcast('wa_status', { connected: true });
+  if (waAlertTimer) { clearTimeout(waAlertTimer); waAlertTimer = null; }
+  if (waDownAlerted) {
+    const mins = Math.max(1, Math.round((Date.now() - (waDownSince || Date.now())) / 60000));
+    sendAlert('✅ WhatsApp reconectado', `O WhatsApp do D'Black Chat voltou após ${mins} min fora do ar.`, { tags: ['white_check_mark'], priority: 3 });
+  }
+  waDownSince = null;
+  waDownAlerted = false;
 });
 
 wa.on('disconnected', () => {
   currentQR = null;
   currentPairingCode = null;
-  broadcast('wa_status', { connected: false, message: 'WhatsApp desconectou. Gerando novo QR code...' });
-  console.log('⚠️ WhatsApp desconectou — aguardando QR code automático...');
+  broadcast('wa_status', { connected: false, message: 'WhatsApp desconectou. Tentando reconectar...' });
+  console.log('⚠️ WhatsApp desconectou — tentando reconexão automática...');
+  if (!waDownSince) waDownSince = Date.now();
+  scheduleDownAlert();
+});
+
+// Reconexão automática esgotada — só o pairing code resolve (ação manual no celular)
+wa.on('recovery_needed', () => {
+  sendAlert(
+    '🚨 WhatsApp precisa de reconexão MANUAL',
+    'A reconexão automática falhou (provável device_removed). NÃO insista no QR code.\n\n1. Abra o painel → Configurações → Parear\n2. No celular: Aparelhos conectados → Conectar com número de telefone\n3. Digite o código IMEDIATAMENTE (expira rápido)'
+  );
 });
 
 // Atualiza status de entrega das mensagens (enviado/entregue/lido)
@@ -952,7 +992,7 @@ app.get('/api/whatsapp/status', auth, async (req, res) => {
       }
     } catch {}
   }
-  res.json({ ...wa.getStatus(), qr: currentQR, pairingCode: currentPairingCode });
+  res.json({ ...wa.getStatus(), qr: currentQR, pairingCode: currentPairingCode, number: process.env.WHATSAPP_NUMBER || '' });
 });
 
 app.post('/api/whatsapp/reconnect', auth, async (req, res) => {
@@ -1605,11 +1645,15 @@ wss.on('connection', (ws) => {
   ws.on('pong', () => { ws.isAlive = true; });
 });
 
-// Monitoramento a cada 5 min + health check da Evolution
+// Health check da Evolution a cada 60s (detecção rápida de queda) + log de status a cada 5 min
+let healthTick = 0;
 setInterval(async () => {
-  const memMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
-  const wsCount = clients.size;
-  console.log(`📊 Status: ${memMB}MB RAM | ${wsCount} WS conectados | Fila: ${msgQueue.size} | WhatsApp: ${wa.connected ? '✅' : '❌'}`);
+  healthTick++;
+  if (healthTick % 5 === 0) {
+    const memMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+    const wsCount = clients.size;
+    console.log(`📊 Status: ${memMB}MB RAM | ${wsCount} WS conectados | Fila: ${msgQueue.size} | WhatsApp: ${wa.connected ? '✅' : '❌'}`);
+  }
 
   // Verifica se a Evolution está respondendo corretamente
   try {
@@ -1618,12 +1662,15 @@ setInterval(async () => {
     if (state !== 'open' && wa.connected) {
       console.log('⚠️ Evolution desconectou (state:', state, ') — reconectando...');
       wa.connected = false;
+      broadcast('wa_status', { connected: false, message: 'WhatsApp desconectou. Tentando reconectar...' });
+      if (!waDownSince) waDownSince = Date.now();
+      scheduleDownAlert();
       await wa.connect();
     }
   } catch (e) {
     console.log('⚠️ Health check falhou:', e.message, '— tentando reconectar...');
     try { await wa.connect(); } catch {}
   }
-}, 300000);
+}, 60000);
 
 start().catch(console.error);
