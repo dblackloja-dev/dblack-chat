@@ -1,7 +1,7 @@
 FROM node:22-slim
 
-# Instala fontes para o cupom de venda (@napi-rs/canvas precisa de fontes no sistema)
-RUN apt-get update && apt-get install -y fontconfig fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+# Fontes para o cupom (@napi-rs/canvas) + ffmpeg para converter áudio/vídeo ao formato do WhatsApp
+RUN apt-get update && apt-get install -y fontconfig fonts-dejavu-core ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

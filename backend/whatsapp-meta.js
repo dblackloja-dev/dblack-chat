@@ -187,6 +187,31 @@ class WhatsAppMeta extends EventEmitter {
     return this._sendPayload({ to: this._digits(phone), type: 'image', image: { id: mediaId, ...(caption ? { caption } : {}) } });
   }
 
+  // Converte vídeo pra MP4 H.264 + AAC (único formato que a Cloud API aceita bem).
+  // Reduz pra no máx 720p pra caber no limite de 16MB e acelerar. Precisa de ffmpeg no sistema.
+  async _toMp4(buffer) {
+    const ffmpeg = require('fluent-ffmpeg');
+    const tmpIn = path.join(os.tmpdir(), `wa_video_${Date.now()}_${Math.round(Math.random() * 1e6)}`);
+    const tmpOut = tmpIn + '.mp4';
+    try {
+      fs.writeFileSync(tmpIn, buffer);
+      await new Promise((resolve, reject) => {
+        ffmpeg(tmpIn)
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .outputOptions(['-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-vf', "scale='min(720,iw)':-2", '-crf', '28'])
+          .format('mp4')
+          .on('end', resolve)
+          .on('error', reject)
+          .save(tmpOut);
+      });
+      return fs.readFileSync(tmpOut);
+    } finally {
+      try { fs.unlinkSync(tmpIn); } catch {}
+      try { fs.unlinkSync(tmpOut); } catch {}
+    }
+  }
+
   async sendVideo(phone, videoBuffer, caption = '', { isBot = false } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     if (isBot) {
@@ -194,7 +219,15 @@ class WhatsAppMeta extends EventEmitter {
       await this.humanDelay(true);
     }
     this.trackSend();
-    const mediaId = await this._uploadMedia(videoBuffer, 'video/mp4', 'video.mp4');
+    let outBuffer = videoBuffer;
+    try {
+      outBuffer = await this._toMp4(videoBuffer);
+      console.log('🎥 Vídeo convertido pra mp4:', Math.round(outBuffer.length / 1024) + 'KB');
+    } catch (e) {
+      console.error('⚠️ Conversão de vídeo falhou, enviando original:', e.message);
+      outBuffer = videoBuffer;
+    }
+    const mediaId = await this._uploadMedia(outBuffer, 'video/mp4', 'video.mp4');
     return this._sendPayload({ to: this._digits(phone), type: 'video', video: { id: mediaId, ...(caption ? { caption } : {}) } });
   }
 

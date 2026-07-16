@@ -685,6 +685,30 @@ app.get('/api/conversations', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Busca conversas por nome ou telefone — INCLUI finalizadas antigas (que não aparecem na lista padrão).
+// Resolve o "sumiço" das conversas: os dados continuam no banco, aqui a equipe reencontra qualquer cliente.
+app.get('/api/conversations/search', auth, async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    const like = '%' + q + '%';
+    const digits = q.replace(/\D/g, '');
+    const params = [like];
+    let phoneClause = '';
+    if (digits.length >= 3) {
+      params.push('%' + digits + '%');
+      phoneClause = ` OR phone ILIKE $${params.length} OR real_phone ILIKE $${params.length}`;
+    }
+    const convs = await queryAll(
+      `SELECT * FROM conversations
+       WHERE customer_name ILIKE $1 OR customer_push_name ILIKE $1 OR phone ILIKE $1${phoneClause}
+       ORDER BY last_message_at DESC LIMIT 50`,
+      params
+    );
+    res.json(convs);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Aceitar conversa (mover de aguardando → atendendo)
 app.post('/api/conversations/:id/accept', auth, async (req, res) => {
   try {
