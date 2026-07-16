@@ -97,6 +97,8 @@ export default function App() {
   const [spyMsgs, setSpyMsgs] = useState([]);
   const [showSales, setShowSales] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
   const [currentModule, setCurrentModule] = useState('chat');
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768 ? true : false);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -342,6 +344,18 @@ export default function App() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
+  // ─── BUSCA DE CONVERSAS NO SERVIDOR (acha antigas/finalizadas) ───
+  useEffect(() => {
+    const q = searchTerm.trim();
+    if (q.length < 2) { setSearchResults([]); setSearching(false); return; }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try { setSearchResults(await api.searchConversations(q)); } catch { setSearchResults([]); }
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
   // Auto-resize do textarea quando msgInput muda
   useEffect(() => {
     if (textareaRef.current) {
@@ -374,6 +388,15 @@ export default function App() {
     const text = msgInput.trim();
     setMsgInput('');
     try {
+      // Se a conversa está finalizada, reabre automaticamente antes de enviar
+      if (activeConv.status === 'finalizado') {
+        try {
+          const conv = await api.acceptConversation(activeConv.id);
+          setActiveConv(conv);
+          setConversations(prev => prev.map(c => c.id === conv.id ? conv : c));
+          setTab('atendendo');
+        } catch {}
+      }
       await api.sendMessage({ conversation_id: activeConv.id, content: text });
       // Se tinha imagem de resposta rápida pendente, envia junto
       if (pendingQuickReply?.has_image) {
@@ -642,20 +665,30 @@ export default function App() {
 
         {/* Lista de conversas */}
         <div style={{ flex: 1, overflowY: 'auto', background: W.bgPanel }}>
-          {tab === 'atendendo' && filteredConvs(myAtendendo).map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} />)}
-          {tab === 'aguardando' && filteredConvs(aguardando).map(conv => (
-            <div key={conv.id} style={{ cursor: 'pointer' }}>
-              <ConvItem conv={conv} active={spyConv?.id === conv.id} onClick={() => spyConversation(conv)} />
-              <div style={{ display: 'flex', gap: 6, padding: '0 16px 10px', marginTop: -4 }}>
-                <button onClick={(e) => { e.stopPropagation(); acceptConversation(conv.id); }} style={{ ...smallBtn, background: W.green, color: '#fff', border: 'none' }}>Aceitar</button>
-                <button onClick={(e) => { e.stopPropagation(); spyConversation(conv); }} style={smallBtn}>👁️ Espiar</button>
-              </div>
-            </div>
-          ))}
-          {tab === 'finalizados' && filteredConvs(finalizados).slice(0, 50).map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} finished />)}
-          {((tab === 'atendendo' && myAtendendo.length === 0) || (tab === 'aguardando' && aguardando.length === 0) || (tab === 'finalizados' && finalizados.length === 0)) &&
-            <div style={{ padding: 40, textAlign: 'center', fontSize: 14, color: W.txt2 }}>Nenhuma conversa</div>
-          }
+          {searchTerm.trim().length >= 2 ? (
+            <>
+              {searching && <div style={{ padding: 20, textAlign: 'center', fontSize: 13, color: W.txt2 }}>Buscando...</div>}
+              {!searching && searchResults.length === 0 && <div style={{ padding: 40, textAlign: 'center', fontSize: 14, color: W.txt2 }}>Nenhuma conversa encontrada</div>}
+              {searchResults.map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} finished={conv.status === 'finalizado'} />)}
+            </>
+          ) : (
+            <>
+              {tab === 'atendendo' && filteredConvs(myAtendendo).map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} />)}
+              {tab === 'aguardando' && filteredConvs(aguardando).map(conv => (
+                <div key={conv.id} style={{ cursor: 'pointer' }}>
+                  <ConvItem conv={conv} active={spyConv?.id === conv.id} onClick={() => spyConversation(conv)} />
+                  <div style={{ display: 'flex', gap: 6, padding: '0 16px 10px', marginTop: -4 }}>
+                    <button onClick={(e) => { e.stopPropagation(); acceptConversation(conv.id); }} style={{ ...smallBtn, background: W.green, color: '#fff', border: 'none' }}>Aceitar</button>
+                    <button onClick={(e) => { e.stopPropagation(); spyConversation(conv); }} style={smallBtn}>👁️ Espiar</button>
+                  </div>
+                </div>
+              ))}
+              {tab === 'finalizados' && filteredConvs(finalizados).slice(0, 50).map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} finished />)}
+              {((tab === 'atendendo' && myAtendendo.length === 0) || (tab === 'aguardando' && aguardando.length === 0) || (tab === 'finalizados' && finalizados.length === 0)) &&
+                <div style={{ padding: 40, textAlign: 'center', fontSize: 14, color: W.txt2 }}>Nenhuma conversa</div>
+              }
+            </>
+          )}
         </div>
       </div>
 
@@ -803,8 +836,16 @@ export default function App() {
                 </div>
               )}
 
+              {/* Banner conversa finalizada + reabrir */}
+              {activeConv.status === 'finalizado' && (
+                <div style={{ padding: '8px 16px', background: 'rgba(234,0,56,.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap', fontSize: 13, color: W.txt2, flexShrink: 0 }}>
+                  <span>Finalizado{activeConv.finished_by ? ` por ${activeConv.finished_by}` : ''}{activeConv.finished_at ? ` em ${fmt(activeConv.finished_at)}` : ''}. Enviar uma mensagem reabre o atendimento.</span>
+                  <button style={{ ...smallBtn, background: W.green, color: '#fff', border: 'none', fontWeight: 600 }} onClick={() => acceptConversation(activeConv.id)}>Reabrir atendimento</button>
+                </div>
+              )}
+
               {/* Input */}
-              {activeConv.status === 'atendendo' && activeConv.agent_id === user.id && (
+              {((activeConv.status === 'atendendo' && activeConv.agent_id === user.id) || activeConv.status === 'finalizado') && (
                 recording ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: W.bgHeader }}>
                     <button style={{ ...iconBtn, color: W.red }} onClick={cancelRecording} title="Cancelar">
@@ -858,11 +899,6 @@ export default function App() {
                     )}
                   </div>
                 )
-              )}
-              {activeConv.status === 'finalizado' && (
-                <div style={{ padding: '12px 16px', background: 'rgba(234,0,56,.04)', textAlign: 'center', fontSize: 13, color: W.txt2 }}>
-                  Finalizado{activeConv.finished_by ? ` por ${activeConv.finished_by}` : ''} {activeConv.finished_at ? `em ${fmt(activeConv.finished_at)}` : ''}
-                </div>
               )}
             </div>
 
@@ -1015,6 +1051,7 @@ function MessageBubble({ msg, onImageClick, onDelete, isAdmin }) {
             title="Apagar mensagem">🗑</button>
         )}
         {!isMe && <div style={{ fontSize: 12.8, fontWeight: 700, color: '#1fa855', marginBottom: 2 }}>{msg.sender}</div>}
+        {isMe && msg.sender && <div style={{ fontSize: 11, fontWeight: 600, color: '#667781', marginBottom: 2, textAlign: 'right' }}>{msg.sender}</div>}
         {msg.media_type === 'audio' && (msg.content?.startsWith('/media') || msg.content?.startsWith('/uploads') || msg.media_url) ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 240 }}>
             <AudioPlayer src={mediaUrl(msg.media_url || msg.content)} />

@@ -57,6 +57,7 @@ const api = {
   finishConversation: (id) => request(`/conversations/${id}/finish`, { method: 'POST' }),
   transferConversation: (id) => request(`/conversations/${id}/transfer`, { method: 'POST' }),
   markUnread: (id) => request(`/conversations/${id}/mark-unread`, { method: 'POST' }),
+  searchConversations: (q) => request('/conversations/search?q=' + encodeURIComponent(q)),
 
   // Messages
   getMessages: (convId) => request(`/messages/${convId}`),
