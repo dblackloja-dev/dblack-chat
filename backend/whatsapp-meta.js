@@ -452,6 +452,8 @@ class WhatsAppMeta extends EventEmitter {
             content,
             mediaType,
             mediaUrl,
+            // Presente quando o cliente responde citando uma mensagem (wamid da original)
+            replyTo: msg.context?.id || null,
             timestamp: new Date(parseInt(msg.timestamp, 10) * 1000 || Date.now()),
           });
         }

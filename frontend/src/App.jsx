@@ -126,6 +126,16 @@ export default function App() {
   // ─── IMAGEM EXPANDIDA ───
   const [expandedImage, setExpandedImage] = useState(null);
 
+  // ─── PULAR PRA MENSAGEM CITADA (resposta do cliente) ───
+  const [highlightMsgId, setHighlightMsgId] = useState(null);
+  const jumpToMessage = (id) => {
+    const el = document.getElementById('msg-' + id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightMsgId(id);
+    setTimeout(() => setHighlightMsgId(null), 1600);
+  };
+
   // ─── NOTIFICAÇÃO PUSH ───
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -759,7 +769,7 @@ export default function App() {
               <button style={iconBtn} onClick={() => setSpyConv(null)}>✕</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
-              {spyMsgs.map(msg => <MessageBubble key={msg.id} msg={msg} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+              {spyMsgs.map(msg => <MessageBubble key={msg.id} msg={msg} quoted={msg.reply_to ? spyMsgs.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
             </div>
             <div style={{ padding: '10px 16px', flexShrink: 0, background: 'rgba(0,168,132,.04)', textAlign: 'center', fontSize: 13, color: W.green }}>
               Aceite o atendimento para responder
@@ -819,7 +829,7 @@ export default function App() {
 
               {/* Messages */}
               <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
-                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -1031,13 +1041,25 @@ function ConvItem({ conv, active, onClick, finished }) {
   );
 }
 
-function MessageBubble({ msg, onImageClick, onDelete, isAdmin }) {
+function quoteSnippet(m) {
+  if (m.media_type === 'image') return m.content?.includes('|') ? '📷 ' + m.content.split('|')[1] : '📷 Foto';
+  if (m.media_type === 'audio') return '🎵 Áudio';
+  if (m.media_type === 'video') return '🎥 Vídeo';
+  if (m.media_type === 'document') return m.content || '📄 Documento';
+  const t = m.content || '';
+  return t.length > 90 ? t.slice(0, 90) + '…' : t;
+}
+
+function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, isAdmin }) {
   const isMe = msg.from_me === true || msg.from_me === 'true';
   const [showMenu, setShowMenu] = useState(false);
   const isDeleted = msg.content === '🚫 Mensagem apagada';
   const canDelete = isAdmin || isMe;
+  const quotedThumb = quoted?.media_type === 'image' && (quoted.media_url || quoted.content?.startsWith('/media/'))
+    ? mediaUrl(quoted.media_url || quoted.content.split('|')[0]) : null;
   return (
-    <div style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 2 }}
+    <div id={'msg-' + msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 2,
+      background: highlight ? 'rgba(0,168,132,.22)' : 'transparent', transition: 'background .5s', borderRadius: 8 }}
       onMouseEnter={() => canDelete && !isDeleted && setShowMenu(true)} onMouseLeave={() => setShowMenu(false)}>
       <div style={{
         maxWidth: '80%', padding: '6px 7px 8px 9px', borderRadius: isMe ? '7.5px 7.5px 0 7.5px' : '7.5px 7.5px 7.5px 0',
@@ -1052,6 +1074,24 @@ function MessageBubble({ msg, onImageClick, onDelete, isAdmin }) {
         )}
         {!isMe && <div style={{ fontSize: 12.8, fontWeight: 700, color: '#1fa855', marginBottom: 2 }}>{msg.sender}</div>}
         {isMe && msg.sender && <div style={{ fontSize: 11, fontWeight: 600, color: '#667781', marginBottom: 2, textAlign: 'right' }}>{msg.sender}</div>}
+        {msg.reply_to && !isDeleted && (
+          <div onClick={() => quoted && onQuoteClick?.(quoted.id)} title={quoted ? 'Ir para a mensagem original' : ''}
+            style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'rgba(11,20,26,.06)', borderLeft: '4px solid #1fa855',
+              borderRadius: 6, padding: '5px 8px', marginBottom: 4, cursor: quoted ? 'pointer' : 'default', minWidth: 140 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#1fa855' }}>
+                {quoted ? ((quoted.from_me === true || quoted.from_me === 'true') ? (quoted.sender || 'D\'Black') : quoted.sender) : 'Mensagem'}
+              </div>
+              <div style={{ fontSize: 12.5, color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {quoted ? quoteSnippet(quoted) : 'Mensagem antiga (fora do histórico carregado)'}
+              </div>
+            </div>
+            {quotedThumb && (
+              <img src={quotedThumb} alt="" style={{ width: 42, height: 42, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
+                onError={e => { e.target.style.display = 'none'; }} />
+            )}
+          </div>
+        )}
         {msg.media_type === 'audio' && (msg.content?.startsWith('/media') || msg.content?.startsWith('/uploads') || msg.media_url) ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 240 }}>
             <AudioPlayer src={mediaUrl(msg.media_url || msg.content)} />
