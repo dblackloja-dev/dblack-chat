@@ -254,6 +254,10 @@ class WhatsAppMeta extends EventEmitter {
           .audioCodec('libopus')
           .audioChannels(1)
           .audioFrequency(48000)
+          // Igual à nota de voz nativa do WhatsApp (~17kbps voip); timestamps do
+          // MediaRecorder podem vir negativos e o iOS rejeita o arquivo
+          .audioBitrate('24k')
+          .outputOptions(['-application', 'voip', '-avoid_negative_ts', 'make_zero'])
           .format('ogg')
           .on('end', resolve)
           .on('error', reject)
@@ -273,14 +277,17 @@ class WhatsAppMeta extends EventEmitter {
       await this.humanDelay(true);
     }
     this.trackSend();
+    // WebM do navegador não toca no WhatsApp (iPhone mostra "áudio não está mais disponível"),
+    // então sem conversão é melhor falhar do que entregar áudio quebrado
     let oggBuffer;
     try {
       oggBuffer = await this._toOggOpus(audioBuffer);
     } catch (e) {
-      console.error('⚠️ Conversão de áudio falhou, enviando original:', e.message);
-      oggBuffer = audioBuffer;
+      console.error('❌ Conversão de áudio falhou (ffmpeg instalado?):', e.message);
+      throw new Error('Falha ao converter o áudio — tente novamente ou avise o suporte.');
     }
-    const mediaId = await this._uploadMedia(oggBuffer, 'audio/ogg', 'audio.ogg');
+    // Meta: "base audio/ogg is not supported" — precisa declarar o codec opus
+    const mediaId = await this._uploadMedia(oggBuffer, 'audio/ogg; codecs=opus', 'audio.ogg');
     return this._sendPayload({ to: this._digits(phone), type: 'audio', audio: { id: mediaId } });
   }
 

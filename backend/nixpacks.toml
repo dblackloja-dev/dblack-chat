@@ -1,2 +1,2 @@
 [phases.setup]
-aptPkgs = ["fontconfig", "fonts-dejavu-core"]
+aptPkgs = ["fontconfig", "fonts-dejavu-core", "ffmpeg"]

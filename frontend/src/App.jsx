@@ -482,7 +482,7 @@ export default function App() {
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
         if (blob.size > 500) {
           setSendingAudio(true);
-          try { await api.sendAudio(activeConv.id, blob); } catch {}
+          try { await api.sendAudio(activeConv.id, blob); } catch (err) { alert('Erro ao enviar áudio: ' + err.message); }
           setSendingAudio(false);
         }
       };
