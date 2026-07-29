@@ -214,6 +214,10 @@ let currentPairingCode = null;
 // Inicializa agente IA com dependências
 aiAgent.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 
+// Lista VIP (Agosto Imbatível) — captura por palavra-chave + broadcast via template
+const vip = require('./vip');
+vip.init({ wa, broadcast: (...args) => broadcast(...args), genId });
+
 // ─── Webhook do Asaas — confirma pagamento, registra no ERP, envia cupom ───
 const asaas = require('./asaas');
 
@@ -548,10 +552,19 @@ wa.on('message', (msg) => {
         message: { id: msgId, conversation_id: conv.id, from_me: false, sender: msg.pushName || msg.phone, content: msg.content, media_type: msg.mediaType, media_url: msg.mediaUrl, reply_to: msg.replyTo || null, timestamp: msg.timestamp },
       });
 
+      // ─── LISTA VIP (Agosto Imbatível) ───
+      // Roda APÓS a mensagem estar salva (fica registrada mesmo se o VIP falhar).
+      // Bot em paralelo, como a saudação: não muda status da conversa nem a fila.
+      let vipHandled = false;
+      try {
+        vipHandled = await vip.handleIncoming(conv, msg);
+      } catch (e) { console.error('❌ Erro no fluxo VIP:', e.message); }
+
       // ─── AGENTE DE IA "Lê" ───
       // Responde automaticamente se: IA ativa + conversa aguardando (sem atendente humano)
       // IMPORTANTE: roda FORA da fila para não bloquear mensagens de outros clientes
-      if (conv.status === 'aguardando') {
+      // (se o VIP já respondeu esta mensagem, a Lê não responde junto)
+      if (conv.status === 'aguardando' && !vipHandled) {
         const aiEnabled = await aiAgent.isAgentEnabled();
 
         // Modo teste: se ai_test_phones estiver configurado, só responde esses números
@@ -1696,6 +1709,96 @@ app.post('/api/erp/sales', auth, async (req, res) => {
 // ═══════════════════════════════════
 // ═══  START                      ═══
 // ═══════════════════════════════════
+// ═══════════════════════════════════
+// ═══  LISTA VIP (Agosto Imbatível)═══
+// ═══════════════════════════════════
+// Leitura/cadastro: admin ou gestor do ERP. Broadcast: só admin.
+const vipCanManage = (u) => u.role === 'admin' || u.erpRole === 'gestor';
+
+app.get('/api/vip', auth, async (req, res) => {
+  try {
+    if (!vipCanManage(req.user)) return res.status(403).json({ error: 'Sem permissão' });
+    const subs = await queryAll("SELECT * FROM vip_subscribers ORDER BY created_at DESC");
+    res.json({
+      total: subs.length,
+      active: subs.filter(s => !s.opted_out).length,
+      opted_out: subs.filter(s => s.opted_out).length,
+      subscribers: subs,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cadastro manual (cliente da loja física, Instagram etc.)
+app.post('/api/vip', auth, async (req, res) => {
+  try {
+    if (!vipCanManage(req.user)) return res.status(403).json({ error: 'Sem permissão' });
+    const { phone, name, source } = req.body || {};
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length < 10) return res.status(400).json({ error: 'Telefone inválido — use DDD + número' });
+    const full = digits.length <= 11 ? '55' + digits : digits; // aceita sem o DDI 55
+    const existing = await queryOne("SELECT opted_out FROM vip_subscribers WHERE phone = $1", [full]);
+    if (existing) {
+      return res.status(409).json({
+        error: existing.opted_out
+          ? 'Este número pediu para SAIR da lista — não recadastrar sem o cliente pedir'
+          : 'Este número já está na lista',
+      });
+    }
+    await queryRun(
+      "INSERT INTO vip_subscribers (id, phone, name, source) VALUES ($1,$2,$3,$4)",
+      [genId(), full, name || '', source || 'manual']);
+    res.json({ success: true, phone: full });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// "Remover" = marcar opted_out (nunca deleta, pra não recadastrar sem querer)
+app.delete('/api/vip/:phone', auth, async (req, res) => {
+  try {
+    if (!vipCanManage(req.user)) return res.status(403).json({ error: 'Sem permissão' });
+    const digits = String(req.params.phone || '').replace(/\D/g, '');
+    const r = await queryRun("UPDATE vip_subscribers SET opted_out = true WHERE phone = $1", [digits]);
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Número não está na lista' });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Disparo em massa via template aprovado da Meta. dryRun=true (padrão) só conta.
+app.post('/api/vip/broadcast', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const {
+      templateName, languageCode = 'pt_BR', components = [],
+      batchSize = 200, intervalMs = 1200, dryRun = true, testOnly = false,
+    } = req.body || {};
+    if (!templateName) return res.status(400).json({ error: 'templateName é obrigatório' });
+
+    const targets = await vip.getTargets(templateName, batchSize, testOnly);
+    if (dryRun) {
+      return res.json({ dryRun: true, total: targets.length, sample: targets.slice(0, 5).map(t => t.phone) });
+    }
+    if (!targets.length) return res.json({ broadcastId: null, total: 0, message: 'Nenhum destinatário pendente' });
+
+    const broadcastId = vip.startBroadcast(targets, { templateName, languageCode, components, intervalMs });
+    res.json({ broadcastId, total: targets.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/vip/broadcast/:id', auth, async (req, res) => {
+  try {
+    if (!vipCanManage(req.user)) return res.status(403).json({ error: 'Sem permissão' });
+    res.json(await vip.getBroadcastStatus(req.params.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Reenvia apenas as falhas de um broadcast
+app.post('/api/vip/broadcast/:id/retry', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const result = await vip.retryBroadcast(req.params.id, req.body || {});
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 async function start() {
   await initDB();
   // Verifica conexão da Evolution API
@@ -1763,5 +1866,43 @@ setInterval(async () => {
     try { await wa.connect(); } catch {}
   }
 }, 60000);
+
+// ─── Jobs diários de manutenção (pré-campanha Agosto Imbatível) ───
+// Rodam 5 min após o boot e depois a cada 24h.
+async function dailyMaintenance() {
+  // A) Finaliza conversas presas em "atendendo" sem mensagem há 3+ dias.
+  // Sem isso o cliente antigo não volta pra fila "aguardando" quando escreve de novo.
+  try {
+    const r = await queryRun(
+      `UPDATE conversations SET status = 'finalizado', finished_at = NOW(), finished_by = 'auto-job'
+       WHERE status = 'atendendo' AND last_message_at < NOW() - INTERVAL '3 days'`);
+    if (r.rowCount > 0) console.log(`🧹 Job: ${r.rowCount} conversas presas em "atendendo" finalizadas automaticamente`);
+  } catch (e) { console.error('🧹 Job de conversas presas falhou:', e.message); }
+
+  // B) Expurgo de mídia com mais de 90 dias (98% do banco é mídia base64).
+  // Em lotes de 500 pra não estourar o statement_timeout de 15s do pool.
+  try {
+    let totalRows = 0, totalBytes = 0;
+    for (let i = 0; i < 40; i++) {
+      const r = await queryOne(
+        `WITH del AS (
+           DELETE FROM media_files
+           WHERE id IN (SELECT id FROM media_files WHERE created_at < NOW() - INTERVAL '90 days' ORDER BY created_at LIMIT 500)
+           RETURNING LENGTH(data) AS l
+         ) SELECT COUNT(*) AS c, COALESCE(SUM(l), 0) AS bytes FROM del`);
+      const c = parseInt(r.c);
+      totalRows += c;
+      totalBytes += parseInt(r.bytes);
+      if (c < 500) break;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    if (totalRows > 0) {
+      const mb = Math.round(totalBytes / 1024 / 1024);
+      console.log(`🧹 Job: ${totalRows} mídias com +90 dias apagadas — ~${mb}MB (base64) liberados no banco`);
+    }
+  } catch (e) { console.error('🧹 Job de expurgo de mídia falhou:', e.message); }
+}
+setTimeout(() => dailyMaintenance().catch(console.error), 5 * 60 * 1000);
+setInterval(() => dailyMaintenance().catch(console.error), 24 * 60 * 60 * 1000);
 
 start().catch(console.error);

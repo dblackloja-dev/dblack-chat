@@ -241,6 +241,46 @@ async function initDB() {
     )
   `);
 
+  // ─── Lista VIP (campanha Agosto Imbatível 2026) ───
+  await queryRun(`
+    CREATE TABLE IF NOT EXISTS vip_subscribers (
+      id TEXT PRIMARY KEY,
+      phone TEXT NOT NULL UNIQUE,
+      name TEXT DEFAULT '',
+      conversation_id TEXT,
+      source TEXT DEFAULT 'whatsapp',
+      campaign TEXT DEFAULT 'agosto-imbativel-2026',
+      opted_out BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // Log de cada envio do disparo em massa (auditoria + retry só das falhas)
+  await queryRun(`
+    CREATE TABLE IF NOT EXISTS vip_broadcast_log (
+      id TEXT PRIMARY KEY,
+      broadcast_id TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      template_name TEXT NOT NULL,
+      status TEXT DEFAULT 'sent',
+      error TEXT,
+      wa_message_id TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // Configurações da Lista VIP — criadas só se não existirem (editáveis via PUT /api/settings)
+  const vipDefaults = [
+    ['vip_enabled', 'true'],
+    ['vip_keywords', 'imbativel,lista imbativel,quero entrar na lista,vip'],
+    ['vip_welcome_text', 'Você tá dentro da Lista Imbatível, {nome}! 👑🔥\n\nDia 11/08 você recebe em primeira mão o catálogo do AGOSTO IMBATÍVEL e pode garantir suas peças ANTES da abertura oficial.\n\nFica de olho aqui no WhatsApp!'],
+    ['vip_rules_text', '📋 *Como funciona a Lista Imbatível*\n\n1️⃣ Dia 11/08 você recebe aqui o catálogo antecipado do AGOSTO IMBATÍVEL\n2️⃣ Escolhe suas peças e garante ANTES da abertura oficial\n3️⃣ Estoque limitado — quem vê primeiro, compra primeiro 👑\n\nPra sair da lista é só responder SAIR.'],
+    ['vip_already_text', 'Você já está na Lista Imbatível! 👑 Dia 11/08 te chamo aqui.'],
+  ];
+  for (const [k, v] of vipDefaults) {
+    await queryRun("INSERT INTO chat_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING", [k, v]);
+  }
+
   // ─── ÍNDICES DE PERFORMANCE ───
   // Sem índices, TODA query faz full table scan — isso é o que deixa o chat lento
   const indexes = [
@@ -267,6 +307,10 @@ async function initDB() {
     "CREATE INDEX IF NOT EXISTS idx_promo_photos_item ON promo_photos (promo_item_id)",
     // Settings
     "CREATE INDEX IF NOT EXISTS idx_settings_key ON chat_settings (key)",
+    // Lista VIP
+    "CREATE INDEX IF NOT EXISTS idx_vip_phone ON vip_subscribers (phone)",
+    "CREATE INDEX IF NOT EXISTS idx_vip_log_broadcast ON vip_broadcast_log (broadcast_id)",
+    "CREATE INDEX IF NOT EXISTS idx_vip_log_phone_tpl ON vip_broadcast_log (phone, template_name)",
   ];
 
   // Habilita extensão pg_trgm para busca ILIKE com índice (se disponível)
