@@ -365,8 +365,10 @@ class WhatsAppMeta extends EventEmitter {
         for (const st of value.statuses || []) {
           const ackMap = { sent: 1, delivered: 2, read: 3 };
           if (st.status === 'failed') {
-            const reason = st.errors?.[0]?.title || st.errors?.[0]?.message || 'desconhecido';
+            const err = st.errors?.[0] || {};
+            const reason = err.title || err.message || 'desconhecido';
             console.error(`❌ Falha ao entregar msg ${st.id} para ${st.recipient_id}: ${reason}`);
+            this.emit('message_failed', { id: st.id, phone: st.recipient_id, code: err.code, reason });
             continue;
           }
           const ack = ackMap[st.status];

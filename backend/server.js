@@ -474,9 +474,18 @@ wa.on('recovery_needed', () => {
 // Atualiza status de entrega das mensagens (enviado/entregue/lido)
 wa.on('message_ack', async ({ id, ack }) => {
   try {
-    await queryRun("UPDATE messages SET ack = $1 WHERE id = $2 AND ack < $1", [ack, id]);
+    // ack = -1 (falha) é terminal — status atrasado não pode voltar a marcar como enviado
+    await queryRun("UPDATE messages SET ack = $1 WHERE id = $2 AND ack < $1 AND ack != -1", [ack, id]);
     broadcast('message_ack', { id, ack });
   } catch (e) { console.error('Erro ao atualizar ack:', e.message); }
+});
+
+// Meta recusou a entrega (ex.: "Re-engagement message" = janela de 24h expirada)
+wa.on('message_failed', async ({ id, reason }) => {
+  try {
+    await queryRun("UPDATE messages SET ack = -1 WHERE id = $1", [id]);
+    broadcast('message_ack', { id, ack: -1, reason });
+  } catch (e) { console.error('Erro ao marcar falha de entrega:', e.message); }
 });
 
 // Quando recebe mensagem do WhatsApp — entra na fila pra processar sequencialmente

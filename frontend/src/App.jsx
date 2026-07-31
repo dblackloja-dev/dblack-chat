@@ -293,8 +293,8 @@ export default function App() {
             setMessages(prev => prev.map(m => m.id === data.id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m));
           }
           if (event === 'message_ack') {
-            setMessages(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack } : m));
-            setSpyMsgs(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack } : m));
+            setMessages(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack, ack_reason: data.reason } : m));
+            setSpyMsgs(prev => prev.map(m => m.id === data.id ? { ...m, ack: data.ack, ack_reason: data.reason } : m));
           }
           if (event === 'conversation_updated') {
             setConversations(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c));
@@ -1132,8 +1132,15 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
         )}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 2 }}>
           <span style={{ fontSize: 11, color: '#667781' }}>{fmt(msg.timestamp)}</span>
-          {isMe && (msg.ack >= 3 ? Icons.dblcheckBlue : msg.ack >= 2 ? Icons.dblcheck : Icons.check)}
+          {isMe && (msg.ack === -1 ? <span style={{ fontSize: 12, lineHeight: 1 }}>⚠️</span> : msg.ack >= 3 ? Icons.dblcheckBlue : msg.ack >= 2 ? Icons.dblcheck : Icons.check)}
         </div>
+        {isMe && msg.ack === -1 && (
+          <div style={{ fontSize: 11, color: '#d32f2f', fontWeight: 600, textAlign: 'right', marginTop: 2, maxWidth: 260 }}>
+            Não entregue — {msg.ack_reason && !/re-?engagement/i.test(msg.ack_reason)
+              ? msg.ack_reason
+              : 'faz mais de 24h que o cliente não responde. Ele precisa te mandar uma mensagem para voltar a receber as suas.'}
+          </div>
+        )}
       </div>
     </div>
   );
