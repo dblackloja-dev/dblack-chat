@@ -832,6 +832,42 @@ app.post('/api/messages/send', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Reengajamento: fora da janela de 24h só template aprovado chega no cliente
+const REENGAGE_TEMPLATE = process.env.REENGAGE_TEMPLATE || 'reengajamento_atendimento';
+const REENGAGE_TEXT = "Olá! Tentamos te responder aqui na D'Black Store, mas a conversa expirou. Toque no botão abaixo ou responda esta mensagem para continuarmos o seu atendimento.";
+const reengageLastSent = new Map(); // conversation_id → timestamp, evita clique repetido
+
+app.post('/api/messages/send-template', auth, async (req, res) => {
+  try {
+    const { conversation_id } = req.body;
+    if (!conversation_id) return res.status(400).json({ error: 'Conversa é obrigatória' });
+    if (typeof wa.sendTemplate !== 'function') return res.status(400).json({ error: 'O provedor atual não suporta templates' });
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+
+    const last = reengageLastSent.get(conversation_id) || 0;
+    if (Date.now() - last < 10 * 60 * 1000) {
+      return res.status(429).json({ error: 'Template já enviado para este cliente há poucos minutos. Aguarde a resposta.' });
+    }
+
+    const waResult = await wa.sendTemplate(conv.phone, REENGAGE_TEMPLATE);
+    reengageLastSent.set(conversation_id, Date.now());
+
+    const msgId = waResult?._waId || genId();
+    const displayText = `📩 ${REENGAGE_TEXT}`;
+    await queryRun(
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW()) ON CONFLICT (id) DO NOTHING",
+      [msgId, conversation_id, req.user.name, displayText]
+    );
+    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", ['📩 Template de reengajamento', conversation_id]);
+
+    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content: displayText, ack: 1, timestamp: new Date().toISOString() };
+    broadcast('new_message', { conversation: { ...conv, last_message: '📩 Template de reengajamento', last_message_from_me: true }, message });
+    console.log(`📩 Template de reengajamento enviado por ${req.user.name} para ${conv.phone}`);
+    res.json(message);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Enviar imagem (atendente → cliente via WhatsApp) — com compressão automática
 app.post('/api/messages/send-image', auth, upload.single('image'), async (req, res) => {
   try {

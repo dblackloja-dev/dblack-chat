@@ -829,7 +829,7 @@ export default function App() {
 
               {/* Messages */}
               <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
-                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onReengage={() => api.sendReengageTemplate(activeConv.id)} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -1050,9 +1050,10 @@ function quoteSnippet(m) {
   return t.length > 90 ? t.slice(0, 90) + '…' : t;
 }
 
-function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, isAdmin }) {
+function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, isAdmin, onReengage }) {
   const isMe = msg.from_me === true || msg.from_me === 'true';
   const [showMenu, setShowMenu] = useState(false);
+  const [reengaging, setReengaging] = useState(false);
   const isDeleted = msg.content === '🚫 Mensagem apagada';
   const canDelete = isAdmin || isMe;
   const quotedThumb = quoted?.media_type === 'image' && (quoted.media_url || quoted.content?.startsWith('/media/'))
@@ -1139,6 +1140,19 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
             Não entregue — {msg.ack_reason && !/re-?engagement/i.test(msg.ack_reason)
               ? msg.ack_reason
               : 'faz mais de 24h que o cliente não responde. Ele precisa te mandar uma mensagem para voltar a receber as suas.'}
+            {onReengage && (
+              <button disabled={reengaging}
+                onClick={async () => {
+                  setReengaging(true);
+                  try { await onReengage(); alert('Template enviado! Quando o cliente responder, a conversa reabre e você pode mandar tudo de novo.'); }
+                  catch (e) { alert(e.message || 'Erro ao enviar template'); }
+                  finally { setReengaging(false); }
+                }}
+                style={{ display: 'block', width: '100%', marginTop: 6, padding: '7px 10px', borderRadius: 6, border: 'none',
+                  background: reengaging ? '#9aa5ab' : '#c77d00', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                {reengaging ? 'Enviando...' : '📩 Reabrir conversa (enviar template)'}
+              </button>
+            )}
           </div>
         )}
       </div>

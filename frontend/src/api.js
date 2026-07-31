@@ -62,6 +62,7 @@ const api = {
   // Messages
   getMessages: (convId) => request(`/messages/${convId}`),
   sendMessage: (data) => request('/messages/send', { method: 'POST', body: data }),
+  sendReengageTemplate: (conversationId) => request('/messages/send-template', { method: 'POST', body: { conversation_id: conversationId } }),
   deleteMessage: (id) => request(`/messages/${id}`, { method: 'DELETE' }),
   sendAudio: async (conversationId, blob) => {
     const token = getToken();
