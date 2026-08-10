@@ -600,11 +600,11 @@ export default function App() {
 
   // ─── MAIN ───
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100dvh', position: 'fixed', inset: 0, background: '#0f1f1c', fontFamily: "-apple-system, 'Inter', 'SF Pro Display', sans-serif", color: W.txt, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', position: 'fixed', inset: 0, background: '#0f1f1c', fontFamily: "-apple-system, 'Inter', 'SF Pro Display', sans-serif", color: W.txt, overflow: 'hidden' }}>
 
       {/* ═══ SIDEBAR NAVEGAÇÃO (Design System D'Black) ═══ */}
       {isMobile && sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 99 }} />}
-      <div style={{ position: isMobile ? 'fixed' : 'relative', top: 0, left: 0, bottom: 0, zIndex: isMobile ? 100 : 1, display: isMobile && !sidebarOpen ? 'none' : 'block' }}>
+      <div style={{ position: isMobile ? 'fixed' : 'relative', top: 0, left: 0, bottom: 0, zIndex: isMobile ? 100 : 1, display: isMobile && !sidebarOpen ? 'none' : 'block', background: '#0f1f1c', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', boxSizing: 'border-box' }}>
         <DBlackSidebar
           activeRoute={currentModule === 'chat' ? 'conversas' : currentModule === 'quick-replies' ? 'respostas' : currentModule === 'ai-agents' ? 'agentes' : currentModule === 'ai-metrics' ? 'relatorios' : currentModule === 'contacts' ? 'contatos' : currentModule === 'promo' ? 'promo' : currentModule}
           onNavigate={(key) => {
@@ -642,7 +642,7 @@ export default function App() {
       }}>
 
         {/* Header sidebar */}
-        <div style={{ height: 59, background: W.bgHeader, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8 }}>
+        <div style={{ height: 'calc(59px + env(safe-area-inset-top))', background: W.bgHeader, display: 'flex', alignItems: 'center', padding: 'env(safe-area-inset-top) 12px 0', gap: 8, flexShrink: 0 }}>
           {isMobile && <button style={iconBtn} onClick={() => setSidebarOpen(true)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>}
           <div style={{ ...avatarStyle(40), background: W.teal, fontSize: 15 }}>{user.avatar || user.name?.[0]}</div>
           <div style={{ flex: 1, fontWeight: 600, fontSize: isMobile ? 14 : 16 }}>{user.name}</div>
@@ -766,7 +766,7 @@ export default function App() {
         {/* SPY MODE */}
         {spyConv && !showAdmin && !showSales && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ height: 56, flexShrink: 0, background: W.bgHeader, display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8 }}>
+            <div style={{ height: 'calc(56px + env(safe-area-inset-top))', flexShrink: 0, background: W.bgHeader, display: 'flex', alignItems: 'center', padding: 'env(safe-area-inset-top) 12px 0', gap: 8 }}>
               {isMobile && <button style={iconBtn} onClick={goBackToList}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg></button>}
               <div style={{ ...avatarStyle(40), background: '#6B7175' }}>{(spyConv.customer_push_name || spyConv.phone)?.[0]?.toUpperCase()}</div>
               <div style={{ flex: 1 }}>
@@ -791,7 +791,7 @@ export default function App() {
             {/* Coluna do chat */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
               {/* Chat header */}
-              <div style={{ height: 56, background: W.bgHeader, display: 'flex', alignItems: 'center', padding: '0 8px', gap: 6, flexShrink: 0, overflow: 'hidden', width: '100%' }}>
+              <div style={{ height: 'calc(56px + env(safe-area-inset-top))', background: W.bgHeader, display: 'flex', alignItems: 'center', padding: 'env(safe-area-inset-top) 8px 0', gap: 6, flexShrink: 0, overflow: 'hidden', width: '100%' }}>
                 {isMobile && <button style={iconBtn} onClick={goBackToList}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg></button>}
                 <div style={{ ...avatarStyle(36), background: W.teal, fontSize: 14 }}>{(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}</div>
                 <div style={{ flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden' }} onClick={() => setShowCustomerPanel(!showCustomerPanel)}>
@@ -808,7 +808,7 @@ export default function App() {
                     </button>
                     {showHeaderMenu && <>
                       <div onClick={() => setShowHeaderMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
-                      <div style={{ position: 'absolute', top: 52, right: 8, zIndex: 200, background: '#fff', borderRadius: 12, boxShadow: '0 4px 20px rgba(11,20,26,.25)', padding: '6px 0', minWidth: 220 }}>
+                      <div style={{ position: 'absolute', top: 'calc(52px + env(safe-area-inset-top))', right: 8, zIndex: 200, background: '#fff', borderRadius: 12, boxShadow: '0 4px 20px rgba(11,20,26,.25)', padding: '6px 0', minWidth: 220 }}>
                         {[
                           { label: '👤  Dados do cliente', fn: () => setShowCustomerPanel(true) },
                           { label: '🔍  Buscar mensagens', fn: () => setShowMsgSearch(true) },
@@ -985,6 +985,7 @@ export default function App() {
                 borderLeft: isMobile ? 'none' : `1px solid ${W.border}`,
                 background: W.bgPanel, overflowY: 'auto', flexShrink: 0,
                 position: isMobile ? 'absolute' : 'relative', top: 0, right: 0, bottom: 0, zIndex: 10,
+                paddingTop: isMobile ? 'env(safe-area-inset-top)' : 0,
               }}>
                 <div style={{ padding: '16px', borderBottom: `1px solid ${W.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 15, fontWeight: 600, flex: 1 }}>Dados do cliente</span>

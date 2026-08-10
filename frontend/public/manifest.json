@@ -4,8 +4,8 @@
   "description": "Plataforma de atendimento WhatsApp da D'Black Store",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0d1b18",
-  "theme_color": "#1eba8a",
+  "background_color": "#f0f2f5",
+  "theme_color": "#f0f2f5",
   "orientation": "any",
   "categories": ["business", "productivity"],
   "icons": [
