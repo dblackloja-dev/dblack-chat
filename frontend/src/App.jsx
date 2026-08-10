@@ -35,6 +35,11 @@ const W = {
   teal: '#008069',       // teal WhatsApp
 };
 
+// Textura de rabiscos do fundo do chat (bem sutil, estilo WhatsApp)
+const chatBg = {
+  background: `${W.bgChat} url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cg fill='none' stroke='%23ddd5c8' stroke-width='1.2' opacity='.5'%3E%3Ccircle cx='16' cy='16' r='4'/%3E%3Cpath d='M56 12c3 0 3 4 0 4s-3-4 0-4z'/%3E%3Cpath d='M22 64l5 5M27 64l-5 5'/%3E%3Ccircle cx='70' cy='70' r='3'/%3E%3Cpath d='M44 38h9M48.5 33.5v9'/%3E%3Cpath d='M74 40c2-3 6-3 8 0'/%3E%3C/g%3E%3C/svg%3E") repeat`,
+};
+
 const fmt = (d) => {
   if (!d) return '';
   const dt = new Date(d);
@@ -106,10 +111,13 @@ export default function App() {
   const [customerInfo, setCustomerInfo] = useState(null);
   const [showCustomerPanel, setShowCustomerPanel] = useState(false);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [showAttachSheet, setShowAttachSheet] = useState(false);
 
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
   const textareaRef = useRef(null);
 
   // Detecta mobile
@@ -377,6 +385,7 @@ export default function App() {
   // ─── ACTIONS ───
   const openConversation = async (conv) => {
     setActiveConv(conv); setSpyConv(null); setShowSales(false); setShowAdmin(false); setShowHistory(false); setShowMsgSearch(false);
+    setShowHeaderMenu(false); setShowAttachSheet(false);
     if (isMobile) setMobileView('chat');
     await loadMessages(conv.id);
     loadTags(conv.id);
@@ -388,7 +397,7 @@ export default function App() {
     }
   };
 
-  const goBackToList = () => { setMobileView('list'); setActiveConv(null); setSpyConv(null); setShowSales(false); setShowCustomerPanel(false); };
+  const goBackToList = () => { setMobileView('list'); setActiveConv(null); setSpyConv(null); setShowSales(false); setShowCustomerPanel(false); setShowHeaderMenu(false); setShowAttachSheet(false); };
   const spyConversation = async (conv) => { setSpyConv(conv); setActiveConv(null); if (isMobile) setMobileView('chat'); try { setSpyMsgs(await api.getMessages(conv.id)); } catch {} };
   const acceptConversation = async (convId) => { try { const conv = await api.acceptConversation(convId); setConversations(prev => prev.map(c => c.id === convId ? conv : c)); setSpyConv(null); setActiveConv(conv); if (isMobile) setMobileView('chat'); await loadMessages(convId); setTab('atendendo'); } catch {} };
   const finishConversation = async (convId) => { if (!confirm('Finalizar este atendimento?')) return; try { await api.finishConversation(convId); if (activeConv?.id === convId) { setActiveConv(null); setMessages([]); } await loadConversations(); } catch {} };
@@ -653,22 +662,21 @@ export default function App() {
           </div>
         </div>
 
-        {/* Abas */}
-        <div style={{ display: 'flex', background: W.bgPanel, borderBottom: `1px solid ${W.border}` }}>
+        {/* Abas (chips de filtro, estilo WhatsApp) */}
+        <div className="chips-row" style={{ display: 'flex', gap: 8, padding: '8px 12px 10px', background: W.bgPanel, borderBottom: `1px solid ${W.border}`, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {[
             { id: 'atendendo', label: 'Atendendo', count: myAtendendo.length },
             { id: 'aguardando', label: 'Fila', count: aguardando.length },
             { id: 'finalizados', label: 'Finalizados', count: finalizados.length },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
-              flex: 1, padding: '14px 4px', background: 'transparent', border: 'none',
-              borderBottom: tab === t.id ? `3px solid ${W.green}` : '3px solid transparent',
-              color: tab === t.id ? W.green : W.txt2, fontSize: 13, fontWeight: 400, cursor: 'pointer',
-              fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              transition: 'all .15s',
+              padding: '7px 14px', background: tab === t.id ? '#d9fdd3' : W.search, border: 'none',
+              borderRadius: 18, color: tab === t.id ? '#0b6b53' : W.txt2, fontSize: 13,
+              fontWeight: tab === t.id ? 600 : 400, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+              fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6, transition: 'all .15s',
             }}>
               {t.label}
-              {t.count > 0 && <span style={{ background: W.green, color: '#fff', borderRadius: 12, padding: '1px 7px', fontSize: 11, fontWeight: 500 }}>{t.count}</span>}
+              {t.count > 0 && <span style={{ background: tab === t.id ? '#0b6b53' : W.green, color: '#fff', borderRadius: 12, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>{t.count}</span>}
             </button>
           ))}
         </div>
@@ -687,9 +695,9 @@ export default function App() {
               {tab === 'aguardando' && filteredConvs(aguardando).map(conv => (
                 <div key={conv.id} style={{ cursor: 'pointer' }}>
                   <ConvItem conv={conv} active={spyConv?.id === conv.id} onClick={() => spyConversation(conv)} />
-                  <div style={{ display: 'flex', gap: 6, padding: '0 16px 10px', marginTop: -4 }}>
-                    <button onClick={(e) => { e.stopPropagation(); acceptConversation(conv.id); }} style={{ ...smallBtn, background: W.green, color: '#fff', border: 'none' }}>Aceitar</button>
-                    <button onClick={(e) => { e.stopPropagation(); spyConversation(conv); }} style={smallBtn}>👁️ Espiar</button>
+                  <div style={{ display: 'flex', gap: 8, padding: '0 16px 10px', marginTop: -4 }}>
+                    <button onClick={(e) => { e.stopPropagation(); acceptConversation(conv.id); }} style={{ ...smallBtn, background: W.green, color: '#fff', border: 'none', padding: '8px 20px', fontSize: 13, fontWeight: 600, borderRadius: 18 }}>Aceitar</button>
+                    <button onClick={(e) => { e.stopPropagation(); spyConversation(conv); }} style={{ ...smallBtn, padding: '8px 16px', fontSize: 13, borderRadius: 18 }}>👁️ Espiar</button>
                   </div>
                 </div>
               ))}
@@ -768,10 +776,10 @@ export default function App() {
               <button style={{ ...smallBtn, background: W.green, color: '#fff', border: 'none', padding: '8px 16px' }} onClick={() => acceptConversation(spyConv.id)}>Aceitar</button>
               <button style={iconBtn} onClick={() => setSpyConv(null)}>✕</button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
-              {spyMsgs.map(msg => <MessageBubble key={msg.id} msg={msg} quoted={msg.reply_to ? spyMsgs.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+            <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', ...chatBg, minHeight: 0 }}>
+              {spyMsgs.map((msg, i) => <MessageBubble key={msg.id} msg={msg} tail={i === 0 || fromMe(spyMsgs[i - 1]) !== fromMe(msg)} quoted={msg.reply_to ? spyMsgs.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
             </div>
-            <div style={{ padding: '10px 16px', flexShrink: 0, background: 'rgba(0,168,132,.04)', textAlign: 'center', fontSize: 13, color: W.green }}>
+            <div style={{ padding: '10px 16px', flexShrink: 0, background: '#e9f8f2', textAlign: 'center', fontSize: 13, color: W.green }}>
               Aceite o atendimento para responder
             </div>
           </div>
@@ -792,16 +800,44 @@ export default function App() {
                     <div style={{ fontSize: 11, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtPhone(activeConv.real_phone || activeConv.phone)}</div>
                   )}
                 </div>
-                {activeConv.status === 'atendendo' && <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-                  <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(30,186,138,.1)', color: '#1eba8a', border: '1px solid rgba(30,186,138,.3)', fontWeight: 600 }} onClick={() => { setShowSales(true); setShowAdmin(false); }} title="Vender">🛒 Vender</button>
-                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowCustomerPanel(!showCustomerPanel)} title="Cliente">👤</button>
-                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowTagMenu(!showTagMenu)} title="Tags">🏷️</button>
-                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowMsgSearch(!showMsgSearch)} title="Buscar">🔍</button>
-                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => loadHistory(activeConv.phone)} title="Histórico">📋</button>
-                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => transferConversation(activeConv.id)} title="Devolver">↩️</button>
-                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={async () => { try { await api.markUnread(activeConv.id); } catch {} }} title="Marcar como não lida">✉️</button>
-                  <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11, color: W.red }} onClick={() => finishConversation(activeConv.id)} title="Finalizar">✓</button>
-                </div>}
+                {activeConv.status === 'atendendo' && (isMobile ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                    <button style={{ ...iconBtn, fontSize: 20, padding: 8 }} onClick={() => { setShowSales(true); setShowAdmin(false); setShowHeaderMenu(false); }} title="Vender">🛒</button>
+                    <button style={{ ...iconBtn, padding: 8 }} onClick={() => setShowHeaderMenu(v => !v)} title="Mais opções">
+                      <svg viewBox="0 0 24 24" width="22" height="22" fill={W.txt2}><path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z"/></svg>
+                    </button>
+                    {showHeaderMenu && <>
+                      <div onClick={() => setShowHeaderMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
+                      <div style={{ position: 'absolute', top: 52, right: 8, zIndex: 200, background: '#fff', borderRadius: 12, boxShadow: '0 4px 20px rgba(11,20,26,.25)', padding: '6px 0', minWidth: 220 }}>
+                        {[
+                          { label: '👤  Dados do cliente', fn: () => setShowCustomerPanel(true) },
+                          { label: '🔍  Buscar mensagens', fn: () => setShowMsgSearch(true) },
+                          { label: '🏷️  Etiquetas', fn: () => setShowTagMenu(true) },
+                          { label: '📋  Histórico do cliente', fn: () => loadHistory(activeConv.phone) },
+                          { label: '✉️  Marcar como não lida', fn: async () => { try { await api.markUnread(activeConv.id); } catch {} } },
+                          { label: '↩️  Devolver para a fila', fn: () => transferConversation(activeConv.id) },
+                          { label: '✅  Finalizar atendimento', fn: () => finishConversation(activeConv.id) },
+                        ].map(item => (
+                          <button key={item.label} onClick={() => { setShowHeaderMenu(false); item.fn(); }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '13px 18px', background: 'none', border: 'none', fontSize: 15, color: W.txt, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                    <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(30,186,138,.1)', color: '#1eba8a', border: '1px solid rgba(30,186,138,.3)', fontWeight: 600 }} onClick={() => { setShowSales(true); setShowAdmin(false); }} title="Vender">🛒 Vender</button>
+                    <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowCustomerPanel(!showCustomerPanel)} title="Cliente">👤</button>
+                    <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowTagMenu(!showTagMenu)} title="Tags">🏷️</button>
+                    <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowMsgSearch(!showMsgSearch)} title="Buscar">🔍</button>
+                    <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => loadHistory(activeConv.phone)} title="Histórico">📋</button>
+                    <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => transferConversation(activeConv.id)} title="Devolver">↩️</button>
+                    <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={async () => { try { await api.markUnread(activeConv.id); } catch {} }} title="Marcar como não lida">✉️</button>
+                    <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11, color: W.red }} onClick={() => finishConversation(activeConv.id)} title="Finalizar">✓</button>
+                  </div>
+                ))}
               </div>
 
               {/* Tags da conversa */}
@@ -828,17 +864,17 @@ export default function App() {
               </div>}
 
               {/* Messages */}
-              <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', background: W.bgChat, minHeight: 0 }}>
-                {messages.map(msg => <MessageBubble key={msg.id} msg={msg} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onReengage={() => api.sendReengageTemplate(activeConv.id)} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+              <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', ...chatBg, minHeight: 0 }}>
+                {messages.map((msg, i) => <MessageBubble key={msg.id} msg={msg} tail={i === 0 || fromMe(messages[i - 1]) !== fromMe(msg)} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onReengage={() => api.sendReengageTemplate(activeConv.id)} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
                 <div ref={messagesEndRef} />
               </div>
 
               {/* Respostas rápidas */}
               {showQuickReplies && activeConv.status === 'atendendo' && activeConv.agent_id === user.id && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '8px 16px', background: W.bgHeader, borderTop: `1px solid ${W.border}` }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px', background: W.bgHeader, borderTop: `1px solid ${W.border}`, maxHeight: 170, overflowY: 'auto' }}>
                   {quickReplies.map((qr, i) => (
                     <button key={qr.id || i} onClick={() => selectQuickReply(qr)}
-                      style={{ padding: '5px 10px', borderRadius: 16, border: `1px solid ${W.border}`, background: '#fff', color: W.txt, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      style={{ padding: '8px 14px', borderRadius: 18, border: `1px solid ${W.border}`, background: '#fff', color: W.txt, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
                       {qr.has_image && <span>📷</span>}
                       {qr.label}
                     </button>
@@ -848,7 +884,7 @@ export default function App() {
 
               {/* Banner conversa finalizada + reabrir */}
               {activeConv.status === 'finalizado' && (
-                <div style={{ padding: '8px 16px', background: 'rgba(234,0,56,.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap', fontSize: 13, color: W.txt2, flexShrink: 0 }}>
+                <div style={{ padding: '8px 16px', background: '#fdf3f4', borderTop: `1px solid ${W.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap', fontSize: 13, color: W.txt2, flexShrink: 0 }}>
                   <span>Finalizado{activeConv.finished_by ? ` por ${activeConv.finished_by}` : ''}{activeConv.finished_at ? ` em ${fmt(activeConv.finished_at)}` : ''}. Enviar uma mensagem reabre o atendimento.</span>
                   <button style={{ ...smallBtn, background: W.green, color: '#fff', border: 'none', fontWeight: 600 }} onClick={() => acceptConversation(activeConv.id)}>Reabrir atendimento</button>
                 </div>
@@ -857,54 +893,84 @@ export default function App() {
               {/* Input */}
               {((activeConv.status === 'atendendo' && activeConv.agent_id === user.id) || activeConv.status === 'finalizado') && (
                 recording ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: W.bgHeader }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', paddingBottom: 'calc(8px + env(safe-area-inset-bottom))', background: W.bgHeader }}>
                     <button style={{ ...iconBtn, color: W.red }} onClick={cancelRecording} title="Cancelar">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, background: W.bgInput, borderRadius: 8, padding: '8px 16px', border: `1px solid ${W.red}` }}>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, background: W.bgInput, borderRadius: 24, padding: '10px 16px', border: `1px solid ${W.red}` }}>
                       <span style={{ width: 10, height: 10, borderRadius: 5, background: W.red, animation: 'pulse 1s infinite' }} />
                       <span style={{ color: W.red, fontWeight: 600 }}>{fmtTime(recordingTime)}</span>
                       <span style={{ flex: 1, color: W.txt2, fontSize: 13 }}>Gravando...</span>
                     </div>
-                    <button style={{ ...iconBtn, width: 42, height: 42, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={stopRecording}>
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="#fff"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
+                    <button style={{ ...iconBtn, width: 46, height: 46, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} onClick={stopRecording}>
+                      <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
                     </button>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', background: W.bgHeader, flexShrink: 0 }}>
-                    <button style={{ ...iconBtn, padding: 6 }} onClick={() => setShowQuickReplies(!showQuickReplies)} title="Respostas rápidas">⚡</button>
-                    <button style={{ ...iconBtn, padding: 6, opacity: sendingMedia ? 0.4 : 1 }} onClick={() => !sendingMedia && fileInputRef.current?.click()} title="Enviar imagem">{sendingMedia ? '⏳' : '📷'}</button>
-                    <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
-                    <button style={{ ...iconBtn, padding: 6, opacity: sendingVideo ? 0.4 : 1 }} onClick={() => !sendingVideo && videoInputRef.current?.click()} title="Enviar vídeo">{sendingVideo ? '⏳' : '🎥'}</button>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, padding: '6px 8px', paddingBottom: 'calc(6px + env(safe-area-inset-bottom))', background: W.bgHeader, flexShrink: 0, position: 'relative' }}>
+                    {/* Menu de anexos (estilo WhatsApp) */}
+                    {showAttachSheet && <>
+                      <div onClick={() => setShowAttachSheet(false)} style={{ position: 'fixed', inset: 0, zIndex: 59 }} />
+                      <div style={{ position: 'absolute', bottom: '100%', left: 8, right: isMobile ? 8 : 'auto', marginBottom: 8, background: '#fff', borderRadius: 16, boxShadow: '0 4px 24px rgba(11,20,26,.25)', padding: '20px 12px', zIndex: 60, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18, minWidth: isMobile ? 'auto' : 320 }}>
+                        {[
+                          { label: 'Galeria', emoji: '🖼️', color: '#bf59cf', fn: () => !sendingMedia && fileInputRef.current?.click() },
+                          { label: 'Câmera', emoji: '📷', color: '#d3396d', fn: () => !sendingMedia && cameraInputRef.current?.click() },
+                          { label: 'Vídeo', emoji: '🎥', color: '#e67e22', fn: () => !sendingVideo && videoInputRef.current?.click() },
+                          { label: 'Documento', emoji: '📄', color: '#5157ae', fn: () => !sendingFile && fileAttachRef.current?.click() },
+                          { label: 'Resposta rápida', emoji: '⚡', color: '#1fa855', fn: () => setShowQuickReplies(true) },
+                        ].map(item => (
+                          <button key={item.label} onClick={() => { setShowAttachSheet(false); item.fn(); }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: 0 }}>
+                            <span style={{ width: 54, height: 54, borderRadius: '50%', background: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, boxShadow: '0 2px 6px rgba(0,0,0,.15)' }}>{item.emoji}</span>
+                            <span style={{ fontSize: 12, color: W.txt2 }}>{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>}
+                    <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
+                    <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleImageUpload} />
                     <input ref={videoInputRef} type="file" accept="video/*" style={{ display: 'none' }} onChange={handleVideoUpload} />
-                    <button style={{ ...iconBtn, padding: 6, opacity: sendingFile ? 0.4 : 1 }} onClick={() => !sendingFile && fileAttachRef.current?.click()} title="Anexar arquivo">{sendingFile ? '⏳' : '📎'}</button>
                     <input ref={fileAttachRef} type="file" style={{ display: 'none' }} onChange={handleFileAttach} />
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', background: W.bgInput, borderRadius: 8, padding: '0 8px', border: `1px solid ${pendingQuickReply ? '#1eba8a' : W.border}`, position: 'relative' }}>
-                      {pendingQuickReply && <span style={{ fontSize: 10, color: '#1eba8a', position: 'absolute', top: -8, left: 8, background: W.bgHeader, padding: '0 4px' }}>📷 + imagem</span>}
-                      <button style={{ ...iconBtn, padding: 4, flexShrink: 0 }} onClick={() => setShowEmojis(!showEmojis)} title="Emojis">😊</button>
+
+                    {/* Pílula de digitação (estilo WhatsApp) */}
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-end', background: W.bgInput, borderRadius: 24, padding: '0 4px 0 6px', border: pendingQuickReply ? '1px solid #1eba8a' : 'none', boxShadow: '0 1px .5px rgba(11,20,26,.13)', position: 'relative' }}>
+                      {pendingQuickReply && <span style={{ fontSize: 10, color: '#1eba8a', position: 'absolute', top: -8, left: 12, background: W.bgHeader, padding: '0 4px' }}>📷 + imagem</span>}
+                      <button style={{ ...iconBtn, padding: 8, flexShrink: 0 }} onClick={() => setShowEmojis(!showEmojis)} title="Emojis">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill={W.txt2}><path d="M9.153 11.603c.795 0 1.44-.88 1.44-1.962s-.645-1.96-1.44-1.96c-.795 0-1.44.88-1.44 1.96s.645 1.965 1.44 1.965zm5.694 0c.795 0 1.44-.88 1.44-1.962s-.645-1.96-1.44-1.96c-.795 0-1.44.88-1.44 1.96s.645 1.965 1.44 1.965zM12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm0-2a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm-4.847-6.383c1.11 1.888 2.823 3.036 4.837 3.036 2.021 0 3.738-1.157 4.848-3.045a.75.75 0 0 0-1.293-.76c-.855 1.455-2.104 2.305-3.555 2.305-1.445 0-2.69-.843-3.545-2.297a.75.75 0 0 0-1.292.761z"/></svg>
+                      </button>
                       {showEmojis && (
-                        <div style={{ position: 'absolute', bottom: '100%', left: 0, background: W.bgHeader, border: `1px solid ${W.border}`, borderRadius: 12, padding: 8, display: 'flex', flexWrap: 'wrap', gap: 2, width: 260, maxHeight: 180, overflowY: 'auto', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,.2)' }}>
-                          {emojiList.map(e => <button key={e} onClick={() => insertEmoji(e)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', padding: 4, borderRadius: 6 }}>{e}</button>)}
+                        <div style={{ position: 'absolute', bottom: '100%', left: 0, marginBottom: 8, background: '#fff', border: `1px solid ${W.border}`, borderRadius: 12, padding: 8, display: 'flex', flexWrap: 'wrap', gap: 2, width: 264, maxHeight: 180, overflowY: 'auto', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,.2)' }}>
+                          {emojiList.map(e => <button key={e} onClick={() => insertEmoji(e)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', padding: 4, borderRadius: 6 }}>{e}</button>)}
                         </div>
                       )}
                       <textarea
                         ref={textareaRef}
                         rows={1}
-                        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 15, fontFamily: 'inherit', padding: '8px 0', lineHeight: '20px', resize: 'none', maxHeight: 120, overflowY: 'auto' }}
-                        placeholder="Digite uma mensagem"
+                        style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: W.txt, fontSize: 16, fontFamily: 'inherit', padding: '11px 4px', lineHeight: '22px', resize: 'none', maxHeight: 120, overflowY: 'auto' }}
+                        placeholder="Mensagem"
                         value={msgInput}
                         onChange={e => setMsgInput(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                        autoFocus
+                        onKeyDown={e => { if (!isMobile && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                        autoFocus={!isMobile}
                       />
+                      <button style={{ ...iconBtn, padding: 8, flexShrink: 0, opacity: (sendingMedia || sendingVideo || sendingFile) ? 0.4 : 1 }} onClick={() => setShowAttachSheet(v => !v)} title="Anexar">
+                        {(sendingMedia || sendingVideo || sendingFile) ? '⏳' : Icons.attach}
+                      </button>
+                      {!msgInput.trim() && (
+                        <button style={{ ...iconBtn, padding: 8, flexShrink: 0, display: isMobile ? 'flex' : 'none' }} onClick={() => !sendingMedia && cameraInputRef.current?.click()} title="Câmera">
+                          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke={W.txt2} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                        </button>
+                      )}
                     </div>
+
+                    {/* Botão redondo verde: enviar ou gravar áudio */}
                     {msgInput.trim() ? (
-                      <button style={{ ...iconBtn, width: 36, height: 36, flexShrink: 0, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={sendMessage}>
-                        <svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
+                      <button style={{ ...iconBtn, width: 46, height: 46, flexShrink: 0, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(11,20,26,.2)' }} onClick={sendMessage} title="Enviar">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff" style={{ marginLeft: 2 }}><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
                       </button>
                     ) : (
-                      <button style={{ ...iconBtn, width: 36, height: 36, flexShrink: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: sendingAudio ? 0.4 : 1 }} onClick={startRecording} title="Gravar áudio">
-                        {sendingAudio ? <span>⏳</span> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8696a0" strokeWidth="1.5"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>}
+                      <button style={{ ...iconBtn, width: 46, height: 46, flexShrink: 0, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: sendingAudio ? 0.4 : 1, boxShadow: '0 1px 3px rgba(11,20,26,.2)' }} onClick={startRecording} title="Gravar áudio">
+                        {sendingAudio ? <span>⏳</span> : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>}
                       </button>
                     )}
                   </div>
@@ -980,7 +1046,7 @@ export default function App() {
 
         {/* EMPTY STATE */}
         {!activeConv && !spyConv && !showAdmin && !showSales && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, background: W.bgChat }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, ...chatBg }}>
             <div style={{ width: 320, height: 320, opacity: 0.06, fontSize: 280, textAlign: 'center', lineHeight: '320px' }}>💬</div>
             <div style={{ fontSize: 32, fontWeight: 300, color: '#41525d', marginTop: -200 }}>D'Black Chat</div>
             <div style={{ fontSize: 14, color: W.txt2, textAlign: 'center', maxWidth: 460, lineHeight: 1.6 }}>
@@ -1041,6 +1107,8 @@ function ConvItem({ conv, active, onClick, finished }) {
   );
 }
 
+const fromMe = (m) => m.from_me === true || m.from_me === 'true';
+
 function quoteSnippet(m) {
   if (m.media_type === 'image') return m.content?.includes('|') ? '📷 ' + m.content.split('|')[1] : '📷 Foto';
   if (m.media_type === 'audio') return '🎵 Áudio';
@@ -1050,7 +1118,7 @@ function quoteSnippet(m) {
   return t.length > 90 ? t.slice(0, 90) + '…' : t;
 }
 
-function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, isAdmin, onReengage }) {
+function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, isAdmin, onReengage, tail = true }) {
   const isMe = msg.from_me === true || msg.from_me === 'true';
   const [showMenu, setShowMenu] = useState(false);
   const [reengaging, setReengaging] = useState(false);
@@ -1059,15 +1127,26 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
   const quotedThumb = quoted?.media_type === 'image' && (quoted.media_url || quoted.content?.startsWith('/media/'))
     ? mediaUrl(quoted.media_url || quoted.content.split('|')[0]) : null;
   return (
-    <div id={'msg-' + msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 2,
+    <div id={'msg-' + msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 2, marginTop: tail ? 10 : 0,
       background: highlight ? 'rgba(0,168,132,.22)' : 'transparent', transition: 'background .5s', borderRadius: 8 }}
       onMouseEnter={() => canDelete && !isDeleted && setShowMenu(true)} onMouseLeave={() => setShowMenu(false)}>
       <div style={{
-        maxWidth: '80%', padding: '6px 7px 8px 9px', borderRadius: isMe ? '7.5px 7.5px 0 7.5px' : '7.5px 7.5px 7.5px 0',
-        background: isDeleted ? 'rgba(150,150,150,.1)' : (isMe ? W.bgMsgMe : W.bgMsg),
+        maxWidth: '80%', padding: '6px 7px 8px 9px',
+        borderRadius: tail ? (isMe ? '7.5px 0 7.5px 7.5px' : '0 7.5px 7.5px 7.5px') : '7.5px',
+        background: isDeleted ? '#f0f0f0' : (isMe ? W.bgMsgMe : W.bgMsg),
         boxShadow: '0 1px .5px rgba(11,20,26,.13)',
         position: 'relative', overflow: 'visible', wordBreak: 'break-word',
       }}>
+        {/* Rabinho da bolha (estilo WhatsApp) */}
+        {tail && (isMe ? (
+          <svg viewBox="0 0 8 13" width="8" height="13" style={{ position: 'absolute', top: 0, right: -8 }}>
+            <path d="M5.188 0H0v11.193l6.467-8.625C7.526 1.156 6.958 0 5.188 0z" fill={isDeleted ? '#f0f0f0' : W.bgMsgMe} />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 8 13" width="8" height="13" style={{ position: 'absolute', top: 0, left: -8 }}>
+            <path d="M2.812 0H8v11.193L1.533 2.568C.474 1.156 1.042 0 2.812 0z" fill={isDeleted ? '#f0f0f0' : W.bgMsg} />
+          </svg>
+        ))}
         {showMenu && (
           <button onClick={() => { if (confirm('Apagar esta mensagem para todos?')) onDelete?.(msg.id); setShowMenu(false); }}
             style={{ position: 'absolute', top: -8, right: -8, width: 24, height: 24, borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}
