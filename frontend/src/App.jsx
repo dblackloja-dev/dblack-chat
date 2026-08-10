@@ -870,17 +870,26 @@ export default function App() {
               </div>
 
               {/* Respostas rápidas */}
-              {showQuickReplies && activeConv.status === 'atendendo' && activeConv.agent_id === user.id && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px', background: W.bgHeader, borderTop: `1px solid ${W.border}`, maxHeight: 170, overflowY: 'auto' }}>
-                  {quickReplies.map((qr, i) => (
-                    <button key={qr.id || i} onClick={() => selectQuickReply(qr)}
-                      style={{ padding: '8px 14px', borderRadius: 18, border: `1px solid ${W.border}`, background: '#fff', color: W.txt, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      {qr.has_image && <span>📷</span>}
-                      {qr.label}
+              {showQuickReplies && activeConv.status === 'atendendo' && activeConv.agent_id === user.id && <>
+                <div onClick={() => setShowQuickReplies(false)} style={{ position: 'fixed', inset: 0, zIndex: 55, background: 'rgba(0,0,0,.08)' }} />
+                <div style={{ position: 'relative', zIndex: 56, background: W.bgHeader, borderTop: `1px solid ${W.border}`, flexShrink: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 0' }}>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: W.txt2 }}>⚡ Respostas rápidas</span>
+                    <button onClick={() => setShowQuickReplies(false)} style={{ ...iconBtn, padding: 6 }} title="Fechar">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
-                  ))}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '6px 12px 10px', maxHeight: 170, overflowY: 'auto' }}>
+                    {quickReplies.map((qr, i) => (
+                      <button key={qr.id || i} onClick={() => selectQuickReply(qr)}
+                        style={{ padding: '8px 14px', borderRadius: 18, border: `1px solid ${W.border}`, background: '#fff', color: W.txt, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {qr.has_image && <span>📷</span>}
+                        {qr.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              )}
+              </>}
 
               {/* Banner conversa finalizada + reabrir */}
               {activeConv.status === 'finalizado' && (
@@ -938,11 +947,12 @@ export default function App() {
                       <button style={{ ...iconBtn, padding: 8, flexShrink: 0 }} onClick={() => setShowEmojis(!showEmojis)} title="Emojis">
                         <svg viewBox="0 0 24 24" width="24" height="24" fill={W.txt2}><path d="M9.153 11.603c.795 0 1.44-.88 1.44-1.962s-.645-1.96-1.44-1.96c-.795 0-1.44.88-1.44 1.96s.645 1.965 1.44 1.965zm5.694 0c.795 0 1.44-.88 1.44-1.962s-.645-1.96-1.44-1.96c-.795 0-1.44.88-1.44 1.96s.645 1.965 1.44 1.965zM12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm0-2a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm-4.847-6.383c1.11 1.888 2.823 3.036 4.837 3.036 2.021 0 3.738-1.157 4.848-3.045a.75.75 0 0 0-1.293-.76c-.855 1.455-2.104 2.305-3.555 2.305-1.445 0-2.69-.843-3.545-2.297a.75.75 0 0 0-1.292.761z"/></svg>
                       </button>
-                      {showEmojis && (
+                      {showEmojis && <>
+                        <div onClick={() => setShowEmojis(false)} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
                         <div style={{ position: 'absolute', bottom: '100%', left: 0, marginBottom: 8, background: '#fff', border: `1px solid ${W.border}`, borderRadius: 12, padding: 8, display: 'flex', flexWrap: 'wrap', gap: 2, width: 264, maxHeight: 180, overflowY: 'auto', zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,.2)' }}>
                           {emojiList.map(e => <button key={e} onClick={() => insertEmoji(e)} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', padding: 4, borderRadius: 6 }}>{e}</button>)}
                         </div>
-                      )}
+                      </>}
                       <textarea
                         ref={textareaRef}
                         rows={1}
