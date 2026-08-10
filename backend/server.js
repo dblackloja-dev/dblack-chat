@@ -120,32 +120,44 @@ async function getGreeting() {
   } catch { return null; }
 }
 
-// ─── Fila de mensagens (processa uma por vez, sem perder nenhuma) ───
+// ─── Fila de mensagens (até N clientes em paralelo; mensagens do MESMO cliente
+// continuam em ordem, uma por vez — evita conversa duplicada e resposta fora de ordem) ───
 class MessageQueue {
-  constructor() {
-    this.queue = [];
-    this.processing = false;
+  constructor(concurrency = 4) {
+    this.concurrency = concurrency;
+    this.active = 0;
+    this.waiting = [];
+    this.tails = new Map(); // chave (telefone) -> última promise da cadeia daquele cliente
+    this.pendingCount = 0;
   }
-  add(handler) {
-    this.queue.push(handler);
-    this.process();
+  _acquire() {
+    if (this.active < this.concurrency) { this.active++; return Promise.resolve(); }
+    return new Promise((resolve) => this.waiting.push(resolve));
   }
-  async process() {
-    if (this.processing) return;
-    this.processing = true;
-    while (this.queue.length > 0) {
-      const handler = this.queue.shift();
+  _release() {
+    const next = this.waiting.shift();
+    if (next) next(); else this.active--;
+  }
+  add(handler, key = '') {
+    this.pendingCount++;
+    const prev = this.tails.get(key) || Promise.resolve();
+    const run = prev.then(async () => {
+      await this._acquire();
       try {
         await handler();
       } catch (e) {
         console.error('❌ Erro na fila de mensagens:', e.message);
+      } finally {
+        this._release();
+        this.pendingCount--;
       }
-    }
-    this.processing = false;
+    });
+    this.tails.set(key, run);
+    run.then(() => { if (this.tails.get(key) === run) this.tails.delete(key); });
   }
-  get size() { return this.queue.length; }
+  get size() { return this.pendingCount; }
 }
-const msgQueue = new MessageQueue();
+const msgQueue = new MessageQueue(4);
 
 // ─── Auth Middleware ───
 const auth = (req, res, next) => {
@@ -496,8 +508,9 @@ wa.on('message_failed', async ({ id, reason }) => {
 wa.on('message', (msg) => {
   msgQueue.add(async () => {
     try {
-      // Marca como lido (simula comportamento humano)
-      if (msg.id) await wa.markAsRead(msg.id, msg.phone);
+      // Marca como lido (simula comportamento humano) — sem await: é só cosmético
+      // (✓✓ azul) e o round-trip à Meta não pode segurar a fila em pico
+      if (msg.id) wa.markAsRead(msg.id, msg.phone);
 
       // Busca ou cria conversa para este telefone
       let conv = await queryOne("SELECT * FROM conversations WHERE phone = $1 AND status != 'finalizado' ORDER BY started_at DESC LIMIT 1", [msg.phone]);
@@ -639,7 +652,7 @@ wa.on('message', (msg) => {
     } catch (e) {
       console.error('❌ Erro ao processar mensagem:', e.message);
     }
-  });
+  }, msg.phone || '');
 });
 
 // ═══════════════════════════════════
