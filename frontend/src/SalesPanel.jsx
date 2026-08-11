@@ -17,6 +17,13 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [cart, setCart] = useState([]);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [mobileTab, setMobileTab] = useState('produtos'); // 'produtos' | 'carrinho'
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const selectedStore = 'loja4'; // E-commerce fixo
   const [payment, setPayment] = useState('pix');
   const [discount, setDiscount] = useState('');
@@ -157,116 +164,97 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     );
   }
 
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-      {/* Header */}
-      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.brd}`, background: C.s1, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ fontSize: 16, fontWeight: 800, color: C.gold }}>🛒 Nova Venda</div>
-        <div style={{ flex: 1 }} />
-        {customer && <div style={{ fontSize: 11, color: C.grn, background: 'rgba(0,230,118,.1)', padding: '4px 10px', borderRadius: 6 }}>👤 {customer.name}</div>}
-        {customerPhone && <div style={{ fontSize: 11, color: C.dim }}>📱 {customerPhone.replace(/(\d{2})(\d{2})(\d{5})(\d{4})/, '+$1 ($2) $3-$4')}</div>}
-        <button style={btnOutline} onClick={onClose}>✕ Fechar</button>
+  // ─── SEÇÕES (compartilhadas entre desktop e mobile) ───
+  const searchSection = (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, borderRight: isMobile ? 'none' : `1px solid ${C.brd}` }}>
+      {/* Campo de busca */}
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.brd}` }}>
+        <input
+          style={{ ...inputStyle, marginBottom: 4 }}
+          placeholder="🔍 Buscar produto, SKU ou código..."
+          value={search}
+          onChange={e => doSearch(e.target.value)}
+          autoFocus={!isMobile}
+        />
+        <div style={{ fontSize: 10, color: C.dim }}>📍 D'Black E-commerce</div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* Resultados */}
+      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: 8 }}>
+        {searching && <div style={{ padding: 20, textAlign: 'center', color: C.dim, fontSize: 12 }}>Buscando...</div>}
 
-        {/* LADO ESQUERDO — Busca de Produtos */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: `1px solid ${C.brd}` }}>
+        {!searching && results.length === 0 && search.length >= 2 && (
+          <div style={{ padding: 20, textAlign: 'center', color: C.dim, fontSize: 12 }}>Nenhum produto encontrado</div>
+        )}
 
-          {/* Campo de busca */}
-          <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.brd}` }}>
-            <input
-              style={inputStyle}
-              placeholder="🔍 Buscar por SKU, nome ou código de barras..."
-              value={search}
-              onChange={e => doSearch(e.target.value)}
-              autoFocus
-            />
-            <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>📍 D'Black E-commerce</div>
-          </div>
+        {!searching && search.length < 2 && (
+          <div style={{ padding: 30, textAlign: 'center', color: C.dim, fontSize: 12 }}>Digite pelo menos 2 caracteres para buscar</div>
+        )}
 
-          {/* Resultados */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-            {searching && <div style={{ padding: 20, textAlign: 'center', color: C.dim, fontSize: 12 }}>Buscando...</div>}
-
-            {!searching && results.length === 0 && search.length >= 2 && (
-              <div style={{ padding: 20, textAlign: 'center', color: C.dim, fontSize: 12 }}>Nenhum produto encontrado</div>
-            )}
-
-            {!searching && search.length < 2 && (
-              <div style={{ padding: 30, textAlign: 'center', color: C.dim, fontSize: 12 }}>Digite pelo menos 2 caracteres para buscar</div>
-            )}
-
-            {results.map(p => (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.brd}`, marginBottom: 6, background: C.s2, cursor: 'pointer', transition: 'border-color .15s' }}
-                onClick={() => addToCart(p)}
-                onMouseOver={e => e.currentTarget.style.borderColor = C.gold}
-                onMouseOut={e => e.currentTarget.style.borderColor = 'rgba(255,215,64,0.08)'}
-              >
-                {/* Foto */}
-                <div style={{ width: 48, height: 48, borderRadius: 6, background: C.s3, overflow: 'hidden', flexShrink: 0 }}>
-                  {p.photo_url
-                    ? <img src={p.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: C.dim }}>📦</div>
-                  }
-                </div>
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                  <div style={{ fontSize: 10, color: C.dim }}>
-                    SKU: {p.sku || '-'} {p.size ? `| Tam: ${p.size}` : ''} {p.color ? `| Cor: ${p.color}` : ''}
-                  </div>
-                </div>
-                {/* Preço e estoque */}
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontWeight: 800, fontSize: 14, color: C.grn }}>R$ {parseFloat(p.price).toFixed(2)}</div>
-                  <div style={{ fontSize: 10, color: parseInt(p.total_stock) > 0 ? C.dim : C.red }}>
-                    Est: {p.total_stock}
-                  </div>
-                </div>
-                {/* Botão adicionar */}
-                <button style={{ ...btnOutline, padding: '6px 10px', fontSize: 16, border: `1px solid ${C.wa}`, color: C.wa }} onClick={(e) => { e.stopPropagation(); addToCart(p); }}>+</button>
+        {results.map(p => (
+          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px', borderRadius: 8, border: `1px solid ${C.brd}`, marginBottom: 6, background: C.s2, cursor: 'pointer', transition: 'border-color .15s' }}
+            onClick={() => addToCart(p)}
+            onMouseOver={e => e.currentTarget.style.borderColor = C.gold}
+            onMouseOut={e => e.currentTarget.style.borderColor = 'rgba(255,215,64,0.08)'}
+          >
+            {/* Foto */}
+            <div style={{ width: 48, height: 48, borderRadius: 6, background: C.s3, overflow: 'hidden', flexShrink: 0 }}>
+              {p.photo_url
+                ? <img src={p.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: C.dim }}>📦</div>
+              }
+            </div>
+            {/* Info */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+              <div style={{ fontSize: 10, color: C.dim }}>
+                SKU: {p.sku || '-'} {p.size ? `| Tam: ${p.size}` : ''} {p.color ? `| Cor: ${p.color}` : ''}
               </div>
-            ))}
+            </div>
+            {/* Preço e estoque */}
+            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, color: C.grn }}>R$ {parseFloat(p.price).toFixed(2)}</div>
+              <div style={{ fontSize: 10, color: parseInt(p.total_stock) > 0 ? C.dim : C.red }}>
+                Est: {p.total_stock}
+              </div>
+            </div>
+            {/* Botão adicionar */}
+            <button style={{ ...btnOutline, padding: '10px 14px', fontSize: 18, border: `1px solid ${C.wa}`, color: C.wa, flexShrink: 0 }} onClick={(e) => { e.stopPropagation(); addToCart(p); }}>+</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const cartItemsSection = (
+    <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: 8, minHeight: 0 }}>
+      {cart.length === 0 && (
+        <div style={{ padding: 30, textAlign: 'center', color: C.dim, fontSize: 12 }}>Carrinho vazio — {isMobile ? 'busque um produto na aba Produtos' : 'clique em um produto para adicionar'}</div>
+      )}
+
+      {cart.map(item => (
+        <div key={item.product_id} style={{ padding: '10px', borderRadius: 8, border: `1px solid ${C.brd}`, marginBottom: 6, background: C.s2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
+              <div style={{ fontSize: 10, color: C.dim }}>R$ {item.price.toFixed(2)} cada</div>
+            </div>
+            <button style={{ ...btnMini, padding: '6px 12px' }} onClick={() => removeFromCart(item.product_id)}>🗑</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+            <button style={{ ...btnMini, padding: '6px 14px', fontSize: 16 }} onClick={() => updateQty(item.product_id, item.quantity - 1)}>−</button>
+            <span style={{ fontSize: 15, fontWeight: 800, minWidth: 24, textAlign: 'center' }}>{item.quantity}</span>
+            <button style={{ ...btnMini, padding: '6px 14px', fontSize: 16 }} onClick={() => updateQty(item.product_id, item.quantity + 1)}>+</button>
+            <div style={{ flex: 1 }} />
+            <span style={{ fontWeight: 800, fontSize: 13, color: C.grn }}>R$ {(item.price * item.quantity).toFixed(2)}</span>
           </div>
         </div>
+      ))}
+    </div>
+  );
 
-        {/* LADO DIREITO — Carrinho */}
-        <div style={{ width: 320, display: 'flex', flexDirection: 'column', background: C.s1 }}>
-
-          <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.brd}`, fontWeight: 700, fontSize: 13, color: C.gold }}>
-            🛒 Carrinho ({cart.length} {cart.length === 1 ? 'item' : 'itens'})
-          </div>
-
-          {/* Itens do carrinho */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-            {cart.length === 0 && (
-              <div style={{ padding: 30, textAlign: 'center', color: C.dim, fontSize: 12 }}>Carrinho vazio — clique em um produto para adicionar</div>
-            )}
-
-            {cart.map(item => (
-              <div key={item.product_id} style={{ padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.brd}`, marginBottom: 6, background: C.s2 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
-                    <div style={{ fontSize: 10, color: C.dim }}>R$ {item.price.toFixed(2)} cada</div>
-                  </div>
-                  <button style={btnMini} onClick={() => removeFromCart(item.product_id)}>🗑</button>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                  <button style={btnMini} onClick={() => updateQty(item.product_id, item.quantity - 1)}>−</button>
-                  <span style={{ fontSize: 14, fontWeight: 800, minWidth: 24, textAlign: 'center' }}>{item.quantity}</span>
-                  <button style={btnMini} onClick={() => updateQty(item.product_id, item.quantity + 1)}>+</button>
-                  <div style={{ flex: 1 }} />
-                  <span style={{ fontWeight: 800, fontSize: 13, color: C.grn }}>R$ {(item.price * item.quantity).toFixed(2)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Totais e pagamento */}
-          <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.brd}`, background: C.s2 }}>
+  const checkoutSection = (
+          <div style={{ padding: '10px 14px', paddingBottom: 'calc(10px + env(safe-area-inset-bottom))', borderTop: `1px solid ${C.brd}`, background: C.s2, flexShrink: 0 }}>
 
             {/* Desconto */}
             <div style={{ marginBottom: 8 }}>
@@ -369,8 +357,59 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
               {finishing ? '⏳ Finalizando...' : '✅ Finalizar Venda'}
             </button>
           </div>
+  );
+
+  // ─── LAYOUT ───
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+
+      {/* Header */}
+      <div style={{ padding: 'calc(10px + env(safe-area-inset-top)) 12px 10px', borderBottom: `1px solid ${C.brd}`, background: C.s1, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: C.gold, whiteSpace: 'nowrap', flexShrink: 0 }}>🛒 Nova Venda</div>
+        <div style={{ flex: 1, minWidth: 0, textAlign: 'right', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+          {customer
+            ? <span style={{ fontSize: 11, color: C.grn, background: 'rgba(0,230,118,.1)', padding: '4px 10px', borderRadius: 6 }}>👤 {customer.name}</span>
+            : (!isMobile && customerPhone && <span style={{ fontSize: 11, color: C.dim }}>📱 {customerPhone.replace(/(\d{2})(\d{2})(\d{5})(\d{4})/, '+$1 ($2) $3-$4')}</span>)}
         </div>
+        <button style={{ ...btnOutline, padding: '8px 14px', fontSize: 12, flexShrink: 0 }} onClick={onClose}>✕ Fechar</button>
       </div>
+
+      {isMobile ? (
+        <>
+          {/* Abas Produtos | Carrinho */}
+          <div style={{ display: 'flex', background: C.s1, borderBottom: `1px solid ${C.brd}`, flexShrink: 0 }}>
+            {[
+              { id: 'produtos', label: '🔍 Produtos' },
+              { id: 'carrinho', label: `🛒 Carrinho${cart.length ? ` (${cart.length})` : ''} — R$ ${total.toFixed(2)}` },
+            ].map(t => (
+              <button key={t.id} onClick={() => setMobileTab(t.id)}
+                style={{ flex: 1, padding: '13px 6px', background: 'transparent', border: 'none',
+                  borderBottom: mobileTab === t.id ? `2px solid ${C.gold}` : '2px solid transparent',
+                  color: mobileTab === t.id ? C.gold : C.dim, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                  fontFamily: 'inherit', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {mobileTab === 'produtos' ? searchSection : (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, background: C.s1 }}>
+              {cartItemsSection}
+              {checkoutSection}
+            </div>
+          )}
+        </>
+      ) : (
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          {searchSection}
+          <div style={{ width: 320, display: 'flex', flexDirection: 'column', background: C.s1, flexShrink: 0 }}>
+            <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.brd}`, fontWeight: 700, fontSize: 13, color: C.gold }}>
+              🛒 Carrinho ({cart.length} {cart.length === 1 ? 'item' : 'itens'})
+            </div>
+            {cartItemsSection}
+            {checkoutSection}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
