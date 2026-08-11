@@ -80,22 +80,6 @@ export default function Settings() {
         <p style={{ fontSize: 11, color: W.txt2 }}>Use {'{nome}'} para inserir o nome do cliente</p>
       </div>
 
-      {/* Finalização Automática */}
-      <div style={cardStyle}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>⏱️ Finalização Automática</h3>
-        <label style={labelStyle}>
-          <input type="checkbox" checked={settings.autofinish_enabled !== 'false'} onChange={e => set('autofinish_enabled', e.target.checked ? 'true' : 'false')} />
-          <span style={{ marginLeft: 8 }}>Finalizar sozinho quando o cliente não responde</span>
-        </label>
-        <p style={{ fontSize: 11, color: W.txt2, marginBottom: 8 }}>O cronômetro começa na última mensagem do atendente. Se o cliente não responder no tempo abaixo, o sistema envia a mensagem de encerramento e finaliza o atendimento. Se o cliente escrever depois, a conversa reabre normalmente.</p>
-        <label style={labelStyle}>Minutos de espera</label>
-        <input type="number" min="1" style={{ ...inputStyle, width: 120 }} value={settings.autofinish_minutes || '15'} onChange={e => set('autofinish_minutes', e.target.value)} />
-        <label style={labelStyle}>Mensagem de encerramento</label>
-        <textarea style={{ ...inputStyle, height: 100, resize: 'vertical' }} value={settings.autofinish_text || ''} onChange={e => set('autofinish_text', e.target.value)}
-          placeholder={"Como não tivemos sua resposta, vamos finalizar este atendimento por aqui, tá bom? 😊\n\nQualquer coisa é só mandar mensagem que a gente continua te atendendo! 🖤 D'Black Store"} />
-        <p style={{ fontSize: 11, color: W.txt2 }}>Deixe em branco para usar a mensagem padrão acima</p>
-      </div>
-
       {/* Dados da Empresa */}
       <div style={cardStyle}>
         <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>🏪 Dados da Empresa</h3>
