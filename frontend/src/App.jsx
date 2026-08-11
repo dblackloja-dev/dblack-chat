@@ -385,7 +385,7 @@ export default function App() {
   // ─── ACTIONS ───
   const openConversation = async (conv) => {
     setActiveConv(conv); setSpyConv(null); setShowSales(false); setShowAdmin(false); setShowHistory(false); setShowMsgSearch(false);
-    setShowHeaderMenu(false); setShowAttachSheet(false);
+    setShowHeaderMenu(false); setShowAttachSheet(false); setReplyTo(null);
     if (isMobile) setMobileView('chat');
     await loadMessages(conv.id);
     loadTags(conv.id);
@@ -397,7 +397,7 @@ export default function App() {
     }
   };
 
-  const goBackToList = () => { setMobileView('list'); setActiveConv(null); setSpyConv(null); setShowSales(false); setShowCustomerPanel(false); setShowHeaderMenu(false); setShowAttachSheet(false); };
+  const goBackToList = () => { setMobileView('list'); setActiveConv(null); setSpyConv(null); setShowSales(false); setShowCustomerPanel(false); setShowHeaderMenu(false); setShowAttachSheet(false); setReplyTo(null); };
   const spyConversation = async (conv) => { setSpyConv(conv); setActiveConv(null); if (isMobile) setMobileView('chat'); try { setSpyMsgs(await api.getMessages(conv.id)); } catch {} };
   const acceptConversation = async (convId) => { try { const conv = await api.acceptConversation(convId); setConversations(prev => prev.map(c => c.id === convId ? conv : c)); setSpyConv(null); setActiveConv(conv); if (isMobile) setMobileView('chat'); await loadMessages(convId); setTab('atendendo'); } catch {} };
   const finishConversation = async (convId) => { if (!confirm('Finalizar este atendimento?')) return; try { await api.finishConversation(convId); if (activeConv?.id === convId) { setActiveConv(null); setMessages([]); } await loadConversations(); } catch {} };
@@ -416,7 +416,8 @@ export default function App() {
           setTab('atendendo');
         } catch {}
       }
-      await api.sendMessage({ conversation_id: activeConv.id, content: text });
+      await api.sendMessage({ conversation_id: activeConv.id, content: text, reply_to: replyTo?.id || null });
+      setReplyTo(null);
       // Se tinha imagem de resposta rápida pendente, envia junto
       if (pendingQuickReply?.has_image) {
         try {
@@ -432,6 +433,8 @@ export default function App() {
     } catch { setMsgInput(text); }
   };
   const [pendingQuickReply, setPendingQuickReply] = useState(null); // guarda a QR selecionada (pra enviar imagem junto)
+  const [replyTo, setReplyTo] = useState(null); // mensagem citada (estilo responder do WhatsApp)
+  const startReply = (m) => { setReplyTo(m); if (!isMobile) textareaRef.current?.focus(); };
 
   const selectQuickReply = (qr) => {
     setMsgInput(qr.text);
@@ -865,7 +868,7 @@ export default function App() {
 
               {/* Messages */}
               <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', ...chatBg, minHeight: 0 }}>
-                {messages.map((msg, i) => <MessageBubble key={msg.id} msg={msg} tail={i === 0 || fromMe(messages[i - 1]) !== fromMe(msg)} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onReengage={() => api.sendReengageTemplate(activeConv.id)} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+                {messages.map((msg, i) => <MessageBubble key={msg.id} msg={msg} tail={i === 0 || fromMe(messages[i - 1]) !== fromMe(msg)} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onReply={startReply} onReengage={() => api.sendReengageTemplate(activeConv.id)} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -916,7 +919,18 @@ export default function App() {
                     </button>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, padding: '6px 8px', paddingBottom: 'calc(6px + env(safe-area-inset-bottom))', background: W.bgHeader, flexShrink: 0, position: 'relative' }}>
+                  <div style={{ background: W.bgHeader, flexShrink: 0 }}>
+                  {/* Prévia da mensagem sendo respondida (estilo WhatsApp) */}
+                  {replyTo && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px 0' }}>
+                      <div style={{ flex: 1, minWidth: 0, background: 'rgba(11,20,26,.06)', borderLeft: '4px solid #1fa855', borderRadius: 8, padding: '6px 10px' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#1fa855' }}>{fromMe(replyTo) ? (replyTo.sender || "D'Black") : (replyTo.sender || 'Cliente')}</div>
+                        <div style={{ fontSize: 12.5, color: '#667781', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quoteSnippet(replyTo)}</div>
+                      </div>
+                      <button style={iconBtn} onClick={() => setReplyTo(null)} title="Cancelar resposta">✕</button>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, padding: '6px 8px', paddingBottom: 'calc(6px + env(safe-area-inset-bottom))', position: 'relative' }}>
                     {/* Menu de anexos (estilo WhatsApp) */}
                     {showAttachSheet && <>
                       <div onClick={() => setShowAttachSheet(false)} style={{ position: 'fixed', inset: 0, zIndex: 59 }} />
@@ -983,6 +997,7 @@ export default function App() {
                         {sendingAudio ? <span>⏳</span> : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>}
                       </button>
                     )}
+                  </div>
                   </div>
                 )
               )}
@@ -1129,24 +1144,44 @@ function quoteSnippet(m) {
   return t.length > 90 ? t.slice(0, 90) + '…' : t;
 }
 
-function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, isAdmin, onReengage, tail = true }) {
+function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, onReply, isAdmin, onReengage, tail = true }) {
   const isMe = msg.from_me === true || msg.from_me === 'true';
   const [showMenu, setShowMenu] = useState(false);
   const [reengaging, setReengaging] = useState(false);
+  const [dragX, setDragX] = useState(0);
+  const touchRef = useRef(null);
   const isDeleted = msg.content === '🚫 Mensagem apagada';
   const canDelete = isAdmin || isMe;
+  const canReply = !!onReply && !isDeleted;
   const quotedThumb = quoted?.media_type === 'image' && (quoted.media_url || quoted.content?.startsWith('/media/'))
     ? mediaUrl(quoted.media_url || quoted.content.split('|')[0]) : null;
+  // Arrastar a bolha pra direita = responder (gesto do WhatsApp no celular)
+  const onTouchStart = e => { if (canReply) touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, fired: false }; };
+  const onTouchMove = e => {
+    const t = touchRef.current; if (!t) return;
+    const dx = e.touches[0].clientX - t.x, dy = e.touches[0].clientY - t.y;
+    if (Math.abs(dy) > 30 && dx < 30) { touchRef.current = null; setDragX(0); return; }
+    if (dx > 0) setDragX(Math.min(dx, 64));
+    if (dx > 56 && !t.fired) { t.fired = true; onReply(msg); if (navigator.vibrate) navigator.vibrate(15); }
+  };
+  const onTouchEnd = () => { touchRef.current = null; setDragX(0); };
   return (
     <div id={'msg-' + msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 2, marginTop: tail ? 10 : 0,
       background: highlight ? 'rgba(0,168,132,.22)' : 'transparent', transition: 'background .5s', borderRadius: 8 }}
-      onMouseEnter={() => canDelete && !isDeleted && setShowMenu(true)} onMouseLeave={() => setShowMenu(false)}>
+      onMouseEnter={() => !isDeleted && setShowMenu(true)} onMouseLeave={() => setShowMenu(false)}
+      onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
+      {dragX > 0 && (
+        <span style={{ alignSelf: 'center', marginRight: 6, opacity: Math.min(dragX / 56, 1), flexShrink: 0, width: 28, height: 28, borderRadius: '50%', background: 'rgba(11,20,26,.25)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', order: isMe ? 0 : -1 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+        </span>
+      )}
       <div style={{
         maxWidth: '80%', padding: '6px 7px 8px 9px',
         borderRadius: tail ? (isMe ? '7.5px 0 7.5px 7.5px' : '0 7.5px 7.5px 7.5px') : '7.5px',
         background: isDeleted ? '#f0f0f0' : (isMe ? W.bgMsgMe : W.bgMsg),
         boxShadow: '0 1px .5px rgba(11,20,26,.13)',
         position: 'relative', overflow: 'visible', wordBreak: 'break-word',
+        transform: dragX ? `translateX(${dragX}px)` : 'none', transition: dragX ? 'none' : 'transform .15s',
       }}>
         {/* Rabinho da bolha (estilo WhatsApp) */}
         {tail && (isMe ? (
@@ -1159,9 +1194,20 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
           </svg>
         ))}
         {showMenu && (
-          <button onClick={() => { if (confirm('Apagar esta mensagem para todos?')) onDelete?.(msg.id); setShowMenu(false); }}
-            style={{ position: 'absolute', top: -8, right: -8, width: 24, height: 24, borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}
-            title="Apagar mensagem">🗑</button>
+          <div style={{ position: 'absolute', top: -8, right: -8, display: 'flex', gap: 4, zIndex: 5 }}>
+            {canReply && (
+              <button onClick={() => { onReply(msg); setShowMenu(false); }}
+                style={{ width: 24, height: 24, borderRadius: '50%', background: '#54656f', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Responder">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+              </button>
+            )}
+            {canDelete && (
+              <button onClick={() => { if (confirm('Apagar esta mensagem para todos?')) onDelete?.(msg.id); setShowMenu(false); }}
+                style={{ width: 24, height: 24, borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Apagar mensagem">🗑</button>
+            )}
+          </div>
         )}
         {!isMe && <div style={{ fontSize: 12.8, fontWeight: 700, color: '#1fa855', marginBottom: 2 }}>{msg.sender}</div>}
         {isMe && msg.sender && <div style={{ fontSize: 11, fontWeight: 600, color: '#667781', marginBottom: 2, textAlign: 'right' }}>{msg.sender}</div>}

@@ -830,20 +830,20 @@ app.post('/api/conversations/:conversationId/mark-unread', auth, async (req, res
 // Enviar mensagem (atendente → cliente via WhatsApp)
 app.post('/api/messages/send', auth, async (req, res) => {
   try {
-    const { conversation_id, content } = req.body;
+    const { conversation_id, content, reply_to } = req.body;
     if (!conversation_id || !content || !content.trim()) return res.status(400).json({ error: 'Conversa e conteúdo são obrigatórios' });
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
 
-    // Envia via WhatsApp com nome do atendente
+    // Envia via WhatsApp com nome do atendente (reply_to = wamid da msg citada)
     const waText = `*${req.user.name}:*\n${content}`;
-    const waResult = await wa.sendMessage(conv.phone, waText);
+    const waResult = await wa.sendMessage(conv.phone, waText, { replyTo: reply_to || null });
 
     // Usa o ID do WhatsApp para rastrear entrega/leitura (se disponível)
     const msgId = waResult?._waId || genId();
     await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW()) ON CONFLICT (id) DO NOTHING",
-      [msgId, conversation_id, req.user.name, content]
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, reply_to, ack, timestamp) VALUES ($1, $2, true, $3, $4, $5, 1, NOW()) ON CONFLICT (id) DO NOTHING",
+      [msgId, conversation_id, req.user.name, content, reply_to || null]
     );
 
     // Atualiza última mensagem
@@ -852,7 +852,7 @@ app.post('/api/messages/send', auth, async (req, res) => {
       [content, conversation_id]
     );
 
-    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content, ack: 1, timestamp: new Date().toISOString() };
+    const message = { id: msgId, conversation_id, from_me: true, sender: req.user.name, content, reply_to: reply_to || null, ack: 1, timestamp: new Date().toISOString() };
     broadcast('new_message', { conversation: { ...conv, last_message: content, last_message_from_me: true }, message });
     res.json(message);
   } catch (e) { res.status(500).json({ error: e.message }); }

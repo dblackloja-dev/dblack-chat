@@ -156,14 +156,23 @@ class WhatsAppMeta extends EventEmitter {
     } catch (e) { console.error('Erro ao marcar como lido:', e.message); }
   }
 
-  async sendMessage(phone, text, { isBot = false } = {}) {
+  async sendMessage(phone, text, { isBot = false, replyTo = null } = {}) {
     if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
     if (isBot) {
       await this.sendPresence(phone);
       await this.humanDelay();
     }
     this.trackSend();
-    return this._sendPayload({ to: this._digits(phone), type: 'text', text: { body: text, preview_url: true } });
+    const payload = { to: this._digits(phone), type: 'text', text: { body: text, preview_url: true } };
+    if (replyTo) {
+      try {
+        return await this._sendPayload({ ...payload, context: { message_id: replyTo } });
+      } catch (e) {
+        // wamid inválido/antigo demais faz a Meta recusar — melhor entregar sem citação do que sumir
+        console.error('⚠️ Envio com citação falhou, reenviando sem contexto:', e.message);
+      }
+    }
+    return this._sendPayload(payload);
   }
 
   // Sobe mídia pra Cloud API e retorna o media id
