@@ -360,7 +360,18 @@ export default function App() {
     };
   }, [user?.id]);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  // Auto-scroll pro fim SÓ se o usuário já está perto do fim (ou trocou de conversa).
+  // Sem isso, cada mensagem nova puxava a tela pra baixo enquanto a atendente lia o histórico.
+  const messagesBoxRef = useRef(null);
+  const lastScrollConvRef = useRef(null);
+  useEffect(() => {
+    const convId = activeConv?.id || null;
+    const isNewConv = lastScrollConvRef.current !== convId;
+    lastScrollConvRef.current = convId;
+    const box = messagesBoxRef.current;
+    const nearBottom = !box || (box.scrollHeight - box.scrollTop - box.clientHeight < 200);
+    if (isNewConv || nearBottom) messagesEndRef.current?.scrollIntoView({ behavior: isNewConv ? 'auto' : 'smooth' });
+  }, [messages]);
 
   // ─── BUSCA DE CONVERSAS NO SERVIDOR (acha antigas/finalizadas) ───
   useEffect(() => {
@@ -873,7 +884,7 @@ export default function App() {
               </div>}
 
               {/* Messages */}
-              <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', ...chatBg, minHeight: 0 }}>
+              <div ref={messagesBoxRef} style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', ...chatBg, minHeight: 0 }}>
                 {messages.map((msg, i) => <MessageBubble key={msg.id} msg={msg} tail={i === 0 || fromMe(messages[i - 1]) !== fromMe(msg)} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onReply={startReply} onReengage={() => api.sendReengageTemplate(activeConv.id)} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
                 <div ref={messagesEndRef} />
               </div>
@@ -1100,11 +1111,16 @@ export default function App() {
           cursor: 'pointer',
         }}>
           <button onClick={() => setExpandedImage(null)} style={{
-            position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,.15)',
-            border: 'none', color: '#fff', fontSize: 24, width: 40, height: 40, borderRadius: '50%',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            position: 'absolute', top: 'calc(16px + env(safe-area-inset-top))', right: 16, background: 'rgba(255,255,255,.25)',
+            border: 'none', color: '#fff', fontSize: 24, width: 44, height: 44, borderRadius: '50%',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2,
           }}>✕</button>
-          <img src={expandedImage} alt="" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8, objectFit: 'contain' }} onClick={e => e.stopPropagation()} />
+          <img src={expandedImage} alt="" style={{ maxWidth: '92vw', maxHeight: '78vh', borderRadius: 8, objectFit: 'contain' }} onClick={e => e.stopPropagation()} />
+          <button onClick={() => setExpandedImage(null)} style={{
+            position: 'absolute', bottom: 'calc(24px + env(safe-area-inset-bottom))', left: '50%', transform: 'translateX(-50%)',
+            background: 'rgba(255,255,255,.25)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 600,
+            padding: '12px 28px', borderRadius: 24, cursor: 'pointer', fontFamily: 'inherit', zIndex: 2,
+          }}>✕ Fechar</button>
         </div>
       )}
     </div>
