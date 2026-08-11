@@ -16,7 +16,32 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [cart, setCart] = useState([]);
+  // Carrinho salvo por cliente no aparelho: sair da conversa (ou recarregar a
+  // página) não perde as peças. Expira em 24h pra não ressuscitar carrinho velho.
+  const cartKey = 'dblack_cart_' + String(customerPhone || 'sem_telefone').replace(/\D/g, '');
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(cartKey));
+      if (saved?.items?.length && Date.now() - (saved.t || 0) < 24 * 60 * 60 * 1000) return saved.items;
+    } catch {}
+    return [];
+  });
+  useEffect(() => {
+    try {
+      if (cart.length) localStorage.setItem(cartKey, JSON.stringify({ t: Date.now(), items: cart }));
+      else localStorage.removeItem(cartKey);
+    } catch {}
+  }, [cart, cartKey]);
+  useEffect(() => { // limpa carrinhos de outros clientes já vencidos (24h+)
+    try {
+      Object.keys(localStorage).filter(k => k.startsWith('dblack_cart_')).forEach(k => {
+        try {
+          const saved = JSON.parse(localStorage.getItem(k));
+          if (!saved?.items?.length || Date.now() - (saved.t || 0) >= 24 * 60 * 60 * 1000) localStorage.removeItem(k);
+        } catch { localStorage.removeItem(k); }
+      });
+    } catch {}
+  }, []);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [mobileTab, setMobileTab] = useState('produtos'); // 'produtos' | 'carrinho'
   useEffect(() => {
