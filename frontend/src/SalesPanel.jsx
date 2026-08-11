@@ -45,19 +45,22 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     }
   }, [customerPhone]);
 
-  // Busca com debounce
+  // Busca com debounce; searchSeq descarta respostas atrasadas de buscas antigas
+  const searchSeq = useRef(0);
   const doSearch = (term) => {
     setSearch(term);
     clearTimeout(searchTimeout.current);
-    if (term.length < 2) { setResults([]); return; }
+    if (term.length < 2) { setResults([]); setSearching(false); return; }
     setSearching(true);
     searchTimeout.current = setTimeout(async () => {
+      const seq = ++searchSeq.current;
       try {
         const prods = await api.searchProducts(term);
+        if (seq !== searchSeq.current) return;
         setResults(prods);
-      } catch { setResults([]); }
-      setSearching(false);
-    }, 400);
+      } catch { if (seq === searchSeq.current) setResults([]); }
+      if (seq === searchSeq.current) setSearching(false);
+    }, 250);
   };
 
   // Adicionar ao carrinho
@@ -149,7 +152,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   // Se a venda foi finalizada com sucesso
   if (saleResult) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 30, paddingBottom: 'calc(30px + env(safe-area-inset-bottom))' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 30, paddingBottom: 'calc(30px + env(safe-area-inset-bottom))', color: C.txt }}>
         <div style={{ fontSize: 48 }}>✅</div>
         <div style={{ fontSize: 20, fontWeight: 800, color: C.grn }}>Venda Finalizada!</div>
         <div style={{ fontSize: 14, color: C.dim }}>Total: <strong style={{ color: C.txt }}>R$ {saleResult.total.toFixed(2)}</strong></div>
@@ -350,7 +353,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
 
   // ─── LAYOUT ───
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, color: C.txt }}>
 
       {/* Header */}
       <div style={{ padding: 'calc(10px + env(safe-area-inset-top)) 12px 10px', borderBottom: `1px solid ${C.brd}`, background: C.s1, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>

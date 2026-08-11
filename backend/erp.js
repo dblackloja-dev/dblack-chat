@@ -6,9 +6,13 @@ const erpPool = new Pool({
   connectionString: process.env.ERP_DATABASE_URL,
   ssl: { rejectUnauthorized: false },
   max: 3,
-  idleTimeoutMillis: 10000,
+  idleTimeoutMillis: 300000, // 5 min — evita reconectar (handshake TLS ~1-3s) a cada busca
   connectionTimeoutMillis: 10000,
+  keepAlive: true,
 });
+
+// Mantém uma conexão quente — sem isso toda busca de produto pagava o custo de reconectar
+setInterval(() => { erpPool.query('SELECT 1').catch(() => {}); }, 60000).unref();
 
 async function erpQueryWithRetry(text, params = [], retries = 2) {
   for (let i = 0; i <= retries; i++) {
