@@ -31,11 +31,13 @@ const erpQueryOne = async (text, params = []) => ((await erpQueryWithRetry(text,
 const erpRun = async (text, params = []) => erpQueryWithRetry(text, params);
 
 // Busca produtos por SKU, nome ou EAN
+// SEM p.photo: as fotos são base64 de ~4-5MB cada no banco — 20 resultados
+// viravam ~60MB de resposta e travavam a busca no celular das vendedoras
 async function searchProducts(term) {
   const like = `%${term}%`;
   return erpQuery(
     `SELECT p.id, p.sku, p.name, p.brand, p.category, p.size, p.color,
-            p.price, p.cost, p.ean, p.ref, p.photo,
+            p.price, p.cost, p.ean, p.ref,
             COALESCE(SUM(s.quantity), 0) AS total_stock
      FROM products p
      LEFT JOIN stock s ON s.product_id = p.id

@@ -76,7 +76,6 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         sku: product.sku,
         price: parseFloat(product.price),
         quantity: 1,
-        photo_url: product.photo_url,
         total_stock: parseInt(product.total_stock),
       }];
     });
@@ -200,14 +199,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
             onMouseOver={e => e.currentTarget.style.borderColor = C.gold}
             onMouseOut={e => e.currentTarget.style.borderColor = 'rgba(255,215,64,0.08)'}
           >
-            {/* Foto */}
-            <div style={{ width: 48, height: 48, borderRadius: 6, background: C.s3, overflow: 'hidden', flexShrink: 0 }}>
-              {p.photo_url
-                ? <img src={p.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, color: C.dim }}>📦</div>
-              }
-            </div>
-            {/* Info */}
+            {/* Info (sem foto — busca leve e rápida) */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
               <div style={{ fontSize: 10, color: C.dim }}>

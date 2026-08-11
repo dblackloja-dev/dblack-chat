@@ -1673,14 +1673,8 @@ app.get('/api/erp/products', auth, async (req, res) => {
   try {
     const { q } = req.query;
     if (!q || q.length < 2) return res.json([]);
+    // Sem foto: base64 de MBs por produto deixava a busca lenta demais no celular
     const products = await erp.searchProducts(q);
-    // Monta URL da foto — se já for URL completa, usa direto; senão, adiciona prefixo
-    const uploadsUrl = process.env.ERP_UPLOADS_URL || '';
-    products.forEach(p => {
-      if (p.photo) {
-        p.photo_url = p.photo.startsWith('http') ? p.photo : `${uploadsUrl}/${p.photo}`;
-      }
-    });
     res.json(products);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
