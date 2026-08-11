@@ -433,6 +433,12 @@ export default function App() {
     } catch { setMsgInput(text); }
   };
   const [pendingQuickReply, setPendingQuickReply] = useState(null); // guarda a QR selecionada (pra enviar imagem junto)
+  // Cronômetro de pagamento: dispara o prazo de 15 min pro cliente fazer o Pix
+  const startPixTimer = async () => {
+    if (!activeConv) return;
+    if (!confirm('Enviar cronômetro de 15 minutos pro cliente fazer o Pix?')) return;
+    try { await api.startPaymentTimer(activeConv.id, 15); } catch (e) { alert('Erro ao disparar cronômetro: ' + e.message); }
+  };
   const [replyTo, setReplyTo] = useState(null); // mensagem citada (estilo responder do WhatsApp)
   const startReply = (m) => { setReplyTo(m); if (!isMobile) textareaRef.current?.focus(); };
 
@@ -941,6 +947,7 @@ export default function App() {
                           { label: 'Vídeo', emoji: '🎥', color: '#e67e22', fn: () => !sendingVideo && videoInputRef.current?.click() },
                           { label: 'Documento', emoji: '📄', color: '#5157ae', fn: () => !sendingFile && fileAttachRef.current?.click() },
                           { label: 'Resposta rápida', emoji: '⚡', color: '#1fa855', fn: () => setShowQuickReplies(true) },
+                          { label: 'Prazo Pix 15min', emoji: '⏰', color: '#f0a500', fn: startPixTimer },
                         ].map(item => (
                           <button key={item.label} onClick={() => { setShowAttachSheet(false); item.fn(); }}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: 0 }}>

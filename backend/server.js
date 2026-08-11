@@ -565,6 +565,11 @@ wa.on('message', (msg) => {
         message: { id: msgId, conversation_id: conv.id, from_me: false, sender: msg.pushName || msg.phone, content: msg.content, media_type: msg.mediaType, media_url: msg.mediaUrl, reply_to: msg.replyTo || null, timestamp: msg.timestamp },
       });
 
+      // Comprovante (imagem/documento) cancela o cronômetro de pagamento pendente
+      if ((msg.mediaType === 'image' || msg.mediaType === 'document') && cancelPaymentTimer(conv.id)) {
+        console.log(`⏰ Cronômetro cancelado — ${conv.phone} enviou comprovante`);
+      }
+
       // ─── LISTA VIP (Agosto Imbatível) ───
       // Roda APÓS a mensagem estar salva (fica registrada mesmo se o VIP falhar).
       // Bot em paralelo, como a saudação: não muda status da conversa nem a fila.
@@ -781,6 +786,70 @@ app.post('/api/conversations/:id/transfer', auth, async (req, res) => {
     broadcast('conversation_updated', conv);
     res.json(conv);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Cronômetro de pagamento Pix ───
+// A atendente manda a chave Pix + valor e dispara o cronômetro: o cliente recebe
+// o prazo na hora, um lembrete faltando 5 min e o aviso de prazo encerrado.
+// Comprovante (imagem/documento) do cliente cancela os avisos pendentes.
+const paymentTimers = new Map(); // conversation_id → { timeouts, expiresAt }
+
+function cancelPaymentTimer(convId) {
+  const t = paymentTimers.get(convId);
+  if (!t) return false;
+  t.timeouts.forEach(clearTimeout);
+  paymentTimers.delete(convId);
+  return true;
+}
+
+// Mensagem de bot no meio do atendimento (não muda status nem fila)
+async function sendTimerMessage(convId, text) {
+  const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
+  if (!conv || conv.status === 'finalizado') return; // atendimento já fechou — não incomoda
+  let msgId = genId();
+  try {
+    const r = await wa.sendMessage(conv.phone, text);
+    msgId = r?._waId || msgId;
+  } catch (e) { console.error('⏰ Cronômetro: envio falhou para', conv.phone, ':', e.message); }
+  await queryRun(
+    "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW()) ON CONFLICT (id) DO NOTHING",
+    [msgId, convId, "D'Black Bot", text]);
+  await queryRun(
+    "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+    [text, convId]);
+  const updated = await queryOne("SELECT * FROM conversations WHERE id = $1", [convId]);
+  broadcast('new_message', { conversation: updated, message: { id: msgId, conversation_id: convId, from_me: true, sender: "D'Black Bot", content: text, ack: 1, timestamp: new Date().toISOString() } });
+}
+
+app.post('/api/conversations/:id/payment-timer', auth, async (req, res) => {
+  try {
+    const minutes = Math.min(120, Math.max(1, parseInt(req.body?.minutes, 10) || 15));
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [req.params.id]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    cancelPaymentTimer(conv.id); // disparar de novo reinicia o prazo
+    const deadline = new Date(Date.now() + minutes * 60000);
+    const hhmm = deadline.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+    await sendTimerMessage(conv.id,
+      `⏰ *Cronômetro de reserva: ${minutes} minutos!*\n\nSuas peças ficam reservadas até *${hhmm}*. É só fazer o Pix dentro desse prazo e mandar o comprovante aqui, combinado? 😉🖤`);
+    const timeouts = [];
+    if (minutes > 7) {
+      timeouts.push(setTimeout(() => {
+        sendTimerMessage(conv.id, '⏳ *Faltam 5 minutinhos* pra garantir a sua reserva! Consegue fazer o Pix aí? Qualquer dúvida me chama 🖤').catch(console.error);
+      }, (minutes - 5) * 60000));
+    }
+    timeouts.push(setTimeout(() => {
+      paymentTimers.delete(conv.id);
+      sendTimerMessage(conv.id, `⏰ O prazo da reserva (${minutes} min) terminou!\n\nSe você já fez o Pix, é só mandar o comprovante aqui. Se precisar de mais um tempinho, fala com a gente que dá um jeito 😉🖤`).catch(console.error);
+      console.log(`⏰ Prazo de pagamento expirou sem comprovante: conversa ${conv.id} (${conv.phone})`);
+    }, minutes * 60000));
+    paymentTimers.set(conv.id, { timeouts, expiresAt: deadline.getTime() });
+    console.log(`⏰ ${req.user.name} disparou cronômetro de ${minutes} min para ${conv.phone}`);
+    res.json({ success: true, expires_at: deadline.toISOString() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/conversations/:id/payment-timer', auth, (req, res) => {
+  res.json({ canceled: cancelPaymentTimer(req.params.id) });
 });
 
 // Atualizar telefone real de conversa LID

@@ -57,6 +57,8 @@ const api = {
   finishConversation: (id) => request(`/conversations/${id}/finish`, { method: 'POST' }),
   transferConversation: (id) => request(`/conversations/${id}/transfer`, { method: 'POST' }),
   markUnread: (id) => request(`/conversations/${id}/mark-unread`, { method: 'POST' }),
+  startPaymentTimer: (id, minutes) => request(`/conversations/${id}/payment-timer`, { method: 'POST', body: { minutes } }),
+  cancelPaymentTimer: (id) => request(`/conversations/${id}/payment-timer`, { method: 'DELETE' }),
   searchConversations: (q) => request('/conversations/search?q=' + encodeURIComponent(q)),
 
   // Messages
