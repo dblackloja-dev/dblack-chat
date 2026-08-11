@@ -1918,4 +1918,44 @@ async function dailyMaintenance() {
 setTimeout(() => dailyMaintenance().catch(console.error), 5 * 60 * 1000);
 setInterval(() => dailyMaintenance().catch(console.error), 24 * 60 * 60 * 1000);
 
+// ─── Finalização automática: cronômetro após a última mensagem do atendente ───
+// Se o cliente não responde em N minutos (padrão 15), envia a mensagem de
+// encerramento e finaliza o atendimento sozinho. Cliente que escrever depois
+// reabre a conversa normalmente (lógica de reabertura já existente no webhook).
+const AUTOFINISH_DEFAULT_TEXT = "Como não tivemos sua resposta, vamos finalizar este atendimento por aqui, tá bom? 😊\n\nQualquer coisa é só mandar mensagem que a gente continua te atendendo! 🖤 *D'Black Store*";
+async function autoFinishIdle() {
+  try {
+    const s = {};
+    (await queryAll("SELECT key, value FROM chat_settings WHERE key IN ('autofinish_enabled','autofinish_minutes','autofinish_text')")).forEach(r => { s[r.key] = r.value; });
+    if (s.autofinish_enabled === 'false') return; // ligado por padrão
+    const minutes = Math.max(1, parseInt(s.autofinish_minutes, 10) || 15);
+    const text = (s.autofinish_text || '').trim() || AUTOFINISH_DEFAULT_TEXT;
+    // Só conversas esperando o CLIENTE (última mensagem é do atendente) há N+ min.
+    // LIMIT baixo: o job roda a cada minuto, então acúmulos são drenados aos poucos.
+    const convs = await queryAll(
+      `SELECT * FROM conversations
+       WHERE status = 'atendendo' AND last_message_from_me = true
+         AND last_message_at < NOW() - make_interval(mins => $1)
+       ORDER BY last_message_at ASC LIMIT 20`, [minutes]);
+    for (const conv of convs) {
+      let msgId = genId();
+      try {
+        const waResult = await wa.sendMessage(conv.phone, text);
+        msgId = waResult?._waId || msgId;
+      } catch (e) { console.error(`⏱️ Auto-finalizar: envio falhou para ${conv.phone}:`, e.message); }
+      await queryRun(
+        "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW()) ON CONFLICT (id) DO NOTHING",
+        [msgId, conv.id, "D'Black Bot", text]);
+      await queryRun(
+        "UPDATE conversations SET status = 'finalizado', finished_at = NOW(), finished_by = $1, last_message = $2, last_message_at = NOW(), last_message_from_me = true WHERE id = $3",
+        [`auto (${minutes} min sem resposta)`, text, conv.id]);
+      const updated = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
+      broadcast('new_message', { conversation: updated, message: { id: msgId, conversation_id: conv.id, from_me: true, sender: "D'Black Bot", content: text, ack: 1, timestamp: new Date().toISOString() } });
+      broadcast('conversation_updated', updated);
+      console.log(`⏱️ Atendimento ${conv.id} (${conv.phone}) finalizado automaticamente após ${minutes} min sem resposta do cliente`);
+    }
+  } catch (e) { console.error('⏱️ Job de finalização automática falhou:', e.message); }
+}
+setInterval(() => autoFinishIdle().catch(console.error), 60 * 1000);
+
 start().catch(console.error);
