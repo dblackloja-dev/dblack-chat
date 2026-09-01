@@ -1731,6 +1731,30 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       discount_label: discount_label || '',
     });
 
+    // Registra na fila de embalagem do dblack-entregas (fire-and-forget:
+    // falha aqui não pode derrubar a venda)
+    const entregasUrl = process.env.ENTREGAS_URL || 'https://dblack-entregas-production.up.railway.app';
+    fetch(`${entregasUrl}/api/embalagem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        numero_pedido: sale.cupom,
+        cliente_nome: customerDisplayName,
+        cliente_telefone: customer_phone || null,
+        itens: items.map(i => ({
+          nome: i.name || i.product_name || i.description || 'Peça',
+          quantidade: i.quantity || 1,
+          tamanho: i.size || null,
+          cor: i.color || null,
+        })),
+        valor_total: sale.total,
+        vendedora: req.user.name,
+        origem: 'chat',
+      }),
+    }).then(r => {
+      if (!r.ok) console.error(`[Embalagem] dblack-entregas respondeu ${r.status} para venda ${sale.cupom}`);
+    }).catch(err => console.error('[Embalagem] Falha ao registrar venda', sale.cupom, '-', err.message));
+
     // Gera cupom como imagem e texto
     const receiptBuffer = generateReceiptImage(sale, req.user.name, customerDisplayName);
     const receiptText = generateReceiptText(sale, req.user.name, customerDisplayName);
