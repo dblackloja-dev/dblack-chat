@@ -365,7 +365,8 @@ app.post('/api/webhook/asaas', async (req, res) => {
         if (tipoEntrega === 'entrega') {
           formMsg = `📋 Para finalizarmos a entrega, preencha o formulário com seu endereço:\n\nhttps://dblack-entregas.vercel.app/formulario\n\nAssim que preenchermos, enviaremos sua encomenda! 🚚`;
         } else {
-          formMsg = `📋 Para agilizar sua retirada, preencha o formulário abaixo:\n\nhttps://dblack-entregas.vercel.app/retirada\n\nAssim que estiver pronto, avisaremos você! 🏪`;
+          // Formulário /retirada desativado 02/09 — o código agora é gerado na venda
+          formMsg = `🏪 Sua compra já está sendo preparada para retirada!\n\nEm instantes enviaremos o código de retirada por aqui. É só apresentar no caixa da loja. 🖤`;
         }
         await wa.sendMessage(pending.customer_phone, formMsg, { isBot: true });
         const formMsgId = genId();
@@ -1731,29 +1732,60 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       discount_label: discount_label || '',
     });
 
-    // Registra na fila de embalagem do dblack-entregas (fire-and-forget:
-    // falha aqui não pode derrubar a venda)
+    // Registra no dblack-entregas conforme o tipo escolhido pelo vendedor.
+    // Retirada: cria o pedido de retirada direto (gera o código, sem formulário
+    // do cliente) — precisa aguardar a resposta para enviar o código no WhatsApp.
+    // Entrega: fila de embalagem como antes (fire-and-forget: falha aqui não
+    // pode derrubar a venda). Sem tipo (app antigo em cache): cai na embalagem.
     const entregasUrl = process.env.ENTREGAS_URL || 'https://dblack-entregas-production.up.railway.app';
-    fetch(`${entregasUrl}/api/embalagem`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        numero_pedido: sale.cupom,
-        cliente_nome: customerDisplayName,
-        cliente_telefone: customer_phone || null,
-        itens: items.map(i => ({
-          nome: i.name || i.product_name || i.description || 'Peça',
-          quantidade: i.quantity || 1,
-          tamanho: i.size || null,
-          cor: i.color || null,
-        })),
-        valor_total: sale.total,
-        vendedora: req.user.name,
-        origem: 'chat',
-      }),
-    }).then(r => {
-      if (!r.ok) console.error(`[Embalagem] dblack-entregas respondeu ${r.status} para venda ${sale.cupom}`);
-    }).catch(err => console.error('[Embalagem] Falha ao registrar venda', sale.cupom, '-', err.message));
+    const tipoEntrega = req.body.tipo_entrega === 'retirada' ? 'retirada' : 'entrega';
+    const lojaRetirada = req.body.loja_retirada || null;
+    const itensEntregas = items.map(i => ({
+      nome: i.name || i.product_name || i.description || 'Peça',
+      quantidade: i.quantity || 1,
+      tamanho: i.size || null,
+      cor: i.color || null,
+    }));
+
+    let codigoRetirada = null;
+    if (tipoEntrega === 'retirada' && lojaRetirada) {
+      try {
+        const r = await fetch(`${entregasUrl}/api/retirada/venda`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            numero_pedido: sale.cupom,
+            cliente_nome: customerDisplayName,
+            cliente_telefone: customer_phone || null,
+            loja: lojaRetirada,
+            itens: itensEntregas,
+            valor_total: sale.total,
+            vendedora: req.user.name,
+          }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.codigo) codigoRetirada = j.codigo;
+        else console.error(`[Retirada] dblack-entregas respondeu ${r.status} para venda ${sale.cupom}:`, j.erro || '');
+      } catch (err) {
+        console.error('[Retirada] Falha ao criar retirada da venda', sale.cupom, '-', err.message);
+      }
+    } else {
+      fetch(`${entregasUrl}/api/embalagem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          numero_pedido: sale.cupom,
+          cliente_nome: customerDisplayName,
+          cliente_telefone: customer_phone || null,
+          itens: itensEntregas,
+          valor_total: sale.total,
+          vendedora: req.user.name,
+          origem: 'chat',
+        }),
+      }).then(r => {
+        if (!r.ok) console.error(`[Embalagem] dblack-entregas respondeu ${r.status} para venda ${sale.cupom}`);
+      }).catch(err => console.error('[Embalagem] Falha ao registrar venda', sale.cupom, '-', err.message));
+    }
 
     // Gera cupom como imagem e texto
     const receiptBuffer = generateReceiptImage(sale, req.user.name, customerDisplayName);
@@ -1798,9 +1830,37 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       } catch (waErr) {
         console.error('Erro ao enviar cupom via WhatsApp:', waErr.message);
       }
+
+      // Retirada: envia o código pela própria conversa (a API oficial funciona;
+      // o WhatsApp do dblack-entregas está morto). Cliente não preenche nada.
+      if (codigoRetirada) {
+        try {
+          const primeiroNome = (customerDisplayName || 'Cliente').split(' ')[0];
+          const msgRetirada = `🏪 ${primeiroNome}, sua retirada está confirmada!\n\n📍 Loja: *${lojaRetirada}*\n🔑 Código de retirada: *${codigoRetirada}*\n\nApresente esse código no caixa quando for buscar. Avisaremos assim que estiver pronto! 🖤`;
+          await wa.sendMessage(customer_phone, msgRetirada);
+          if (conv) {
+            const rMsgId = genId();
+            await queryRun(
+              "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, $3, $4, 1, NOW())",
+              [rMsgId, conv.id, req.user.name, msgRetirada]
+            );
+            const displayRet = `🏪 Código de retirada ${codigoRetirada} — loja ${lojaRetirada}`;
+            await queryRun(
+              "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+              [displayRet, conv.id]
+            );
+            broadcast('new_message', {
+              conversation: { ...conv, last_message: displayRet, last_message_from_me: true },
+              message: { id: rMsgId, conversation_id: conv.id, from_me: true, sender: req.user.name, content: msgRetirada, timestamp: new Date().toISOString() },
+            });
+          }
+        } catch (retErr) {
+          console.error('Erro ao enviar código de retirada via WhatsApp:', retErr.message);
+        }
+      }
     }
 
-    res.json({ success: true, sale });
+    res.json({ success: true, sale, tipo_entrega: tipoEntrega, loja_retirada: lojaRetirada, codigo_retirada: codigoRetirada });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

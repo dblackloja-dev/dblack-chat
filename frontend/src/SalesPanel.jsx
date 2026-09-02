@@ -12,6 +12,8 @@ const payMethods = [
   { id: 'crediario', label: 'Crediário' },
 ];
 
+const lojasRetirada = ['Divino', 'São João', 'São Domingos'];
+
 export default function SalesPanel({ customerPhone, customerName, onClose }) {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
@@ -57,6 +59,8 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   const [itemDiscounts, setItemDiscounts] = useState({}); // { product_id: valor }
   const [showDiscountPanel, setShowDiscountPanel] = useState(false);
   const [customer, setCustomer] = useState(null);
+  const [tipoEntrega, setTipoEntrega] = useState(null); // 'entrega' | 'retirada' — obrigatório
+  const [lojaRetirada, setLojaRetirada] = useState(null);
   const [finishing, setFinishing] = useState(false);
   const [saleResult, setSaleResult] = useState(null);
   const searchTimeout = useRef(null);
@@ -145,9 +149,12 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   discountVal = Math.min(discountVal, subtotal);
   const total = Math.max(0, subtotal - discountVal);
 
+  // Entrega/retirada é obrigatório — venda só finaliza classificada
+  const deliveryOk = tipoEntrega === 'entrega' || (tipoEntrega === 'retirada' && lojaRetirada);
+
   // Finalizar venda
   const finishSale = async () => {
-    if (cart.length === 0 || finishing) return;
+    if (cart.length === 0 || finishing || !deliveryOk) return;
     setFinishing(true);
     try {
       const result = await api.createSale({
@@ -160,13 +167,17 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         discount: discountVal,
         discount_type: 'fixed',
         discount_label: discountLabel,
+        tipo_entrega: tipoEntrega,
+        loja_retirada: tipoEntrega === 'retirada' ? lojaRetirada : null,
       });
-      setSaleResult(result.sale);
+      setSaleResult({ ...result.sale, tipo_entrega: result.tipo_entrega, loja_retirada: result.loja_retirada, codigo_retirada: result.codigo_retirada });
       setCart([]);
       setDiscount('');
       setItemDiscounts({});
       setDiscountScope('sale');
       setShowDiscountPanel(false);
+      setTipoEntrega(null);
+      setLojaRetirada(null);
     } catch (e) {
       alert('Erro ao finalizar venda: ' + (e.message || 'Erro desconhecido'));
     }
@@ -183,6 +194,19 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         <div style={{ fontSize: 12, color: C.wa }}>
           {customerPhone ? '📱 Cupom enviado via WhatsApp!' : 'Sem WhatsApp — cupom não enviado'}
         </div>
+        {saleResult.tipo_entrega === 'retirada' && (
+          saleResult.codigo_retirada ? (
+            <div style={{ textAlign: 'center', background: 'rgba(255,215,64,.08)', border: `1px solid ${C.brdH}`, borderRadius: 10, padding: '12px 20px' }}>
+              <div style={{ fontSize: 11, color: C.dim }}>🏪 Retirada — loja {saleResult.loja_retirada}</div>
+              <div style={{ fontSize: 26, fontWeight: 900, color: C.gold, letterSpacing: 4 }}>{saleResult.codigo_retirada}</div>
+              <div style={{ fontSize: 11, color: C.wa }}>Código enviado ao cliente pelo WhatsApp</div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: C.red, textAlign: 'center', maxWidth: 280 }}>
+              ⚠️ Não consegui gerar o código de retirada agora. A venda está OK — gere a retirada de novo finalizando pelo suporte ou avise o admin.
+            </div>
+          )
+        )}
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 10, marginTop: 10, width: '100%', maxWidth: 300 }}>
           <button style={btnGold} onClick={() => setSaleResult(null)}>Nova Venda</button>
           <button style={{ ...btnOutline, padding: '12px 20px', fontSize: 13, textAlign: 'center', width: '100%' }} onClick={onClose}>Voltar ao Chat</button>
@@ -276,6 +300,26 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   // Estilo dos botões de opção (escopo/tipo de desconto) — maiores no celular
   const optBtn = (active) => ({ flex: 1, padding: isMobile ? '10px 5px' : '5px', borderRadius: 6, border: `1px solid ${active ? C.gold : C.brd}`, background: active ? 'rgba(255,215,64,.1)' : C.s1, color: active ? C.gold : C.dim, cursor: 'pointer', fontSize: isMobile ? 12 : 11, fontWeight: 600, fontFamily: 'inherit' });
 
+  // Entrega ou Retirada (+ loja) — obrigatório antes de finalizar
+  const deliverySection = (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: deliveryOk ? C.dim : C.gold, marginBottom: 5 }}>
+        {deliveryOk ? '📦 Tipo de venda' : '📦 Entrega ou retirada? (obrigatório)'}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => { setTipoEntrega('entrega'); setLojaRetirada(null); }} style={optBtn(tipoEntrega === 'entrega')}>🚚 Entrega</button>
+        <button onClick={() => setTipoEntrega('retirada')} style={optBtn(tipoEntrega === 'retirada')}>🏪 Retirada</button>
+      </div>
+      {tipoEntrega === 'retirada' && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {lojasRetirada.map(l => (
+            <button key={l} onClick={() => setLojaRetirada(l)} style={optBtn(lojaRetirada === l)}>{l}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   const discountSection = (
     <div style={{ marginBottom: 8 }}>
       <button onClick={() => setShowDiscountPanel(!showDiscountPanel)}
@@ -361,9 +405,11 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 900, color: C.grn, marginBottom: 10 }}>
         <span>TOTAL:</span><span>R$ {total.toFixed(2)}</span>
       </div>
-      <button style={{ ...btnGold, opacity: cart.length === 0 || finishing ? 0.5 : 1 }}
-        onClick={finishSale} disabled={cart.length === 0 || finishing}>
-        {finishing ? '⏳ Finalizando...' : '✅ Finalizar Venda'}
+      <button style={{ ...btnGold, opacity: cart.length === 0 || finishing || !deliveryOk ? 0.5 : 1 }}
+        onClick={finishSale} disabled={cart.length === 0 || finishing || !deliveryOk}>
+        {finishing ? '⏳ Finalizando...'
+          : cart.length > 0 && !deliveryOk ? (tipoEntrega === 'retirada' ? '🏪 Escolha a loja da retirada' : '📦 Marque entrega ou retirada')
+          : '✅ Finalizar Venda'}
       </button>
     </>
   );
@@ -407,6 +453,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
                 {cartItemsList}
                 {cart.length > 0 && (
                   <div style={{ padding: '0 8px 12px' }}>
+                    {deliverySection}
                     {discountSection}
                     {paymentSection}
                   </div>
@@ -429,6 +476,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
               {cartItemsList}
             </div>
             <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.brd}`, background: C.s2, flexShrink: 0 }}>
+              {deliverySection}
               {discountSection}
               {paymentSection}
               {totalsSection}
