@@ -1010,6 +1010,40 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Encaminhar imagem de uma conversa para outra (reusa a mídia já salva no banco)
+app.post('/api/messages/forward-image', auth, async (req, res) => {
+  try {
+    const { message_id, target_conversation_id } = req.body;
+    const srcMsg = await queryOne("SELECT * FROM messages WHERE id = $1", [message_id]);
+    if (!srcMsg) return res.status(404).json({ error: 'Mensagem não encontrada' });
+    if (srcMsg.media_type !== 'image' || !srcMsg.media_url?.startsWith('/media/')) {
+      return res.status(400).json({ error: 'Só é possível encaminhar imagens' });
+    }
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [target_conversation_id]);
+    if (!conv) return res.status(404).json({ error: 'Conversa de destino não encontrada' });
+
+    const mediaId = srcMsg.media_url.replace('/media/', '');
+    const media = await queryOne("SELECT mime_type, data FROM media_files WHERE id = $1", [mediaId]);
+    if (!media) return res.status(404).json({ error: 'Imagem não está mais disponível (mídia expirada)' });
+    const imageBuffer = Buffer.from(media.data, 'base64');
+
+    const waResult = await wa.sendImage(conv.phone, imageBuffer, '');
+
+    // Reusa a mesma mídia — só cria a mensagem nova apontando pra ela
+    const msgId = waResult?._waId || genId();
+    await queryRun(
+      "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, 1, NOW()) ON CONFLICT (id) DO NOTHING",
+      [msgId, target_conversation_id, req.user.name, srcMsg.media_url, srcMsg.media_url]
+    );
+    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", ['📷 Imagem', target_conversation_id]);
+
+    const message = { id: msgId, conversation_id: target_conversation_id, from_me: true, sender: req.user.name, content: srcMsg.media_url, media_type: 'image', media_url: srcMsg.media_url, ack: 1, timestamp: new Date().toISOString() };
+    broadcast('new_message', { conversation: { ...conv, last_message: '📷 Imagem', last_message_from_me: true }, message });
+    console.log(`↪️ Imagem encaminhada por ${req.user.name} para ${conv.phone}`);
+    res.json(message);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Enviar arquivo (atendente → cliente via WhatsApp)
 app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res) => {
   try {
@@ -1862,6 +1896,53 @@ app.post('/api/erp/sales', auth, async (req, res) => {
 
     res.json({ success: true, sale, tipo_entrega: tipoEntrega, loja_retirada: lojaRetirada, codigo_retirada: codigoRetirada });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Notificações do dblack-entregas (pacote chegou na loja, saiu pra entrega,
+// retirada confirmada etc.) saem daqui pela API oficial da Meta — o WhatsApp
+// próprio do entregas (Evolution) está morto. Autenticado por segredo
+// compartilhado (NOTIFY_SECRET nos dois serviços Railway). Fora da janela de
+// 24h a Meta recusa a mensagem; o painel marca "Não entregue" via webhook.
+app.post('/api/notify/send', async (req, res) => {
+  try {
+    const { telefone, mensagem, secret } = req.body || {};
+    if (!process.env.NOTIFY_SECRET || secret !== process.env.NOTIFY_SECRET) {
+      return res.status(401).json({ ok: false, erro: 'Não autorizado' });
+    }
+    if (!telefone || !mensagem) {
+      return res.status(400).json({ ok: false, erro: 'telefone e mensagem são obrigatórios' });
+    }
+    const digits = String(telefone).replace(/\D/g, '');
+    const phone = digits.startsWith('55') ? digits : '55' + digits;
+
+    const result = await wa.sendMessage(phone, mensagem, { isBot: true });
+
+    // Registra na conversa ativa, se houver, para as atendentes verem
+    const conv = await queryOne(
+      "SELECT * FROM conversations WHERE phone = $1 AND status != 'finalizado' ORDER BY last_message_at DESC LIMIT 1",
+      [phone]
+    );
+    if (conv) {
+      const msgId = result?._waId || genId();
+      await queryRun(
+        "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+        [msgId, conv.id, 'Entregas (auto)', mensagem]
+      );
+      const display = '📦 ' + mensagem.split('\n')[0].slice(0, 70);
+      await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+        [display, conv.id]);
+      broadcast('new_message', {
+        conversation: { ...conv, last_message: display, last_message_from_me: true },
+        message: { id: msgId, conversation_id: conv.id, from_me: true, sender: 'Entregas (auto)', content: mensagem, timestamp: new Date().toISOString() },
+      });
+    }
+
+    console.log(`[Notify] Notificação do entregas enviada para ${phone}`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[Notify] Erro ao enviar notificação do entregas:', e.message);
+    res.status(500).json({ ok: false, erro: e.message });
+  }
 });
 
 // Receipt functions moved to receipt.js (shared with ai-agent.js)
