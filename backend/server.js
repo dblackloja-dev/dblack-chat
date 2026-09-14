@@ -230,6 +230,11 @@ aiAgent.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 const vip = require('./vip');
 vip.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 
+// Cliente Black — adesão com CPF pelo chat + worker que envia as mensagens do programa
+// (lê o outbox loyalty_events do banco do ERP; níveis/cashback rodam em trigger lá)
+const clienteBlack = require('./cliente-black');
+clienteBlack.init({ wa, broadcast: (...args) => broadcast(...args), genId });
+
 // ─── Webhook do Asaas — confirma pagamento, registra no ERP, envia cupom ───
 const asaas = require('./asaas');
 
@@ -571,13 +576,18 @@ wa.on('message', (msg) => {
         console.log(`⏰ Cronômetro cancelado — ${conv.phone} enviou comprovante`);
       }
 
-      // ─── LISTA VIP (Agosto Imbatível) ───
-      // Roda APÓS a mensagem estar salva (fica registrada mesmo se o VIP falhar).
+      // ─── CLIENTE BLACK + LISTA VIP ───
+      // Roda APÓS a mensagem estar salva (fica registrada mesmo se o bot falhar).
       // Bot em paralelo, como a saudação: não muda status da conversa nem a fila.
       let vipHandled = false;
       try {
-        vipHandled = await vip.handleIncoming(conv, msg);
-      } catch (e) { console.error('❌ Erro no fluxo VIP:', e.message); }
+        vipHandled = await clienteBlack.handleIncoming(conv, msg);
+      } catch (e) { console.error('❌ Erro no fluxo Cliente Black:', e.message); }
+      if (!vipHandled) {
+        try {
+          vipHandled = await vip.handleIncoming(conv, msg);
+        } catch (e) { console.error('❌ Erro no fluxo VIP:', e.message); }
+      }
 
       // ─── AGENTE DE IA "Lê" ───
       // Responde automaticamente se: IA ativa + conversa aguardando (sem atendente humano)
