@@ -134,6 +134,28 @@ export default function App() {
   // ─── IMAGEM EXPANDIDA ───
   const [expandedImage, setExpandedImage] = useState(null);
 
+  // ─── ENCAMINHAR IMAGEM PARA OUTRA CONVERSA ───
+  const [forwardMsg, setForwardMsg] = useState(null);
+  const [forwardSearch, setForwardSearch] = useState('');
+  const [forwardingTo, setForwardingTo] = useState(null);
+  const [forwardToast, setForwardToast] = useState('');
+
+  const doForward = async (conv) => {
+    if (forwardingTo) return;
+    setForwardingTo(conv.id);
+    try {
+      await api.forwardImage(forwardMsg.id, conv.id);
+      setForwardMsg(null);
+      setForwardSearch('');
+      setForwardToast(`Imagem encaminhada para ${conv.customer_push_name || fmtPhone(conv.phone)}`);
+      setTimeout(() => setForwardToast(''), 3000);
+    } catch (e) {
+      alert(e.message || 'Erro ao encaminhar imagem');
+    } finally {
+      setForwardingTo(null);
+    }
+  };
+
   // ─── PULAR PRA MENSAGEM CITADA (resposta do cliente) ───
   const [highlightMsgId, setHighlightMsgId] = useState(null);
   const jumpToMessage = (id) => {
@@ -885,7 +907,7 @@ export default function App() {
 
               {/* Messages */}
               <div ref={messagesBoxRef} style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: isMobile ? '8px 12px' : '8px 60px', ...chatBg, minHeight: 0 }}>
-                {messages.map((msg, i) => <MessageBubble key={msg.id} msg={msg} tail={i === 0 || fromMe(messages[i - 1]) !== fromMe(msg)} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onReply={startReply} onReengage={() => api.sendReengageTemplate(activeConv.id)} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
+                {messages.map((msg, i) => <MessageBubble key={msg.id} msg={msg} tail={i === 0 || fromMe(messages[i - 1]) !== fromMe(msg)} quoted={msg.reply_to ? messages.find(m => m.id === msg.reply_to) : null} onQuoteClick={jumpToMessage} highlight={highlightMsgId === msg.id} isAdmin={user?.role === 'admin'} onImageClick={setExpandedImage} onReply={startReply} onForward={setForwardMsg} onReengage={() => api.sendReengageTemplate(activeConv.id)} onDelete={async (id) => { try { await api.deleteMessage(id); setMessages(prev => prev.map(m => m.id === id ? { ...m, content: '🚫 Mensagem apagada', media_type: null, media_url: null } : m)); } catch {} }} />)}
                 <div ref={messagesEndRef} />
               </div>
 
@@ -1103,6 +1125,73 @@ export default function App() {
 
       </>}
 
+      {/* Modal de encaminhar imagem para outra conversa */}
+      {forwardMsg && (
+        <div onClick={() => { setForwardMsg(null); setForwardSearch(''); }} style={{
+          position: 'fixed', inset: 0, zIndex: 9998,
+          background: 'rgba(11,20,26,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: '#fff', borderRadius: 12, width: '100%', maxWidth: 420, maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 12px 40px rgba(11,20,26,.3)',
+          }}>
+            <div style={{ padding: '14px 16px', background: W.teal, color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button onClick={() => { setForwardMsg(null); setForwardSearch(''); }}
+                style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer', padding: 0, lineHeight: 1 }}>✕</button>
+              <span style={{ fontSize: 16, fontWeight: 600 }}>Encaminhar imagem para...</span>
+            </div>
+            <div style={{ padding: '10px 12px', display: 'flex', gap: 10, alignItems: 'center', borderBottom: `1px solid ${W.border}` }}>
+              <img src={mediaUrl(forwardMsg.media_url || forwardMsg.content?.split('|')[0])} alt=""
+                style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
+                onError={e => { e.target.style.display = 'none'; }} />
+              <input autoFocus value={forwardSearch} onChange={e => setForwardSearch(e.target.value)}
+                placeholder="Buscar conversa por nome ou telefone..."
+                style={{ flex: 1, padding: '9px 12px', borderRadius: 8, border: 'none', background: W.search, fontSize: 14, outline: 'none', fontFamily: 'inherit' }} />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {conversations
+                .filter(c => c.id !== forwardMsg.conversation_id)
+                .filter(c => {
+                  const q = forwardSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return (c.customer_push_name || '').toLowerCase().includes(q) || (c.phone || '').includes(q.replace(/\D/g, '') || q);
+                })
+                .slice(0, 50)
+                .map(c => (
+                  <div key={c.id} onClick={() => doForward(c)} style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', cursor: forwardingTo ? 'wait' : 'pointer',
+                    borderBottom: `1px solid ${W.border}`, opacity: forwardingTo && forwardingTo !== c.id ? .5 : 1,
+                    background: forwardingTo === c.id ? W.bgActive : 'transparent',
+                  }}>
+                    <div style={{ ...avatarStyle(40), background: W.teal, fontSize: 15 }}>
+                      {(c.customer_push_name || c.phone)?.[0]?.toUpperCase() || '?'}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: W.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {c.customer_push_name || fmtPhone(c.phone)}
+                      </div>
+                      {c.customer_push_name && <div style={{ fontSize: 12, color: W.txt2 }}>{fmtPhone(c.phone)}</div>}
+                    </div>
+                    {forwardingTo === c.id && <span style={{ fontSize: 12, color: W.teal, fontWeight: 600, flexShrink: 0 }}>Enviando...</span>}
+                  </div>
+                ))}
+              {conversations.filter(c => c.id !== forwardMsg.conversation_id).length === 0 && (
+                <div style={{ padding: 24, textAlign: 'center', fontSize: 14, color: W.txt2 }}>Nenhuma outra conversa disponível</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast de confirmação do encaminhamento */}
+      {forwardToast && (
+        <div style={{
+          position: 'fixed', bottom: 'calc(24px + env(safe-area-inset-bottom))', left: '50%', transform: 'translateX(-50%)',
+          background: '#111b21', color: '#fff', padding: '10px 20px', borderRadius: 24, fontSize: 14, fontWeight: 500,
+          zIndex: 10000, boxShadow: '0 4px 16px rgba(11,20,26,.35)', whiteSpace: 'nowrap', maxWidth: '90vw', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>✓ {forwardToast}</div>
+      )}
+
       {/* Imagem expandida (overlay fullscreen) */}
       {expandedImage && (
         <div onClick={() => setExpandedImage(null)} style={{
@@ -1167,7 +1256,7 @@ function quoteSnippet(m) {
   return t.length > 90 ? t.slice(0, 90) + '…' : t;
 }
 
-function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, onReply, isAdmin, onReengage, tail = true }) {
+function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onDelete, onReply, onForward, isAdmin, onReengage, tail = true }) {
   const isMe = msg.from_me === true || msg.from_me === 'true';
   const [showMenu, setShowMenu] = useState(false);
   const [reengaging, setReengaging] = useState(false);
@@ -1176,6 +1265,7 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
   const isDeleted = msg.content === '🚫 Mensagem apagada';
   const canDelete = isAdmin || isMe;
   const canReply = !!onReply && !isDeleted;
+  const canForward = !!onForward && !isDeleted && msg.media_type === 'image' && (msg.media_url || msg.content?.startsWith('/media/'));
   const quotedThumb = quoted?.media_type === 'image' && (quoted.media_url || quoted.content?.startsWith('/media/'))
     ? mediaUrl(quoted.media_url || quoted.content.split('|')[0]) : null;
   // Arrastar a bolha pra direita = responder (gesto do WhatsApp no celular)
@@ -1223,6 +1313,13 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
                 style={{ width: 24, height: 24, borderRadius: '50%', background: '#54656f', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 title="Responder">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+              </button>
+            )}
+            {canForward && (
+              <button onClick={() => { onForward(msg); setShowMenu(false); }}
+                style={{ width: 24, height: 24, borderRadius: '50%', background: '#54656f', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Encaminhar imagem">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M14 9V5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11z"/></svg>
               </button>
             )}
             {canDelete && (

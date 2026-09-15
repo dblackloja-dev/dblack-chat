@@ -107,6 +107,7 @@ const api = {
     if (!res.ok) throw new Error('Erro ao enviar imagem');
     return res.json();
   },
+  forwardImage: (messageId, targetConversationId) => request('/messages/forward-image', { method: 'POST', body: { message_id: messageId, target_conversation_id: targetConversationId } }),
   sendVideo: async (conversationId, file, caption) => {
     const token = getToken();
     const form = new FormData();
