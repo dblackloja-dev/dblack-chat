@@ -165,4 +165,22 @@ async function getById(mediaId) {
   return queryOne("SELECT * FROM ig_content WHERE id = $1", [mediaId]);
 }
 
-module.exports = { initTables, start, syncNow, getPageContext, getById };
+// O ID de story do webhook (reply_to.story.id) NÃO é o mesmo ID que /me/stories lista.
+// Se não estiver indexado, busca a mídia por esse ID na API e indexa na hora (com análise).
+async function ensureStory(storyId) {
+  if (!storyId) return null;
+  const existing = await getById(storyId);
+  if (existing) return existing;
+  try {
+    const item = await igGet(`${storyId}?fields=id,media_type,media_url,thumbnail_url,caption,timestamp`);
+    if (item?.id) {
+      await ingestItem(item, 'story');
+      return getById(storyId);
+    }
+  } catch (e) {
+    console.warn('[ig-content] ensureStory falhou para', storyId, '—', e.details?.message || e.message);
+  }
+  return null;
+}
+
+module.exports = { initTables, start, syncNow, getPageContext, getById, ensureStory };

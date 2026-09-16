@@ -154,10 +154,14 @@ async function generateAndSend(convStale, msg) {
     const pageContext = await content.getPageContext();
     let system = buildSystemPrompt(pageContext);
 
-    // Resposta de story: injeta o lookup exato do story respondido
+    // Resposta de story: busca (e indexa se preciso) o story exato respondido
     if (msg?.ig_story_id) {
-      const item = await content.getById(msg.ig_story_id);
-      if (item) system += `\n\nATENÇÃO: a última mensagem da cliente é RESPOSTA a este story específico: ${item.analysis || item.caption || 'sem descrição'}`;
+      const item = await content.ensureStory(msg.ig_story_id);
+      if (item && (item.analysis || item.caption)) {
+        system += `\n\nATENÇÃO: a última mensagem da cliente é RESPOSTA a este story específico — responda sobre ESTA peça: ${item.analysis || item.caption}`;
+      } else {
+        system += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem (pode ser um conjunto de mais de uma peça) e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual. Se não tiver certeza do preço, transfira.`;
+      }
     }
 
     const messages = await buildMessages(conv.id);
