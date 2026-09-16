@@ -109,10 +109,33 @@ async function buildMessages(convId) {
   return messages;
 }
 
-// Chamada após cada DM recebida — decide se a Lê responde
+// Trava por conversa: mensagens em rajada geram UMA resposta só (a geração em
+// andamento termina, e se chegou coisa nova nesse meio tempo, gera mais uma vez)
+const inFlight = new Map(); // convId → { dirty: bool, lastMsg }
+
 async function maybeReply(conv, msg) {
+  const lock = inFlight.get(conv.id);
+  if (lock) { lock.dirty = true; lock.lastMsg = msg; return; }
+  inFlight.set(conv.id, { dirty: false, lastMsg: msg });
   try {
-    if (!conv || conv.status !== 'aguardando' || conv.ai_muted) return;
+    let rounds = 0;
+    do {
+      await new Promise(r => setTimeout(r, 3000)); // agrupa mensagens em rajada
+      const state = inFlight.get(conv.id);
+      state.dirty = false;
+      await generateAndSend(conv, state.lastMsg);
+      rounds++;
+    } while (inFlight.get(conv.id)?.dirty && rounds < 3);
+  } finally {
+    inFlight.delete(conv.id);
+  }
+}
+
+async function generateAndSend(convStale, msg) {
+  try {
+    // Estado fresco: a conversa pode ter sido aceita/transferida durante a espera
+    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convStale.id]);
+    if (!conv || conv.status !== 'aguardando' || conv.ai_muted || conv.channel !== 'instagram') return;
     if ((await setting('ig_ai_enabled', 'false')) !== 'true') return;
 
     // Modo teste: só responde os usuários da lista (ig_ai_test_users = '*' libera todos)
