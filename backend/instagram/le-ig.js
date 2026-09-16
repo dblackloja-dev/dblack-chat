@@ -42,6 +42,7 @@ COMO VOCÊ ESCREVE:
 - NUNCA use apelidos (flor, querida, amor, miga). Use o nome se souber
 - NUNCA repita saudação nem informação já dita na conversa
 - Responda SOMENTE o que foi perguntado
+- Se a última mensagem da cliente JÁ estiver coberta pela sua resposta anterior (nada novo a dizer), responda exatamente [SKIP] e nada mais — assim nenhuma mensagem é enviada
 
 O CANAL: a cliente chega respondendo um story, compartilhando um post ou mandando print. A imagem vem anexada na conversa — identifique a peça e cruze com o CONTEXTO DA PÁGINA abaixo.
 
@@ -180,6 +181,8 @@ async function generateAndSend(convStale, msg) {
 
     let text = (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
     if (!text) return;
+
+    if (text.includes('[SKIP]')) return; // nada novo a dizer — não envia
 
     const shouldTransfer = text.includes('[TRANSFERIR]');
     text = text.replace(/\[TRANSFERIR\]/g, '').trim();
