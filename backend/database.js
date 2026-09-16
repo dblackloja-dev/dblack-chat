@@ -153,6 +153,12 @@ async function initDB() {
   try { await queryRun("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to TEXT"); } catch {}
   // Canal da conversa: whatsapp (padrão) ou instagram (DMs; phone = IGSID do cliente)
   try { await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel TEXT DEFAULT 'whatsapp'"); } catch {}
+  // Lê no Instagram: ai_muted = Lê transferiu e não responde mais; ig_story_id = story que a cliente respondeu
+  try { await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS ai_muted BOOLEAN DEFAULT false"); } catch {}
+  try { await queryRun("ALTER TABLE messages ADD COLUMN IF NOT EXISTS ig_story_id TEXT"); } catch {}
+  // Config da Lê no Instagram (editável via /api/settings): desligada por padrão; modo teste com perfis da casa
+  await queryRun("INSERT INTO chat_settings (key, value) VALUES ('ig_ai_enabled', 'false') ON CONFLICT (key) DO NOTHING");
+  await queryRun("INSERT INTO chat_settings (key, value) VALUES ('ig_ai_test_users', 'denilson_dblack,leticia_dblack') ON CONFLICT (key) DO NOTHING");
 
   // Insere respostas rápidas padrão se tabela vazia
   const qrCount = await queryOne("SELECT COUNT(*) as c FROM quick_replies");

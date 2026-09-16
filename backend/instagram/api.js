@@ -63,4 +63,9 @@ async function getUserProfile(igsid) {
   return igGraph('GET', `${igsid}?fields=name,username,profile_pic`);
 }
 
-module.exports = { sendPrivateReply, sendDirectMessage, sendMediaMessage, replyToComment, getUserProfile };
+// GET genérico na Instagram API (usado pelo job de contexto de stories/feed)
+async function igGet(pathPart) {
+  return igGraph('GET', pathPart);
+}
+
+module.exports = { sendPrivateReply, sendDirectMessage, sendMediaMessage, replyToComment, getUserProfile, igGet };

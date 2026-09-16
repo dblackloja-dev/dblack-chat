@@ -3,6 +3,7 @@
 // gravada com mídia em media_files e broadcast 'new_message' pros atendentes.
 const { queryOne, queryRun } = require('../database');
 const { getUserProfile } = require('./api');
+const leIg = require('./le-ig');
 
 const IG_USER_ID = process.env.META_IG_USER_ID;
 const MAX_MEDIA_BYTES = 25 * 1024 * 1024; // media_files guarda base64 no banco — vídeo gigante não entra
@@ -54,11 +55,13 @@ async function extractContent(message) {
   let label = '';
   let mediaType = null;
   let mediaSourceUrl = null;
+  let storyId = null;
 
   if (message.reply_to?.story) {
     label = '↩️ Respondeu ao seu story';
     mediaType = 'image';
     mediaSourceUrl = message.reply_to.story.url || null;
+    storyId = message.reply_to.story.id || null;
   }
 
   const att = (message.attachments || [])[0];
@@ -91,7 +94,7 @@ async function extractContent(message) {
   }
 
   const content = [label, text].filter(Boolean).join('\n') || (mediaType ? `[${mediaType}]` : '[mensagem]');
-  return { content, mediaType: mediaUrl ? mediaType : null, mediaUrl };
+  return { content, mediaType: mediaUrl ? mediaType : null, mediaUrl, storyId };
 }
 
 // Evento messaging[] do webhook do Instagram
@@ -143,7 +146,7 @@ async function handleDmEvent(evt) {
   const displayName = profile.name || (profile.username ? '@' + profile.username : `Instagram ${igsid.slice(-4)}`);
   const pushName = profile.username ? '@' + profile.username : displayName;
 
-  const { content, mediaType, mediaUrl } = await extractContent(message);
+  const { content, mediaType, mediaUrl, storyId } = await extractContent(message);
 
   let conv = await queryOne(
     "SELECT * FROM conversations WHERE phone = $1 AND channel = 'instagram' AND status != 'finalizado' ORDER BY started_at DESC LIMIT 1",
@@ -167,13 +170,16 @@ async function handleDmEvent(evt) {
 
   const msgId = message.mid || genId();
   await queryRun(
-    "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, timestamp) VALUES ($1, $2, false, $3, $4, $5, $6, NOW()) ON CONFLICT (id) DO NOTHING",
-    [msgId, conv.id, pushName, content, mediaType, mediaUrl]);
+    "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ig_story_id, timestamp) VALUES ($1, $2, false, $3, $4, $5, $6, $7, NOW()) ON CONFLICT (id) DO NOTHING",
+    [msgId, conv.id, pushName, content, mediaType, mediaUrl, storyId || null]);
 
   notify('new_message', {
     conversation: conv,
     message: { id: msgId, conversation_id: conv.id, from_me: false, sender: pushName, content, media_type: mediaType, media_url: mediaUrl, timestamp: new Date().toISOString() },
   });
+
+  // Lê (IA) — responde em background se estiver habilitada pro canal Instagram
+  setImmediate(() => leIg.maybeReply(conv, { id: msgId, content, media_type: mediaType, ig_story_id: storyId }).catch(() => {}));
 }
 
 module.exports = { init, handleDmEvent };

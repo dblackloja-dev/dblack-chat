@@ -26,6 +26,8 @@ const { generateReceiptImage, generateReceiptText } = require('./receipt');
 const { handleInstagramWebhook } = require('./instagram/webhook');
 const igApi = require('./instagram/api');
 const igDm = require('./instagram/dm');
+const igContent = require('./instagram/content');
+const leIg = require('./instagram/le-ig');
 const liveReservations = require('./live/reservations');
 
 // Valida que JWT_SECRET foi definido no .env (nunca usar fallback hardcoded)
@@ -2257,6 +2259,9 @@ async function start() {
   await liveReservations.initTables();
   liveReservations.init({ onUpdate: (payload) => broadcast('live:update', payload) });
   igDm.init({ broadcast });
+  await igContent.initTables();
+  igContent.start();
+  leIg.init({ broadcast });
   // Verifica conexão da Evolution API
   await wa.connect();
   server.listen(PORT, () => {
