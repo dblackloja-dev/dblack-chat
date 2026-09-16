@@ -152,7 +152,7 @@ async function getPageContext() {
   if (feed.length) {
     out += '\nPOSTS RECENTES DO FEED:\n';
     for (const p of feed) {
-      out += `- (${fmtAge(p.posted_at)}) ${p.analysis || ''}${p.caption ? ` | legenda: ${p.caption.slice(0, 150)}` : ''}\n`;
+      out += `- [${fmtHora(p.posted_at)}] ${p.analysis || ''}${p.caption ? ` | legenda: ${p.caption.slice(0, 150)}` : ''}\n`;
     }
   }
   return out || '(nenhum conteúdo indexado ainda)';
