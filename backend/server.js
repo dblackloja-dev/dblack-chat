@@ -76,6 +76,28 @@ const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: 
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Política de privacidade — exigida pela Meta para publicar o app (webhooks IG/WhatsApp)
+app.get('/privacidade', (req, res) => {
+  res.type('html').send(`<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de Privacidade — D'Black Store</title>
+<style>body{font-family:system-ui,-apple-system,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.6;color:#222}h1{font-size:1.5rem}h2{font-size:1.1rem;margin-top:1.5em}</style>
+</head><body>
+<h1>Política de Privacidade — D'BLACK STORE LTDA</h1>
+<p>CNPJ 45.708.026/0001-27 · Contato: dblackloja@gmail.com</p>
+<h2>Quais dados coletamos</h2>
+<p>Ao falar com a D'Black Store pelo WhatsApp ou Instagram (mensagens, comentários em publicações e lives), recebemos seu nome/usuário, número ou identificador da conta e o conteúdo das mensagens, para realizar o atendimento, registrar pedidos e reservas de produtos.</p>
+<h2>Como usamos</h2>
+<p>Os dados são usados exclusivamente para atendimento ao cliente, processamento de pedidos, reservas de peças em lives e comunicação sobre suas compras. Não vendemos nem compartilhamos seus dados com terceiros, exceto processadores de pagamento quando você realiza uma compra.</p>
+<h2>Armazenamento</h2>
+<p>As conversas ficam armazenadas em servidores seguros pelo tempo necessário ao atendimento e a obrigações legais. Mídias recebidas são apagadas automaticamente após 90 dias.</p>
+<h2>Seus direitos (LGPD)</h2>
+<p>Você pode solicitar acesso, correção ou exclusão dos seus dados a qualquer momento pelo e-mail dblackloja@gmail.com ou pelo próprio WhatsApp da loja.</p>
+<h2>Exclusão de dados</h2>
+<p>Para excluir seus dados, envie um pedido para dblackloja@gmail.com com o número de telefone ou usuário do Instagram utilizado no contato.</p>
+</body></html>`);
+});
+
 // Serve mídia salva no banco — protegido por IDs longos e aleatórios (ex: evo_AC71BC721C...)
 // Não exige token JWT para evitar problemas de expiração em <img src> e <audio src>
 // Cache de mídia em memória (evita query no banco pra cada imagem que aparece no chat)
