@@ -151,6 +151,8 @@ async function initDB() {
   try { await queryRun("ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS image_data TEXT"); } catch {}
   try { await queryRun("ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS image_mime TEXT"); } catch {}
   try { await queryRun("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to TEXT"); } catch {}
+  // Canal da conversa: whatsapp (padrão) ou instagram (DMs; phone = IGSID do cliente)
+  try { await queryRun("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel TEXT DEFAULT 'whatsapp'"); } catch {}
 
   // Insere respostas rápidas padrão se tabela vazia
   const qrCount = await queryOne("SELECT COUNT(*) as c FROM quick_replies");

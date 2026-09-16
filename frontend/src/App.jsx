@@ -95,6 +95,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [msgInput, setMsgInput] = useState('');
   const [tab, setTab] = useState('atendendo');
+  const [channel, setChannel] = useState('whatsapp'); // whatsapp | instagram — listas separadas por canal
   const [waStatus, setWaStatus] = useState({ connected: false, qr: null });
   const [users, setUsers] = useState([]);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -584,10 +585,14 @@ export default function App() {
   const insertEmoji = (emoji) => { setMsgInput(prev => prev + emoji); setShowEmojis(false); };
 
   // ─── FILTROS ───
-  const aguardando = conversations.filter(c => c.status === 'aguardando');
-  const atendendo = conversations.filter(c => c.status === 'atendendo');
+  const convChannel = (c) => c.channel || 'whatsapp';
+  const chanConvs = conversations.filter(c => convChannel(c) === channel);
+  const igAguardando = conversations.filter(c => convChannel(c) === 'instagram' && c.status === 'aguardando').length;
+  const waAguardando = conversations.filter(c => convChannel(c) === 'whatsapp' && c.status === 'aguardando').length;
+  const aguardando = chanConvs.filter(c => c.status === 'aguardando');
+  const atendendo = chanConvs.filter(c => c.status === 'atendendo');
   const myAtendendo = user?.role === 'admin' ? atendendo : atendendo.filter(c => c.agent_id === user?.id);
-  const finalizados = conversations.filter(c => c.status === 'finalizado');
+  const finalizados = chanConvs.filter(c => c.status === 'finalizado');
 
   const filteredConvs = (list) => {
     if (!searchTerm) return list;
@@ -704,6 +709,24 @@ export default function App() {
           </div>
         </div>
 
+        {/* Canais: WhatsApp | Instagram (listas separadas) */}
+        <div style={{ display: 'flex', gap: 8, padding: '8px 12px 0', background: W.bgPanel }}>
+          {[
+            { id: 'whatsapp', label: 'WhatsApp', emoji: '💬', count: waAguardando, activeBg: '#d9fdd3', activeTxt: '#0b6b53' },
+            { id: 'instagram', label: 'Instagram', emoji: '📷', count: igAguardando, activeBg: '#fde3f1', activeTxt: '#c1275e' },
+          ].map(ch => (
+            <button key={ch.id} onClick={() => setChannel(ch.id)} style={{
+              flex: 1, padding: '8px 10px', background: channel === ch.id ? ch.activeBg : W.search, border: 'none',
+              borderRadius: 10, color: channel === ch.id ? ch.activeTxt : W.txt2, fontSize: 13,
+              fontWeight: channel === ch.id ? 700 : 400, cursor: 'pointer', fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'all .15s',
+            }}>
+              {ch.emoji} {ch.label}
+              {ch.count > 0 && <span style={{ background: channel === ch.id ? ch.activeTxt : W.green, color: '#fff', borderRadius: 12, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>{ch.count}</span>}
+            </button>
+          ))}
+        </div>
+
         {/* Abas (chips de filtro, estilo WhatsApp) */}
         <div className="chips-row" style={{ display: 'flex', gap: 8, padding: '8px 12px 10px', background: W.bgPanel, borderBottom: `1px solid ${W.border}`, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {[
@@ -729,7 +752,7 @@ export default function App() {
             <>
               {searching && <div style={{ padding: 20, textAlign: 'center', fontSize: 13, color: W.txt2 }}>Buscando...</div>}
               {!searching && searchResults.length === 0 && <div style={{ padding: 40, textAlign: 'center', fontSize: 14, color: W.txt2 }}>Nenhuma conversa encontrada</div>}
-              {searchResults.map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} finished={conv.status === 'finalizado'} />)}
+              {searchResults.filter(c => convChannel(c) === channel).map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} finished={conv.status === 'finalizado'} />)}
             </>
           ) : (
             <>
@@ -837,8 +860,10 @@ export default function App() {
                 {isMobile && <button style={iconBtn} onClick={goBackToList}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg></button>}
                 <div style={{ ...avatarStyle(36), background: W.teal, fontSize: 14 }}>{(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}</div>
                 <div style={{ flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden' }} onClick={() => setShowCustomerPanel(!showCustomerPanel)}>
-                  <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeConv.customer_push_name || fmtPhone(activeConv.phone)}</div>
-                  {(activeConv.real_phone || (activeConv.phone && !activeConv.phone.endsWith('@lid'))) && (
+                  <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeConv.channel === 'instagram' ? '📷 ' : ''}{activeConv.customer_push_name || (activeConv.channel === 'instagram' ? 'Instagram' : fmtPhone(activeConv.phone))}</div>
+                  {activeConv.channel === 'instagram' ? (
+                    <div style={{ fontSize: 11, color: '#c1275e', whiteSpace: 'nowrap' }}>Instagram Direct</div>
+                  ) : (activeConv.real_phone || (activeConv.phone && !activeConv.phone.endsWith('@lid'))) && (
                     <div style={{ fontSize: 11, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtPhone(activeConv.real_phone || activeConv.phone)}</div>
                   )}
                 </div>
@@ -978,9 +1003,14 @@ export default function App() {
                           { label: 'Galeria', emoji: '🖼️', color: '#bf59cf', fn: () => !sendingMedia && fileInputRef.current?.click() },
                           { label: 'Câmera', emoji: '📷', color: '#d3396d', fn: () => !sendingMedia && cameraInputRef.current?.click() },
                           { label: 'Vídeo', emoji: '🎥', color: '#e67e22', fn: () => !sendingVideo && videoInputRef.current?.click() },
-                          { label: 'Documento', emoji: '📄', color: '#5157ae', fn: () => !sendingFile && fileAttachRef.current?.click() },
+                          // Documento e Prazo Pix só existem no WhatsApp
+                          ...(activeConv.channel !== 'instagram' ? [
+                            { label: 'Documento', emoji: '📄', color: '#5157ae', fn: () => !sendingFile && fileAttachRef.current?.click() },
+                          ] : []),
                           { label: 'Resposta rápida', emoji: '⚡', color: '#1fa855', fn: () => setShowQuickReplies(true) },
-                          { label: 'Prazo Pix 15min', emoji: '⏰', color: '#f0a500', fn: startPixTimer },
+                          ...(activeConv.channel !== 'instagram' ? [
+                            { label: 'Prazo Pix 15min', emoji: '⏰', color: '#f0a500', fn: startPixTimer },
+                          ] : []),
                         ].map(item => (
                           <button key={item.label} onClick={() => { setShowAttachSheet(false); item.fn(); }}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: 0 }}>
@@ -1033,7 +1063,7 @@ export default function App() {
                         <svg viewBox="0 0 24 24" width="22" height="22" fill="#fff" style={{ marginLeft: 2 }}><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
                       </button>
                     ) : (
-                      <button style={{ ...iconBtn, width: 46, height: 46, flexShrink: 0, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: sendingAudio ? 0.4 : 1, boxShadow: '0 1px 3px rgba(11,20,26,.2)' }} onClick={startRecording} title="Gravar áudio">
+                      <button style={{ ...iconBtn, width: 46, height: 46, flexShrink: 0, borderRadius: '50%', background: W.green, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: (sendingAudio || activeConv.channel === 'instagram') ? 0.4 : 1, boxShadow: '0 1px 3px rgba(11,20,26,.2)' }} onClick={activeConv.channel === 'instagram' ? () => alert('Áudio ainda não é suportado no Instagram — envie texto ou imagem.') : startRecording} title="Gravar áudio">
                         {sendingAudio ? <span>⏳</span> : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>}
                       </button>
                     )}
@@ -1062,8 +1092,10 @@ export default function App() {
                   <div style={{ ...avatarStyle(80), background: W.teal, fontSize: 32, margin: '0 auto 12px' }}>
                     {(activeConv.customer_push_name || activeConv.phone)?.[0]?.toUpperCase()}
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 600 }}>{activeConv.customer_push_name || 'Cliente'}</div>
-                  {(activeConv.real_phone || (activeConv.phone && !activeConv.phone.endsWith('@lid'))) ? (
+                  <div style={{ fontSize: 18, fontWeight: 600 }}>{activeConv.channel === 'instagram' ? '📷 ' : ''}{activeConv.customer_push_name || 'Cliente'}</div>
+                  {activeConv.channel === 'instagram' ? (
+                    <div style={{ fontSize: 13, color: '#c1275e' }}>Instagram Direct</div>
+                  ) : (activeConv.real_phone || (activeConv.phone && !activeConv.phone.endsWith('@lid'))) ? (
                     <div style={{ fontSize: 13, color: W.txt2 }}>{fmtPhone(activeConv.real_phone || activeConv.phone)}</div>
                   ) : (
                     <PhoneInput convId={activeConv.id} onSave={(phone) => {
@@ -1229,10 +1261,13 @@ function ConvItem({ conv, active, onClick, finished }) {
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-          <span style={{ fontSize: 17, fontWeight: 600, color: W.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.customer_push_name || fmtPhone(conv.phone)}</span>
+          <span style={{ fontSize: 17, fontWeight: 600, color: W.txt, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>
+            {conv.channel === 'instagram' && <span title="Instagram" style={{ fontSize: 13, flexShrink: 0 }}>📷</span>}
+            {conv.customer_push_name || (conv.channel === 'instagram' ? 'Instagram' : fmtPhone(conv.phone))}
+          </span>
           <span style={{ fontSize: 12, color: conv.unread_count > 0 ? W.green : W.txt2, flexShrink: 0, marginLeft: 8 }}>{fmt(conv.last_message_at)}</span>
         </div>
-        {conv.customer_push_name && conv.phone && !conv.phone.endsWith('@lid') && (
+        {conv.customer_push_name && conv.phone && conv.channel !== 'instagram' && !conv.phone.endsWith('@lid') && (
           <div style={{ fontSize: 12, color: W.txt2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 2 }}>{fmtPhone(conv.phone)}</div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

@@ -50,4 +50,17 @@ async function replyToComment(commentId, message) {
   return igGraph('POST', `${commentId}/replies`, { message });
 }
 
-module.exports = { sendPrivateReply, sendDirectMessage, replyToComment };
+// DM com mídia (imagem/vídeo/áudio) — a URL precisa ser pública para a Meta baixar
+async function sendMediaMessage(igsid, type, url) {
+  return igGraph('POST', `${IG_USER_ID}/messages`, {
+    recipient: { id: igsid },
+    message: { attachment: { type, payload: { url } } },
+  });
+}
+
+// Perfil de quem mandou DM (nome, @username, foto) a partir do IGSID
+async function getUserProfile(igsid) {
+  return igGraph('GET', `${igsid}?fields=name,username,profile_pic`);
+}
+
+module.exports = { sendPrivateReply, sendDirectMessage, sendMediaMessage, replyToComment, getUserProfile };

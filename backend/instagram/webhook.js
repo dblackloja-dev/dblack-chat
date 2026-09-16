@@ -3,6 +3,7 @@
 // do WhatsApp, com body.object === 'instagram'.
 const { sendPrivateReply, sendDirectMessage } = require('./api');
 const reservations = require('../live/reservations');
+const dm = require('./dm');
 
 const IG_USER_ID = process.env.META_IG_USER_ID;
 const CHECKOUT_BASE = process.env.LIVE_CHECKOUT_URL || 'https://dblack.com.br/live';
@@ -27,7 +28,11 @@ async function handleInstagramWebhook(body) {
       }
     }
     for (const evt of entry.messaging || []) {
-      if (evt.message?.text) await handleDirectMessage(evt);
+      try {
+        await dm.handleDmEvent(evt);
+      } catch (e) {
+        console.error('[ig-dm] erro ao processar evento:', e.message);
+      }
     }
   }
 }
@@ -86,11 +91,6 @@ async function handleComment(value, isLive) {
       }
     }
   }
-}
-
-async function handleDirectMessage(evt) {
-  // Por enquanto só loga. Depois: integrar ao painel do Chat como canal "instagram".
-  console.log('[ig-dm]', evt.sender?.id, evt.message?.text);
 }
 
 module.exports = { handleInstagramWebhook };

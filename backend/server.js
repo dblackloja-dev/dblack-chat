@@ -24,6 +24,8 @@ const erp = require('./erp');
 const aiAgent = require('./ai-agent');
 const { generateReceiptImage, generateReceiptText } = require('./receipt');
 const { handleInstagramWebhook } = require('./instagram/webhook');
+const igApi = require('./instagram/api');
+const igDm = require('./instagram/dm');
 const liveReservations = require('./live/reservations');
 
 // Valida que JWT_SECRET foi definido no .env (nunca usar fallback hardcoded)
@@ -873,6 +875,7 @@ app.post('/api/conversations/:id/payment-timer', auth, async (req, res) => {
     const minutes = Math.min(120, Math.max(1, parseInt(req.body?.minutes, 10) || 15));
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [req.params.id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    if (conv.channel === 'instagram') return res.status(400).json({ error: 'Prazo Pix disponível só no WhatsApp por enquanto.' });
     cancelPaymentTimer(conv.id); // disparar de novo reinicia o prazo
     const deadline = new Date(Date.now() + minutes * 60000);
     const hhmm = deadline.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
@@ -951,12 +954,25 @@ app.post('/api/messages/send', auth, async (req, res) => {
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
 
-    // Envia via WhatsApp com nome do atendente (reply_to = wamid da msg citada)
-    const waText = `*${req.user.name}:*\n${content}`;
-    const waResult = await wa.sendMessage(conv.phone, waText, { replyTo: reply_to || null });
-
-    // Usa o ID do WhatsApp para rastrear entrega/leitura (se disponível)
-    const msgId = waResult?._waId || genId();
+    let msgId;
+    if (conv.channel === 'instagram') {
+      // DM do Instagram — sem negrito/citação; janela de 24h após a última msg do cliente
+      try {
+        const igResult = await igApi.sendDirectMessage(conv.phone, `${req.user.name}: ${content}`);
+        msgId = igResult?.message_id || genId();
+      } catch (e) {
+        const reason = e.details?.error_subcode === 2534022 || /window/i.test(e.message)
+          ? 'Janela de 24h expirada — o cliente precisa mandar uma nova mensagem no Instagram.'
+          : e.message;
+        return res.status(400).json({ error: `Instagram recusou o envio: ${reason}` });
+      }
+    } else {
+      // Envia via WhatsApp com nome do atendente (reply_to = wamid da msg citada)
+      const waText = `*${req.user.name}:*\n${content}`;
+      const waResult = await wa.sendMessage(conv.phone, waText, { replyTo: reply_to || null });
+      // Usa o ID do WhatsApp para rastrear entrega/leitura (se disponível)
+      msgId = waResult?._waId || genId();
+    }
     await queryRun(
       "INSERT INTO messages (id, conversation_id, from_me, sender, content, reply_to, ack, timestamp) VALUES ($1, $2, true, $3, $4, $5, 1, NOW()) ON CONFLICT (id) DO NOTHING",
       [msgId, conversation_id, req.user.name, content, reply_to || null]
@@ -986,6 +1002,8 @@ app.post('/api/messages/send-template', auth, async (req, res) => {
     if (typeof wa.sendTemplate !== 'function') return res.status(400).json({ error: 'O provedor atual não suporta templates' });
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+
+    if (conv.channel === 'instagram') return res.status(400).json({ error: 'Template de reengajamento não existe no Instagram — o cliente precisa mandar uma nova mensagem.' });
 
     const last = reengageLastSent.get(conversation_id) || 0;
     if (Date.now() - last < 10 * 60 * 1000) {
@@ -1030,17 +1048,32 @@ app.post('/api/messages/send-image', auth, upload.single('image'), async (req, r
       console.log('⚠️ Compressão falhou, usando original:', e.message);
     }
 
-    // Envia via WhatsApp (usa o buffer já comprimido)
-    const waResult = await wa.sendImage(conv.phone, imageBuffer, caption || '');
-
-    // Salva no banco (usa o buffer comprimido — menor e mais rápido)
-    const msgId = waResult?._waId || genId();
-    const mediaId = 'img_' + msgId;
-    const base64 = imageBuffer.toString('base64');
-    await queryRun(
-      "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
-      [mediaId, 'image/jpeg', base64]
-    );
+    let msgId, mediaId;
+    if (conv.channel === 'instagram') {
+      // Instagram: salva a imagem primeiro e manda a URL pública pra Meta baixar
+      mediaId = 'img_' + genId();
+      await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [mediaId, 'image/jpeg', imageBuffer.toString('base64')]);
+      const base = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
+      if (!base) return res.status(400).json({ error: 'URL pública não configurada para mídia no Instagram' });
+      try {
+        const igResult = await igApi.sendMediaMessage(conv.phone, 'image', `${base}/media/${mediaId}`);
+        msgId = igResult?.message_id || genId();
+        // Instagram não tem legenda junto da imagem — vai como mensagem separada
+        if (caption) await igApi.sendDirectMessage(conv.phone, caption).catch(() => {});
+      } catch (e) {
+        return res.status(400).json({ error: `Instagram recusou a imagem: ${e.message}` });
+      }
+    } else {
+      // Envia via WhatsApp (usa o buffer já comprimido)
+      const waResult = await wa.sendImage(conv.phone, imageBuffer, caption || '');
+      // Salva no banco (usa o buffer comprimido — menor e mais rápido)
+      msgId = waResult?._waId || genId();
+      mediaId = 'img_' + msgId;
+      await queryRun(
+        "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+        [mediaId, 'image/jpeg', imageBuffer.toString('base64')]
+      );
+    }
 
     const mediaUrl = `/media/${mediaId}`;
     const displayText = caption ? `📷 ${caption}` : '📷 Imagem';
@@ -1073,10 +1106,20 @@ app.post('/api/messages/forward-image', auth, async (req, res) => {
     if (!media) return res.status(404).json({ error: 'Imagem não está mais disponível (mídia expirada)' });
     const imageBuffer = Buffer.from(media.data, 'base64');
 
-    const waResult = await wa.sendImage(conv.phone, imageBuffer, '');
-
-    // Reusa a mesma mídia — só cria a mensagem nova apontando pra ela
-    const msgId = waResult?._waId || genId();
+    let msgId;
+    if (conv.channel === 'instagram') {
+      const base = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
+      if (!base) return res.status(400).json({ error: 'URL pública não configurada para mídia no Instagram' });
+      try {
+        const igResult = await igApi.sendMediaMessage(conv.phone, 'image', `${base}${srcMsg.media_url}`);
+        msgId = igResult?.message_id || genId();
+      } catch (e) {
+        return res.status(400).json({ error: `Instagram recusou a imagem: ${e.message}` });
+      }
+    } else {
+      const waResult = await wa.sendImage(conv.phone, imageBuffer, '');
+      msgId = waResult?._waId || genId();
+    }
     await queryRun(
       "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1, $2, true, $3, $4, 'image', $5, 1, NOW()) ON CONFLICT (id) DO NOTHING",
       [msgId, target_conversation_id, req.user.name, srcMsg.media_url, srcMsg.media_url]
@@ -1097,6 +1140,7 @@ app.post('/api/messages/send-file', auth, upload.single('file'), async (req, res
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
+    if (conv.channel === 'instagram') return res.status(400).json({ error: 'Envio de arquivo ainda não é suportado no Instagram — use imagem ou texto.' });
 
     const jid = conv.phone.includes('@') ? conv.phone : conv.phone + '@s.whatsapp.net';
     const fileName = req.file.originalname || 'arquivo';
@@ -1134,17 +1178,32 @@ app.post('/api/messages/send-video', auth, uploadVideo.single('video'), async (r
 
     console.log(`🎥 Enviando vídeo: ${Math.round(req.file.buffer.length/1024/1024)}MB | ${req.file.mimetype}`);
 
-    // Envia via WhatsApp
-    const waResult = await wa.sendVideo(conv.phone, req.file.buffer, caption || '');
-
-    // Salva no banco
-    const msgId = waResult?._waId || genId();
-    const mediaId = 'vid_' + msgId;
+    let msgId, mediaId;
     const mime = req.file.mimetype || 'video/mp4';
-    await queryRun(
-      "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
-      [mediaId, mime, req.file.buffer.toString('base64')]
-    );
+    if (conv.channel === 'instagram') {
+      if (req.file.buffer.length > 25 * 1024 * 1024) return res.status(400).json({ error: 'Instagram aceita vídeos de até 25MB' });
+      mediaId = 'vid_' + genId();
+      await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING", [mediaId, mime, req.file.buffer.toString('base64')]);
+      const base = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
+      if (!base) return res.status(400).json({ error: 'URL pública não configurada para mídia no Instagram' });
+      try {
+        const igResult = await igApi.sendMediaMessage(conv.phone, 'video', `${base}/media/${mediaId}`);
+        msgId = igResult?.message_id || genId();
+        if (caption) await igApi.sendDirectMessage(conv.phone, caption).catch(() => {});
+      } catch (e) {
+        return res.status(400).json({ error: `Instagram recusou o vídeo: ${e.message}` });
+      }
+    } else {
+      // Envia via WhatsApp
+      const waResult = await wa.sendVideo(conv.phone, req.file.buffer, caption || '');
+      // Salva no banco
+      msgId = waResult?._waId || genId();
+      mediaId = 'vid_' + msgId;
+      await queryRun(
+        "INSERT INTO media_files (id, mime_type, data) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING",
+        [mediaId, mime, req.file.buffer.toString('base64')]
+      );
+    }
 
     const mediaUrl = `/media/${mediaId}`;
     const displayText = caption ? `🎥 ${caption}` : '🎥 Vídeo';
@@ -1170,6 +1229,7 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
     const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conversation_id]);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     if (!req.file) return res.status(400).json({ error: 'Áudio não enviado' });
+    if (conv.channel === 'instagram') return res.status(400).json({ error: 'Áudio ainda não é suportado no Instagram — envie texto ou imagem.' });
 
     // Salva no banco
     const mediaId = 'aud_' + genId();
@@ -1193,12 +1253,17 @@ app.post('/api/messages/send-audio', auth, upload.single('audio'), async (req, r
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Foto de perfil do WhatsApp
+// Foto de perfil (WhatsApp; fallback Instagram quando :phone é um IGSID)
 app.get('/api/profile-pic/:phone', auth, async (req, res) => {
   try {
     const url = await wa.getProfilePic(req.params.phone);
-    res.json({ url });
-  } catch { res.json({ url: null }); }
+    if (url) return res.json({ url });
+  } catch {}
+  try {
+    const p = await igApi.getUserProfile(req.params.phone);
+    return res.json({ url: p.profile_pic || null });
+  } catch {}
+  res.json({ url: null });
 });
 
 // Apagar mensagem enviada (para todos)
@@ -2191,6 +2256,7 @@ async function start() {
   await initDB();
   await liveReservations.initTables();
   liveReservations.init({ onUpdate: (payload) => broadcast('live:update', payload) });
+  igDm.init({ broadcast });
   // Verifica conexão da Evolution API
   await wa.connect();
   server.listen(PORT, () => {
