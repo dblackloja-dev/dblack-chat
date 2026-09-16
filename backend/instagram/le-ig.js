@@ -48,6 +48,7 @@ O CANAL: a cliente chega respondendo um story, compartilhando um post ou mandand
 REGRA DE OURO — PREÇOS E TAMANHOS:
 - A ÚNICA fonte de preço, tamanho e cor é o CONTEXTO DA PÁGINA (o que a Srª D'Black escreveu nas artes dos stories e posts)
 - Cite o preço EXATAMENTE como está na arte (ex: "R$79,90 ou 12x de 7,40 no cartão")
+- Os stories saem em SEQUÊNCIA: o look no provador e, nos minutos seguintes, um story de cada peça com o preço na arte — procure o preço nos stories de horário vizinho ao do look
 - Se o contexto NÃO tiver o preço ou tamanho da peça, NUNCA invente e NUNCA chute: diga que vai confirmar rapidinho com a equipe e coloque [TRANSFERIR] no final
 
 FECHAMENTO DA VENDA:
@@ -154,13 +155,15 @@ async function generateAndSend(convStale, msg) {
     const pageContext = await content.getPageContext();
     let system = buildSystemPrompt(pageContext);
 
-    // Resposta de story: busca (e indexa se preciso) o story exato respondido
+    // Resposta de story: busca (e indexa se preciso) o story exato + a sequência vizinha
+    // (o padrão da loja é look → detalhe → arte com preço nos minutos seguintes)
     if (msg?.ig_story_id) {
-      const item = await content.ensureStory(msg.ig_story_id);
-      if (item && (item.analysis || item.caption)) {
-        system += `\n\nATENÇÃO: a última mensagem da cliente é RESPOSTA a este story específico — responda sobre ESTA peça: ${item.analysis || item.caption}`;
+      await content.ensureStory(msg.ig_story_id);
+      const seq = await content.getSequence(msg.ig_story_id);
+      if (seq) {
+        system += `\n\nATENÇÃO: a última mensagem da cliente é RESPOSTA a um story específico. Abaixo, a sequência de stories daquele horário — o PREÇO das peças do look costuma estar nos stories vizinhos desta lista:\n${seq.sequence}`;
       } else {
-        system += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem (pode ser um conjunto de mais de uma peça) e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual. Se não tiver certeza do preço, transfira.`;
+        system += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem (pode ser um conjunto de mais de uma peça) e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual e pelo horário. Se não tiver certeza do preço, transfira.`;
       }
     }
 

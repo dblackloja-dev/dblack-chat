@@ -118,7 +118,8 @@ async function ingestItem(item, kind) {
 }
 
 async function syncNow() {
-  const stories = await igGet(`${IG_USER_ID}/stories?fields=id,media_type,media_url,thumbnail_url,caption,timestamp&limit=30`).catch(e => {
+  // limit alto: a loja posta dezenas de stories/dia e o PREÇO vem em stories separados da sequência
+  const stories = await igGet(`${IG_USER_ID}/stories?fields=id,media_type,media_url,thumbnail_url,caption,timestamp&limit=100`).catch(e => {
     console.warn('[ig-content] stories indisponíveis:', e.details?.message || e.message);
     return { data: [] };
   });
@@ -131,23 +132,21 @@ async function syncNow() {
   for (const p of feed.data || []) await ingestItem(p, 'feed');
 }
 
+const fmtHora = (d) => new Date(d).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
 // Contexto textual injetado no prompt da Lê
 async function getPageContext() {
-  const fmtAge = (d) => {
-    const h = Math.round((Date.now() - new Date(d).getTime()) / 3600000);
-    return h < 1 ? 'agora há pouco' : h < 24 ? `há ${h}h` : `há ${Math.round(h / 24)}d`;
-  };
   const stories = await queryAll(
-    "SELECT * FROM ig_content WHERE kind = 'story' AND posted_at > NOW() - INTERVAL '48 hours' ORDER BY posted_at DESC LIMIT 25");
+    "SELECT * FROM ig_content WHERE kind = 'story' AND posted_at > NOW() - INTERVAL '48 hours' ORDER BY posted_at ASC LIMIT 100");
   const feed = await queryAll(
     "SELECT * FROM ig_content WHERE kind = 'feed' ORDER BY posted_at DESC LIMIT 10");
 
   let out = '';
   if (stories.length) {
-    out += 'STORIES RECENTES (últimas 48h; os sem "EXPIRADO" ainda estão no ar):\n';
+    out += 'STORIES RECENTES em ordem cronológica (últimas 48h). PADRÃO DA LOJA: os stories saem em SEQUÊNCIA — primeiro o look completo no provador, logo depois um story de cada peça com o PREÇO e tamanhos na arte. O preço de uma peça vista num look costuma estar nos stories dos MINUTOS SEGUINTES (mesma faixa de horário):\n';
     for (const s of stories) {
       const dead = s.expires_at && new Date(s.expires_at) < new Date() ? ' [EXPIRADO]' : '';
-      out += `- (${fmtAge(s.posted_at)}${dead}) ${s.analysis || s.caption || 'sem descrição'}\n`;
+      out += `- [${fmtHora(s.posted_at)}${dead}] ${s.analysis || s.caption || 'sem descrição'}\n`;
     }
   }
   if (feed.length) {
@@ -183,4 +182,20 @@ async function ensureStory(storyId) {
   return null;
 }
 
-module.exports = { initTables, start, syncNow, getPageContext, getById, ensureStory };
+// Sequência do provador: o story respondido + vizinhos de ±45 min (onde costuma estar o preço)
+async function getSequence(storyId) {
+  const row = await getById(storyId);
+  if (!row || !row.posted_at) return null;
+  const neighbors = await queryAll(
+    `SELECT * FROM ig_content WHERE kind = 'story'
+       AND posted_at BETWEEN $1::timestamptz - INTERVAL '45 minutes' AND $1::timestamptz + INTERVAL '45 minutes'
+     ORDER BY posted_at ASC LIMIT 15`, [row.posted_at]);
+  let out = '';
+  for (const s of neighbors) {
+    const marker = s.id === storyId ? '  << ESTE é o story que a cliente respondeu' : '';
+    out += `- [${fmtHora(s.posted_at)}] ${s.analysis || s.caption || 'sem descrição'}${marker}\n`;
+  }
+  return { row, sequence: out };
+}
+
+module.exports = { initTables, start, syncNow, getPageContext, getById, ensureStory, getSequence };
