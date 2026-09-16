@@ -23,6 +23,8 @@ const bcrypt = require('bcryptjs');
 const erp = require('./erp');
 const aiAgent = require('./ai-agent');
 const { generateReceiptImage, generateReceiptText } = require('./receipt');
+const { handleInstagramWebhook } = require('./instagram/webhook');
+const liveReservations = require('./live/reservations');
 
 // Valida que JWT_SECRET foi definido no .env (nunca usar fallback hardcoded)
 if (!process.env.JWT_SECRET) {
@@ -59,7 +61,13 @@ app.use(cors({
 }));
 
 // Rate limit global — máximo 100 requests por minuto por IP
-const globalLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, message: { error: 'Muitas requisições. Aguarde um momento.' } });
+// Webhooks da Meta ficam de fora: numa live com comentários em ritmo alto o limite estouraria,
+// os 429 fariam a Meta desativar a assinatura do webhook (WhatsApp e Instagram juntos)
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 100,
+  message: { error: 'Muitas requisições. Aguarde um momento.' },
+  skip: (req) => req.path.startsWith('/api/webhook/'),
+});
 app.use(globalLimiter);
 
 // Rate limit específico para login — máximo 5 tentativas por minuto por IP
@@ -423,6 +431,12 @@ app.get('/api/webhook/meta', (req, res) => {
 });
 
 app.post('/api/webhook/meta', async (req, res) => {
+  // Eventos do Instagram (live commerce) chegam no mesmo endpoint, com object === 'instagram'
+  if (req.body?.object === 'instagram') {
+    res.sendStatus(200); // responder já — a Meta desativa a assinatura se demorar/falhar
+    handleInstagramWebhook(req.body).catch(err => console.error('[ig-webhook]', err));
+    return;
+  }
   res.sendStatus(200); // responde rápido — Meta reenvia se demorar
   try {
     await wa.processWebhook(req.body);
@@ -2050,8 +2064,111 @@ app.post('/api/vip/broadcast/:id/retry', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════
+// ═══  LIVE COMMERCE (Instagram @d_blackloja)  ═══
+// ═══════════════════════════════════════════
+
+// Lista as lives (painel do moderador)
+app.get('/api/live/sessions', auth, async (req, res) => {
+  try {
+    res.json(await queryAll("SELECT * FROM live_sessions ORDER BY id DESC LIMIT 50"));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cria live
+app.post('/api/live/sessions', auth, async (req, res) => {
+  try {
+    const { title, starts_at } = req.body || {};
+    if (!title) return res.status(400).json({ error: 'title é obrigatório' });
+    const row = await queryOne(
+      "INSERT INTO live_sessions (title, starts_at) VALUES ($1, $2) RETURNING *",
+      [title, starts_at || null]
+    );
+    res.json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ativa a live (só pode haver uma ativa — desativa qualquer outra)
+app.post('/api/live/sessions/:id/activate', auth, async (req, res) => {
+  try {
+    await queryRun("UPDATE live_sessions SET status = 'closed' WHERE status = 'active' AND id != $1", [req.params.id]);
+    const row = await queryOne("UPDATE live_sessions SET status = 'active' WHERE id = $1 RETURNING *", [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Live não encontrada' });
+    broadcast('live:update', { sessionId: row.id, event: 'activated' });
+    res.json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Encerra a live
+app.post('/api/live/sessions/:id/close', auth, async (req, res) => {
+  try {
+    const row = await queryOne("UPDATE live_sessions SET status = 'closed' WHERE id = $1 RETURNING *", [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Live não encontrada' });
+    broadcast('live:update', { sessionId: row.id, event: 'closed' });
+    res.json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Adiciona peça ao catálogo da live
+app.post('/api/live/sessions/:id/items', auth, async (req, res) => {
+  try {
+    const { code, erp_product_id, name, live_price_cents, sizes } = req.body || {};
+    if (!code || !name || !Number.isInteger(live_price_cents)) {
+      return res.status(400).json({ error: 'code, name e live_price_cents (int) são obrigatórios' });
+    }
+    const row = await queryOne(
+      `INSERT INTO live_items (session_id, code, erp_product_id, name, live_price_cents, sizes)
+       VALUES ($1, UPPER($2), $3, $4, $5, $6)
+       ON CONFLICT (session_id, code) DO UPDATE
+         SET erp_product_id = EXCLUDED.erp_product_id, name = EXCLUDED.name,
+             live_price_cents = EXCLUDED.live_price_cents, sizes = EXCLUDED.sizes
+       RETURNING *`,
+      [req.params.id, code, erp_product_id || null, name, live_price_cents, JSON.stringify(sizes || {})]
+    );
+    broadcast('live:update', { sessionId: parseInt(req.params.id), event: 'item' });
+    res.json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Painel do moderador: peças com reservado/pago/expirado/fila
+app.get('/api/live/sessions/:id/board', auth, async (req, res) => {
+  try {
+    const data = await liveReservations.board(req.params.id);
+    if (!data) return res.status(404).json({ error: 'Live não encontrada' });
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Dados da reserva para a página do checkout (pública, só leitura)
+app.get('/api/live/r/:token', async (req, res) => {
+  try {
+    const r = await liveReservations.getByToken(req.params.token);
+    if (!r) return res.status(404).json({ error: 'Reserva não encontrada' });
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Marca reserva como paga — chamado pelo webhook do gateway (mesmo token do webhook Asaas)
+app.post('/api/live/r/:token/paid', async (req, res) => {
+  try {
+    const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
+    if (webhookToken) {
+      const received = req.headers['asaas-access-token'] || req.query.token;
+      if (received !== webhookToken) {
+        console.log('⛔ live/paid rejeitado — token inválido');
+        return res.status(403).json({ error: 'Não autorizado' });
+      }
+    }
+    const row = await liveReservations.markPaid(req.params.token, req.body?.order_id);
+    if (!row) return res.status(404).json({ error: 'Reserva não encontrada ou já paga/cancelada' });
+    res.json({ ok: true, reservation: row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 async function start() {
   await initDB();
+  await liveReservations.initTables();
+  liveReservations.init({ onUpdate: (payload) => broadcast('live:update', payload) });
   // Verifica conexão da Evolution API
   await wa.connect();
   server.listen(PORT, () => {
