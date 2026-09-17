@@ -593,6 +593,10 @@ export default function App() {
   const atendendo = chanConvs.filter(c => c.status === 'atendendo');
   const myAtendendo = user?.role === 'admin' ? atendendo : atendendo.filter(c => c.agent_id === user?.id);
   const finalizados = chanConvs.filter(c => c.status === 'finalizado');
+  // Instagram: separa quem a Lê ainda atende de quem ela já passou pra equipe
+  const isMuted = (c) => c.ai_muted === true || c.ai_muted === 'true';
+  const comLe = aguardando.filter(c => !isMuted(c));
+  const praEquipe = aguardando.filter(isMuted);
 
   const filteredConvs = (list) => {
     if (!searchTerm) return list;
@@ -715,7 +719,7 @@ export default function App() {
             { id: 'whatsapp', label: 'WhatsApp', emoji: '💬', count: waAguardando, activeBg: '#d9fdd3', activeTxt: '#0b6b53' },
             { id: 'instagram', label: 'Instagram', emoji: '📷', count: igAguardando, activeBg: '#fde3f1', activeTxt: '#c1275e' },
           ].map(ch => (
-            <button key={ch.id} onClick={() => setChannel(ch.id)} style={{
+            <button key={ch.id} onClick={() => { setChannel(ch.id); setTab('atendendo'); }} style={{
               flex: 1, padding: '8px 10px', background: channel === ch.id ? ch.activeBg : W.search, border: 'none',
               borderRadius: 10, color: channel === ch.id ? ch.activeTxt : W.txt2, fontSize: 13,
               fontWeight: channel === ch.id ? 700 : 400, cursor: 'pointer', fontFamily: 'inherit',
@@ -729,11 +733,16 @@ export default function App() {
 
         {/* Abas (chips de filtro, estilo WhatsApp) */}
         <div className="chips-row" style={{ display: 'flex', gap: 8, padding: '8px 12px 10px', background: W.bgPanel, borderBottom: `1px solid ${W.border}`, overflowX: 'auto', scrollbarWidth: 'none' }}>
-          {[
+          {(channel === 'instagram' ? [
+            { id: 'atendendo', label: 'Atendendo', count: myAtendendo.length },
+            { id: 'pra_equipe', label: '👋 Pra equipe', count: praEquipe.length, alert: true },
+            { id: 'com_le', label: '🤖 Com a Lê', count: comLe.length },
+            { id: 'finalizados', label: 'Finalizados', count: finalizados.length },
+          ] : [
             { id: 'atendendo', label: 'Atendendo', count: myAtendendo.length },
             { id: 'aguardando', label: 'Fila', count: aguardando.length },
             { id: 'finalizados', label: 'Finalizados', count: finalizados.length },
-          ].map(t => (
+          ]).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               padding: '7px 14px', background: tab === t.id ? '#d9fdd3' : W.search, border: 'none',
               borderRadius: 18, color: tab === t.id ? '#0b6b53' : W.txt2, fontSize: 13,
@@ -741,7 +750,7 @@ export default function App() {
               fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6, transition: 'all .15s',
             }}>
               {t.label}
-              {t.count > 0 && <span style={{ background: tab === t.id ? '#0b6b53' : W.green, color: '#fff', borderRadius: 12, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>{t.count}</span>}
+              {t.count > 0 && <span style={{ background: t.alert ? '#e0483d' : (tab === t.id ? '#0b6b53' : W.green), color: '#fff', borderRadius: 12, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>{t.count}</span>}
             </button>
           ))}
         </div>
@@ -757,7 +766,7 @@ export default function App() {
           ) : (
             <>
               {tab === 'atendendo' && filteredConvs(myAtendendo).map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} />)}
-              {tab === 'aguardando' && filteredConvs(aguardando).map(conv => (
+              {(tab === 'aguardando' || tab === 'com_le' || tab === 'pra_equipe') && filteredConvs(tab === 'com_le' ? comLe : tab === 'pra_equipe' ? praEquipe : aguardando).map(conv => (
                 <div key={conv.id} style={{ cursor: 'pointer' }}>
                   <ConvItem conv={conv} active={spyConv?.id === conv.id} onClick={() => spyConversation(conv)} />
                   <div style={{ display: 'flex', gap: 8, padding: '0 16px 10px', marginTop: -4 }}>
@@ -767,8 +776,8 @@ export default function App() {
                 </div>
               ))}
               {tab === 'finalizados' && filteredConvs(finalizados).slice(0, 50).map(conv => <ConvItem key={conv.id} conv={conv} active={activeConv?.id === conv.id} onClick={() => openConversation(conv)} finished />)}
-              {((tab === 'atendendo' && myAtendendo.length === 0) || (tab === 'aguardando' && aguardando.length === 0) || (tab === 'finalizados' && finalizados.length === 0)) &&
-                <div style={{ padding: 40, textAlign: 'center', fontSize: 14, color: W.txt2 }}>Nenhuma conversa</div>
+              {((tab === 'atendendo' && myAtendendo.length === 0) || (tab === 'aguardando' && aguardando.length === 0) || (tab === 'com_le' && comLe.length === 0) || (tab === 'pra_equipe' && praEquipe.length === 0) || (tab === 'finalizados' && finalizados.length === 0)) &&
+                <div style={{ padding: 40, textAlign: 'center', fontSize: 14, color: W.txt2 }}>{tab === 'pra_equipe' ? 'Nenhuma conversa esperando a equipe 🎉' : 'Nenhuma conversa'}</div>
               }
             </>
           )}
