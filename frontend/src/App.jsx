@@ -735,15 +735,15 @@ export default function App() {
         <div className="chips-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 12px 10px', background: W.bgPanel, borderBottom: `1px solid ${W.border}` }}>
           {(channel === 'instagram' ? [
             { id: 'atendendo', label: 'Atendendo', count: myAtendendo.length },
-            { id: 'pra_equipe', label: '👋 Pra equipe', count: praEquipe.length, alert: true },
-            { id: 'com_le', label: '🤖 Lê', count: comLe.length },
+            { id: 'pra_equipe', label: '👋', title: 'Passadas pra equipe pela Lê', count: praEquipe.length, alert: true },
+            { id: 'com_le', label: '🤖', title: 'A Lê está atendendo', count: comLe.length },
             { id: 'finalizados', label: 'Finalizados', count: finalizados.length },
           ] : [
             { id: 'atendendo', label: 'Atendendo', count: myAtendendo.length },
             { id: 'aguardando', label: 'Fila', count: aguardando.length },
             { id: 'finalizados', label: 'Finalizados', count: finalizados.length },
           ]).map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
+            <button key={t.id} onClick={() => setTab(t.id)} title={t.title || t.label} style={{
               padding: '7px 14px', background: tab === t.id ? '#d9fdd3' : W.search, border: 'none',
               borderRadius: 18, color: tab === t.id ? '#0b6b53' : W.txt2, fontSize: 13,
               fontWeight: tab === t.id ? 600 : 400, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
