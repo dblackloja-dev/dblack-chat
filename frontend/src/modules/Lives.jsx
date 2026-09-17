@@ -4,7 +4,7 @@ import api from '../api';
 // Painel do moderador da sala de live — cria a live, cadastra as peças (com foto),
 // ativa/encerra e acompanha reservado/pago/fila em tempo real.
 const SALA_URL = 'https://dblack-checkout-production.up.railway.app/live';
-const HLS_URL = 'https://dblack-live-production.up.railway.app/live/index.m3u8';
+const HLS_URL = 'https://dblack-live-production.up.railway.app/live/dblack/index.m3u8';
 
 const C = {
   bg: '#0f1f1c', card: '#152825', border: 'rgba(255,255,255,0.08)',
