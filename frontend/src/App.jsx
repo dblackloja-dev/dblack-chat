@@ -732,7 +732,7 @@ export default function App() {
         </div>
 
         {/* Abas (chips de filtro, estilo WhatsApp) */}
-        <div className="chips-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 12px 10px', background: W.bgPanel, borderBottom: `1px solid ${W.border}` }}>
+        <div className="chips-row" style={{ display: 'flex', flexWrap: 'nowrap', gap: 6, padding: '8px 10px 10px', background: W.bgPanel, borderBottom: `1px solid ${W.border}`, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {(channel === 'instagram' ? [
             { id: 'atendendo', label: 'Atendendo', count: myAtendendo.length },
             { id: 'pra_equipe', label: '👋', title: 'Passadas pra equipe pela Lê', count: praEquipe.length, alert: true },
@@ -744,13 +744,13 @@ export default function App() {
             { id: 'finalizados', label: 'Finalizados', count: finalizados.length },
           ]).map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} title={t.title || t.label} style={{
-              padding: '7px 14px', background: tab === t.id ? '#d9fdd3' : W.search, border: 'none',
-              borderRadius: 18, color: tab === t.id ? '#0b6b53' : W.txt2, fontSize: 13,
+              padding: '6px 10px', background: tab === t.id ? '#d9fdd3' : W.search, border: 'none',
+              borderRadius: 16, color: tab === t.id ? '#0b6b53' : W.txt2, fontSize: 12.5,
               fontWeight: tab === t.id ? 600 : 400, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
-              fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6, transition: 'all .15s',
+              fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5, transition: 'all .15s',
             }}>
               {t.label}
-              {t.count > 0 && <span style={{ background: t.alert ? '#e0483d' : (tab === t.id ? '#0b6b53' : W.green), color: '#fff', borderRadius: 12, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>{t.count}</span>}
+              {t.count > 0 && <span style={{ background: t.alert ? '#e0483d' : (tab === t.id ? '#0b6b53' : W.green), color: '#fff', borderRadius: 12, padding: '1px 6px', fontSize: 10.5, fontWeight: 600 }}>{t.count}</span>}
             </button>
           ))}
         </div>
