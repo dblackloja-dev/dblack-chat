@@ -267,8 +267,6 @@ function renderEvent(ev, payload, nome) {
     }
     case 'expiring':
       return `${nome}, ${fmtBRL(p.valor)} do seu saldo Cliente Black vence em ${p.dias} dia${Number(p.dias) === 1 ? '' : 's'}. Vem usar! 🖤`;
-    case 'birthday':
-      return `Feliz aniversário, ${nome}! 🎂🖤 Este mês seu cashback Cliente Black é em DOBRO em todas as compras.`;
     default:
       return null; // eventos internos (ex.: balance_shortfall) não vão pro cliente
   }
