@@ -279,9 +279,20 @@ export const IconPromo = ({ active = false, size = 20 }) => (
   </svg>
 );
 
+export const IconLives = ({ active = false, size = 20 }) => (
+  <svg {...iconProps} width={size} height={size}>
+    <circle cx="12" cy="12" r="3.2" fill={active ? '#0d1b18' : s} opacity={active ? 0.9 : 0.6} />
+    <path d="M7.5 7.5C6.3 8.7 5.6 10.3 5.6 12C5.6 13.7 6.3 15.3 7.5 16.5M16.5 7.5C17.7 8.7 18.4 10.3 18.4 12C18.4 13.7 17.7 15.3 16.5 16.5"
+      stroke={active ? '#0d1b18' : s} strokeWidth="1.5" fill="none" strokeLinecap="round" opacity={active ? 1 : 0.7}/>
+    <path d="M4.5 4.5C2.6 6.4 1.5 9.1 1.5 12C1.5 14.9 2.6 17.6 4.5 19.5M19.5 4.5C21.4 6.4 22.5 9.1 22.5 12C22.5 14.9 21.4 17.6 19.5 19.5"
+      stroke={active ? '#0d1b18' : s} strokeWidth="1.5" fill="none" strokeLinecap="round" opacity={active ? 0.6 : 0.4}/>
+  </svg>
+);
+
 export const SIDEBAR_ICONS = [
   { key: 'dashboard',  label: 'Dashboard',  Icon: IconDashboard  },
   { key: 'conversas',  label: 'Conversas',  Icon: IconConversas  },
+  { key: 'lives',      label: 'Lives',      Icon: IconLives      },
   { key: 'contatos',   label: 'Contatos',   Icon: IconContatos   },
   { key: 'promo',      label: 'Promo',      Icon: IconPromo      },
   { key: 'respostas',  label: 'Respostas',  Icon: IconRespostas  },

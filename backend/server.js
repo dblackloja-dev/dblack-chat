@@ -2228,6 +2228,55 @@ app.get('/api/live/sessions/:id/board', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Vitrine pública da sala de live (consumida pelo dblack-checkout; cache de 3s pro poll da plateia)
+let vitrineCache = { data: null, at: 0 };
+app.get('/api/live/vitrine', async (req, res) => {
+  try {
+    if (Date.now() - vitrineCache.at > 3000) {
+      vitrineCache = { data: await liveReservations.vitrine(), at: Date.now() };
+    }
+    const base = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
+    const data = vitrineCache.data;
+    if (!data) return res.json({ active: false });
+    res.json({
+      active: true,
+      session: data.session,
+      items: data.items.map(i => ({ ...i, photoUrl: i.photoUrl ? base + i.photoUrl : null })),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// QUERO da sala de live: cria a reserva e devolve o token do checkout (público, com rate limit)
+const queroLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, message: { error: 'Calma! Muitas tentativas — espera um minutinho.' } });
+app.post('/api/live/quero', queroLimiter, async (req, res) => {
+  try {
+    const { code, size } = req.body || {};
+    if (!code) return res.status(400).json({ error: 'Informe o código da peça' });
+    const result = await liveReservations.reserve({
+      code: String(code).toUpperCase().trim(),
+      size: size ? String(size).toUpperCase().trim() : null,
+      igUserId: null, igUsername: 'sala', commentId: null, mediaId: null, source: 'sala',
+    });
+    vitrineCache.at = 0; // vitrine muda na hora
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto da peça da live (painel do moderador)
+app.post('/api/live/items/:id/photo', auth, upload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Foto não enviada' });
+    const buffer = await sharp(req.file.buffer).rotate().resize({ width: 800, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+    const mediaId = 'lvph_' + genId();
+    await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1, 'image/jpeg', $2)", [mediaId, buffer.toString('base64')]);
+    const row = await queryOne("UPDATE live_items SET photo_media_id = $1 WHERE id = $2 RETURNING *", [mediaId, req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Peça não encontrada' });
+    vitrineCache.at = 0;
+    broadcast('live:update', { sessionId: row.session_id, event: 'item' });
+    res.json({ ok: true, photoUrl: `/media/${mediaId}` });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Dados da reserva para a página do checkout (pública, só leitura)
 app.get('/api/live/r/:token', async (req, res) => {
   try {

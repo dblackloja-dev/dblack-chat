@@ -9,6 +9,7 @@ import Settings from './modules/Settings';
 import AIAgents from './modules/AIAgents';
 import AIMetrics from './modules/AIMetrics';
 import PromoManager from './modules/PromoManager';
+import Lives from './modules/Lives';
 import { Sidebar as DBlackSidebar } from './components/layout/Sidebar';
 
 // ─── CORES WHATSAPP WEB (TEMA CLARO) ───
@@ -680,6 +681,7 @@ export default function App() {
       {currentModule === 'reports' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><Reports /></div>}
       {currentModule === 'settings' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><Settings /></div>}
       {currentModule === 'promo' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><PromoManager /></div>}
+      {currentModule === 'lives' && <div style={{ flex: 1, background: '#0f1f1c', overflow: 'auto', width: '100%', minWidth: 0 }}><Lives /></div>}
 
       {/* ═══ CHAT (módulo principal) ═══ */}
       {currentModule === 'chat' && <>

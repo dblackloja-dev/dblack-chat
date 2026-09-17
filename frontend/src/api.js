@@ -45,6 +45,25 @@ const api = {
   logout: () => clearToken(),
   getToken,
 
+  // Lives (painel do moderador da sala de live)
+  getLiveSessions: () => request('/live/sessions'),
+  createLiveSession: (title) => request('/live/sessions', { method: 'POST', body: { title } }),
+  activateLiveSession: (id) => request(`/live/sessions/${id}/activate`, { method: 'POST' }),
+  closeLiveSession: (id) => request(`/live/sessions/${id}/close`, { method: 'POST' }),
+  addLiveItem: (id, item) => request(`/live/sessions/${id}/items`, { method: 'POST', body: item }),
+  getLiveBoard: (id) => request(`/live/sessions/${id}/board`),
+  uploadLiveItemPhoto: async (itemId, file) => {
+    const fd = new FormData();
+    fd.append('photo', file);
+    const res = await fetch(`${BASE}/live/items/${itemId}/photo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}` },
+      body: fd,
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Erro ao enviar foto');
+    return res.json();
+  },
+
   // Users
   getUsers: () => request('/users'),
   createUser: (data) => request('/users', { method: 'POST', body: data }),

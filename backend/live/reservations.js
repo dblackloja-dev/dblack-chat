@@ -66,6 +66,8 @@ async function initTables() {
     );
     CREATE INDEX IF NOT EXISTS idx_live_wait_item ON live_waitlist (item_id, size, created_at);
   `);
+  // Foto da peça pra vitrine da sala de live (id em media_files)
+  try { await queryRun("ALTER TABLE live_items ADD COLUMN IF NOT EXISTS photo_media_id TEXT"); } catch {}
   console.log('🎥 Tabelas de live commerce prontas');
 }
 
@@ -259,4 +261,39 @@ async function board(sessionId) {
   return { session, items, reservations };
 }
 
-module.exports = { initTables, init, reserve, getByToken, markPaid, expireStale, board };
+// Vitrine pública da sala de live: peças da sessão ativa com disponibilidade por tamanho
+async function vitrine() {
+  const session = await queryOne("SELECT id, title FROM live_sessions WHERE status = 'active' ORDER BY id DESC LIMIT 1");
+  if (!session) return null;
+  const items = await queryAll("SELECT * FROM live_items WHERE session_id = $1 ORDER BY code", [session.id]);
+  const counts = await queryAll(
+    `SELECT item_id, size, COUNT(*)::int AS c FROM live_reservations
+     WHERE session_id = $1 AND (status = 'paid' OR (status = 'reserved' AND expires_at > NOW()))
+     GROUP BY item_id, size`, [session.id]);
+  const used = new Map();
+  for (const r of counts) used.set(`${r.item_id}|${r.size ?? ''}`, r.c);
+
+  const out = items.map(i => {
+    const sizes = i.sizes || {};
+    const hasSizes = Object.keys(sizes).length > 0;
+    let sizeAvail = null, soldOut;
+    if (hasSizes) {
+      sizeAvail = {};
+      for (const [s, cap] of Object.entries(sizes)) {
+        sizeAvail[s] = Math.max(0, parseInt(cap, 10) - (used.get(`${i.id}|${s}`) || 0));
+      }
+      soldOut = Object.values(sizeAvail).every(v => v <= 0);
+    } else {
+      soldOut = (1 - (used.get(`${i.id}|`) || 0)) <= 0;
+    }
+    return {
+      id: i.id, code: i.code, name: i.name,
+      priceCents: i.live_price_cents,
+      photoUrl: i.photo_media_id ? `/media/${i.photo_media_id}` : null,
+      sizes: sizeAvail, soldOut,
+    };
+  });
+  return { session: { id: session.id, title: session.title }, items: out };
+}
+
+module.exports = { initTables, init, reserve, getByToken, markPaid, expireStale, board, vitrine };
