@@ -732,11 +732,11 @@ export default function App() {
         </div>
 
         {/* Abas (chips de filtro, estilo WhatsApp) */}
-        <div className="chips-row" style={{ display: 'flex', gap: 8, padding: '8px 12px 10px', background: W.bgPanel, borderBottom: `1px solid ${W.border}`, overflowX: 'auto', scrollbarWidth: 'none' }}>
+        <div className="chips-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 12px 10px', background: W.bgPanel, borderBottom: `1px solid ${W.border}` }}>
           {(channel === 'instagram' ? [
             { id: 'atendendo', label: 'Atendendo', count: myAtendendo.length },
             { id: 'pra_equipe', label: '👋 Pra equipe', count: praEquipe.length, alert: true },
-            { id: 'com_le', label: '🤖 Com a Lê', count: comLe.length },
+            { id: 'com_le', label: '🤖 Lê', count: comLe.length },
             { id: 'finalizados', label: 'Finalizados', count: finalizados.length },
           ] : [
             { id: 'atendendo', label: 'Atendendo', count: myAtendendo.length },
