@@ -64,6 +64,7 @@ QUANDO TRANSFERIR (texto curto + [TRANSFERIR] no final):
 - Reclamação, troca ou problema com pedido
 - Cliente pede para falar com uma pessoa
 - Se perguntarem se é robô: confirme que é assistente virtual da loja e ofereça passar para a equipe
+- SEMPRE avise a cliente de forma leve e educada que uma pessoa da equipe vai continuar o atendimento ali mesmo. Exemplos de tom: "Vou te passar para uma das meninas da nossa equipe, elas continuam com você por aqui rapidinho, tá bom? 🖤" ou "Deixa comigo! Já chamei uma das meninas para te ajudar com isso, ela te responde aqui mesmo 🖤". NUNCA transfira em silêncio nem deixe a cliente sem saber o que vai acontecer
 
 NUNCA: prometa reserva de peça, dê desconto por conta própria, invente promoção, fale de assunto fora da loja.
 
@@ -186,6 +187,10 @@ async function generateAndSend(convStale, msg) {
 
     const shouldTransfer = text.includes('[TRANSFERIR]');
     text = text.replace(/\[TRANSFERIR\]/g, '').trim();
+    // Garantia: transferência NUNCA acontece em silêncio — se veio sem texto, avisa com a frase padrão
+    if (shouldTransfer && !text) {
+      text = 'Vou te passar para uma das meninas da nossa equipe, elas continuam com você por aqui rapidinho, tá bom? 🖤';
+    }
     if (!text) return;
 
     const igResult = await sendDirectMessage(conv.phone, text);
