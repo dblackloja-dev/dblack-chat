@@ -68,6 +68,8 @@ async function initTables() {
   `);
   // Foto da peça pra vitrine da sala de live (id em media_files)
   try { await queryRun("ALTER TABLE live_items ADD COLUMN IF NOT EXISTS photo_media_id TEXT"); } catch {}
+  // "Em cena": só as peças marcadas aparecem nos cards da sala (moderador troca durante a live)
+  try { await queryRun("ALTER TABLE live_items ADD COLUMN IF NOT EXISTS on_stage BOOLEAN DEFAULT TRUE"); } catch {}
   console.log('🎥 Tabelas de live commerce prontas');
 }
 
@@ -265,7 +267,7 @@ async function board(sessionId) {
 async function vitrine() {
   const session = await queryOne("SELECT id, title FROM live_sessions WHERE status = 'active' ORDER BY id DESC LIMIT 1");
   if (!session) return null;
-  const items = await queryAll("SELECT * FROM live_items WHERE session_id = $1 ORDER BY code", [session.id]);
+  const items = await queryAll("SELECT * FROM live_items WHERE session_id = $1 AND on_stage IS NOT FALSE ORDER BY code", [session.id]);
   const counts = await queryAll(
     `SELECT item_id, size, COUNT(*)::int AS c FROM live_reservations
      WHERE session_id = $1 AND (status = 'paid' OR (status = 'reserved' AND expires_at > NOW()))
@@ -296,4 +298,9 @@ async function vitrine() {
   return { session: { id: session.id, title: session.title }, items: out };
 }
 
-module.exports = { initTables, init, reserve, getByToken, markPaid, expireStale, board, vitrine };
+// Marca/desmarca a peça como "em cena" (visível nos cards da sala)
+async function setStage(itemId, on) {
+  return queryOne("UPDATE live_items SET on_stage = $2 WHERE id = $1 RETURNING *", [itemId, !!on]);
+}
+
+module.exports = { initTables, init, reserve, getByToken, markPaid, expireStale, board, vitrine, setStage };

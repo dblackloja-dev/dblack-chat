@@ -2239,6 +2239,17 @@ app.post('/api/live/sessions/:id/items', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// "Em cena": moderador escolhe quais peças aparecem nos cards da sala durante a live
+app.post('/api/live/items/:id/stage', auth, async (req, res) => {
+  try {
+    const row = await liveReservations.setStage(req.params.id, req.body?.on);
+    if (!row) return res.status(404).json({ error: 'Peça não encontrada' });
+    vitrineCache.at = 0; // sala reflete na hora
+    broadcast('live:update', { sessionId: row.session_id, event: 'stage' });
+    res.json(row);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Painel do moderador: peças com reservado/pago/expirado/fila
 app.get('/api/live/sessions/:id/board', auth, async (req, res) => {
   try {

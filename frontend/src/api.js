@@ -51,6 +51,7 @@ const api = {
   activateLiveSession: (id) => request(`/live/sessions/${id}/activate`, { method: 'POST' }),
   closeLiveSession: (id) => request(`/live/sessions/${id}/close`, { method: 'POST' }),
   addLiveItem: (id, item) => request(`/live/sessions/${id}/items`, { method: 'POST', body: item }),
+  setLiveItemStage: (itemId, on) => request(`/live/items/${itemId}/stage`, { method: 'POST', body: { on } }),
   getLiveBoard: (id) => request(`/live/sessions/${id}/board`),
   uploadLiveItemPhoto: async (itemId, file) => {
     const fd = new FormData();

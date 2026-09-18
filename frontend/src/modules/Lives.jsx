@@ -158,7 +158,25 @@ export default function Lives() {
                 <input ref={el => photoRefs.current[i.id] = el} type="file" accept="image/*" style={{ display: 'none' }}
                   onChange={e => { uploadPhoto(i.id, e.target.files[0]); e.target.value = ''; }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700 }}>{i.code} <span style={{ fontWeight: 400 }}>{i.name}</span></div>
+                  <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span>{i.code} <span style={{ fontWeight: 400 }}>{i.name}</span></span>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await api.setLiveItemStage(i.id, i.on_stage === false);
+                          const b = await api.getLiveBoard(selected); setBoard(b);
+                        } catch (e) { flash(e.message); }
+                      }}
+                      title={i.on_stage === false ? 'Peça escondida da sala — clique para colocar EM CENA' : 'Peça visível na sala — clique para tirar de cena'}
+                      style={{
+                        border: `1px solid ${i.on_stage === false ? C.border : C.gold}`,
+                        background: i.on_stage === false ? 'transparent' : 'rgba(212,175,55,.15)',
+                        color: i.on_stage === false ? C.muted : C.gold,
+                        borderRadius: 999, padding: '2px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                      }}>
+                      {i.on_stage === false ? '🙈 fora de cena' : '🎬 EM CENA'}
+                    </button>
+                  </div>
                   <div style={{ color: C.gold, fontWeight: 700, margin: '2px 0 6px' }}>{fmtPrice(i.live_price_cents)}</div>
                   <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>
                     {Object.keys(i.sizes || {}).length ? Object.entries(i.sizes).map(([s, q]) => `${s}:${q}`).join('  ') : 'peça única'}
