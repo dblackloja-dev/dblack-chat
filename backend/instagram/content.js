@@ -11,6 +11,11 @@ const MODEL = 'claude-sonnet-4-6';
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 let timer = null;
 
+// Surrogate solto (ex.: emoji cortado ao meio) gera JSON inválido e a API da
+// Anthropic recusa a requisição inteira — remove antes de serializar.
+const stripLoneSurrogates = (s) => String(s).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+const jsonSafe = (obj) => JSON.stringify(obj, (k, v) => typeof v === 'string' ? stripLoneSurrogates(v) : v);
+
 async function initTables() {
   await queryRun(`
     CREATE TABLE IF NOT EXISTS ig_content (
@@ -65,7 +70,7 @@ async function analyzeImage(base64, mime, caption, kind) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
+    body: jsonSafe({
       model: MODEL,
       max_tokens: 300,
       messages: [{
@@ -152,7 +157,7 @@ async function getPageContext() {
   if (feed.length) {
     out += '\nPOSTS RECENTES DO FEED:\n';
     for (const p of feed) {
-      out += `- [${fmtHora(p.posted_at)}] ${p.analysis || ''}${p.caption ? ` | legenda: ${p.caption.slice(0, 150)}` : ''}\n`;
+      out += `- [${fmtHora(p.posted_at)}] ${p.analysis || ''}${p.caption ? ` | legenda: ${[...p.caption].slice(0, 150).join('')}` : ''}\n`;
     }
   }
   return out || '(nenhum conteúdo indexado ainda)';
@@ -198,4 +203,4 @@ async function getSequence(storyId) {
   return { row, sequence: out };
 }
 
-module.exports = { initTables, start, syncNow, getPageContext, getById, ensureStory, getSequence };
+module.exports = { initTables, start, syncNow, getPageContext, getById, ensureStory, getSequence, jsonSafe };

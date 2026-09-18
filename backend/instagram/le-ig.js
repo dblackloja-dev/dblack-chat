@@ -174,7 +174,7 @@ async function generateAndSend(convStale, msg) {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: MODEL, max_tokens: 500, temperature: 0.7, system, messages }),
+      body: content.jsonSafe({ model: MODEL, max_tokens: 500, temperature: 0.7, system, messages }),
       signal: AbortSignal.timeout(60000),
     });
     const json = await res.json().catch(() => ({}));
