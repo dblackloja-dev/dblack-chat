@@ -125,12 +125,30 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
 
   // Cálculos (mesma lógica do ERP)
   const subtotal = cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+
+  // Leve 4 Pague 3: o brinde NÃO é desconto — sai da conta da venda (vira item de R$0
+  // no registro, baixando estoque) e qualquer desconto % incide só sobre o valor pago.
+  const p43Today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  const promo43On = !!(promo43Cfg?.active && (!promo43Cfg.from || p43Today >= promo43Cfg.from) && (!promo43Cfg.to || p43Today <= promo43Cfg.to));
+  let promo43Val = 0, promo43Free = 0, promo43Hint = 0;
+  if (promo43On && cart.length > 0) {
+    const byPrice = {};
+    cart.forEach(i => { const k = (Math.round(i.price * 100) / 100).toFixed(2); byPrice[k] = (byPrice[k] || 0) + i.quantity; });
+    Object.entries(byPrice).forEach(([price, qty]) => {
+      const free = Math.floor(qty / 4);
+      if (free > 0) { promo43Free += free; promo43Val += free * (+price); }
+      if (qty % 4 === 3 && !promo43Hint) promo43Hint = +price; // falta 1 peça pra fechar o brinde
+    });
+    promo43Val = Math.round(Math.min(promo43Val, subtotal) * 100) / 100;
+  }
+  const subPagavel = Math.max(0, Math.round((subtotal - promo43Val) * 100) / 100);
+
   let discountVal = 0;
   let discountLabel = '';
 
   if (discountScope === 'sale' && parseFloat(discount || 0) > 0) {
     if (discountType === 'percent') {
-      discountVal = subtotal * parseFloat(discount) / 100;
+      discountVal = subPagavel * parseFloat(discount) / 100;
       discountLabel = `${discount}% na venda toda`;
     } else {
       discountVal = parseFloat(discount);
@@ -150,24 +168,9 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       discountLabel = `desconto em ${activeItems.length === 1 ? activeItems[0].name : activeItems.length + ' produtos'}`;
     }
   }
-  discountVal = Math.min(discountVal, subtotal);
+  discountVal = Math.min(discountVal, subPagavel);
 
-  // Leve 4 Pague 3: aplica sozinho no período configurado
-  const p43Today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
-  const promo43On = !!(promo43Cfg?.active && (!promo43Cfg.from || p43Today >= promo43Cfg.from) && (!promo43Cfg.to || p43Today <= promo43Cfg.to));
-  let promo43Val = 0, promo43Free = 0, promo43Hint = 0;
-  if (promo43On && cart.length > 0) {
-    const byPrice = {};
-    cart.forEach(i => { const k = (Math.round(i.price * 100) / 100).toFixed(2); byPrice[k] = (byPrice[k] || 0) + i.quantity; });
-    Object.entries(byPrice).forEach(([price, qty]) => {
-      const free = Math.floor(qty / 4);
-      if (free > 0) { promo43Free += free; promo43Val += free * (+price); }
-      if (qty % 4 === 3 && !promo43Hint) promo43Hint = +price; // falta 1 peça pra fechar o brinde
-    });
-    promo43Val = Math.round(Math.min(promo43Val, Math.max(0, subtotal - discountVal)) * 100) / 100;
-  }
-
-  const total = Math.max(0, subtotal - discountVal - promo43Val);
+  const total = Math.max(0, subPagavel - discountVal);
 
   // Entrega/retirada é obrigatório — venda só finaliza classificada
   const deliveryOk = tipoEntrega === 'entrega' || (tipoEntrega === 'retirada' && lojaRetirada);
@@ -177,16 +180,35 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     if (cart.length === 0 || finishing || !deliveryOk) return;
     setFinishing(true);
     try {
+      // Leve 4 Pague 3: brinde vira item de R$0 (baixa estoque, fora da conta e do desconto)
+      let saleItems = cart.map(i => ({ product_id: i.product_id, name: i.name, sku: i.sku, price: i.price, quantity: i.quantity }));
+      if (promo43Free > 0) {
+        const freeLeft = {};
+        const byPrice = {};
+        cart.forEach(i => { const k = (Math.round(i.price * 100) / 100).toFixed(2); byPrice[k] = (byPrice[k] || 0) + i.quantity; });
+        Object.entries(byPrice).forEach(([p, q]) => { const f = Math.floor(q / 4); if (f > 0) freeLeft[p] = f; });
+        const out = [];
+        for (const it of saleItems) {
+          const k = (Math.round(it.price * 100) / 100).toFixed(2);
+          const take = Math.min(freeLeft[k] || 0, it.quantity);
+          if (take > 0) {
+            freeLeft[k] -= take;
+            if (it.quantity - take > 0) out.push({ ...it, quantity: it.quantity - take });
+            out.push({ ...it, quantity: take, price: 0, name: it.name + ' 🎁 BRINDE' });
+          } else out.push(it);
+        }
+        saleItems = out;
+      }
       const result = await api.createSale({
         store_id: selectedStore,
         customer_id: customer?.id || null,
         customer_phone: customerPhone,
         customer_name: customerName || customer?.name || null,
-        items: cart.map(i => ({ product_id: i.product_id, name: i.name, sku: i.sku, price: i.price, quantity: i.quantity })),
+        items: saleItems,
         payment_method: payment,
-        discount: Math.round((discountVal + promo43Val) * 100) / 100,
+        discount: Math.round(discountVal * 100) / 100,
         discount_type: 'fixed',
-        discount_label: [promo43Val > 0 ? `Leve 4 Pague 3 (${promo43Free} peça${promo43Free > 1 ? 's' : ''} de brinde)` : '', discountLabel].filter(Boolean).join(' + '),
+        discount_label: discountLabel,
         tipo_entrega: tipoEntrega,
         loja_retirada: tipoEntrega === 'retirada' ? lojaRetirada : null,
       });
