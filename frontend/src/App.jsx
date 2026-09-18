@@ -474,6 +474,12 @@ export default function App() {
     if (!confirm('Enviar cronômetro de 15 minutos pro cliente fazer o Pix?')) return;
     try { await api.startPaymentTimer(activeConv.id, 15); } catch (e) { alert('Erro ao disparar cronômetro: ' + e.message); }
   };
+  // Botão 🖤: o bot inicia o cadastro Cliente Black na conversa (pede CPF → aniversário).
+  // O feedback é a própria mensagem do bot aparecendo no chat; já inscrito recebe o resumo.
+  const startClienteBlack = async () => {
+    if (!activeConv) return;
+    try { await api.cbStart(activeConv.id); } catch (e) { alert('Cliente Black: ' + e.message); }
+  };
   const [replyTo, setReplyTo] = useState(null); // mensagem citada (estilo responder do WhatsApp)
   const startReply = (m) => { setReplyTo(m); if (!isMobile) textareaRef.current?.focus(); };
 
@@ -888,6 +894,7 @@ export default function App() {
                       <div onClick={() => setShowHeaderMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
                       <div style={{ position: 'absolute', top: 'calc(52px + env(safe-area-inset-top))', right: 8, zIndex: 200, background: '#fff', borderRadius: 12, boxShadow: '0 4px 20px rgba(11,20,26,.25)', padding: '6px 0', minWidth: 220 }}>
                         {[
+                          ...(activeConv.channel !== 'instagram' ? [{ label: '🖤  Cadastrar Cliente Black', fn: startClienteBlack }] : []),
                           { label: '👤  Dados do cliente', fn: () => setShowCustomerPanel(true) },
                           { label: '🔍  Buscar mensagens', fn: () => setShowMsgSearch(true) },
                           { label: '🏷️  Etiquetas', fn: () => setShowTagMenu(true) },
@@ -907,6 +914,7 @@ export default function App() {
                 ) : (
                   <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
                     <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(30,186,138,.1)', color: '#1eba8a', border: '1px solid rgba(30,186,138,.3)', fontWeight: 600 }} onClick={() => { setShowSales(true); setShowAdmin(false); }} title="Vender">🛒 Vender</button>
+                    {activeConv.channel !== 'instagram' && <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(255,215,64,.12)', color: '#b8860b', border: '1px solid rgba(255,215,64,.4)', fontWeight: 600 }} onClick={startClienteBlack} title="Bot inicia o cadastro Cliente Black nesta conversa">🖤 Black</button>}
                     <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowCustomerPanel(!showCustomerPanel)} title="Cliente">👤</button>
                     <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowTagMenu(!showTagMenu)} title="Tags">🏷️</button>
                     <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowMsgSearch(!showMsgSearch)} title="Buscar">🔍</button>

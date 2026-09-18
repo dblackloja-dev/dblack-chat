@@ -1851,6 +1851,18 @@ app.get('/api/erp/customer/:phone', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Botão 🖤 do painel: aciona o bot de cadastro do Cliente Black na conversa
+app.post('/api/cb/start/:convId', auth, async (req, res) => {
+  try {
+    const conv = await queryOne('SELECT * FROM conversations WHERE id = $1', [req.params.convId]);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    if (conv.channel === 'instagram') return res.status(400).json({ error: 'O cadastro Cliente Black é pelo WhatsApp' });
+    const r = await clienteBlack.startSignup(conv, conv.phone, conv.customer_push_name || conv.customer_name);
+    if (r?.error) return res.status(400).json(r);
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Promoção Leve 4 Pague 3 — mesma config do ERP (⚙️ Configurações, setting promo_leve4)
 app.get('/api/erp/promo-leve4', auth, async (req, res) => {
   try {

@@ -233,6 +233,7 @@ const api = {
   getCustomerDetails: (phone) => request(`/erp/customer-details/${phone}`),
   createSale: (data) => request('/erp/sales', { method: 'POST', body: data }),
   getPromoLeve4: () => request('/erp/promo-leve4'),
+  cbStart: (convId) => request(`/cb/start/${convId}`, { method: 'POST' }),
 };
 
 export { mediaUrl };

@@ -269,26 +269,36 @@ async function handleIncoming(conv, msg) {
 
   // gatilho
   if (matchesKeyword(norm, await getSetting('cb_keywords'))) {
-    const c = await findErpByPhone(msg.phone);
-    if (c && isEnrolled(c)) {
-      if (Number(c.whatsapp_opt_out) === 1) await erpQuery('UPDATE customers SET whatsapp_opt_out = 0 WHERE id = $1', [c.id]);
-      await sendText(conv, msg.phone, await summaryText(c));
-      if (conv) await addTag(conv.id);
-      if (!String(c.birthdate || '').trim()) {
-        await queryRun(
-          `INSERT INTO cb_signup_state (phone, state, tries, updated_at) VALUES ($1,'await_birth',0,NOW())
-           ON CONFLICT (phone) DO UPDATE SET state='await_birth', tries=0, updated_at=NOW()`, [phoneDigits]);
-        await sendText(conv, msg.phone, await getSetting('cb_ask_birth'));
-      }
-      return true;
-    }
-    await queryRun(
-      `INSERT INTO cb_signup_state (phone, state, tries, updated_at) VALUES ($1,'await_cpf',0,NOW())
-       ON CONFLICT (phone) DO UPDATE SET state='await_cpf', tries=0, updated_at=NOW()`, [phoneDigits]);
-    await sendText(conv, msg.phone, fillName(await getSetting('cb_ask_cpf'), msg.pushName || conv?.name));
+    await startSignup(conv, msg.phone, msg.pushName || conv?.name);
     return true;
   }
   return false;
+}
+
+// Inicia o fluxo de cadastro (usado pelo gatilho por keyword e pelo botão 🖤 do painel).
+// Já inscrito: manda o resumo (e pede aniversário se faltar). Não inscrito: pede o CPF.
+async function startSignup(conv, phoneRaw, pushName) {
+  if ((await getSetting('cb_enabled')) !== 'true') return { error: 'Cliente Black está desativado (cb_enabled)' };
+  const phoneDigits = normPhone(phoneRaw);
+  if (!phoneDigits) return { error: 'Conversa sem telefone de WhatsApp' };
+  const c = await findErpByPhone(phoneRaw);
+  if (c && isEnrolled(c)) {
+    if (Number(c.whatsapp_opt_out) === 1) await erpQuery('UPDATE customers SET whatsapp_opt_out = 0 WHERE id = $1', [c.id]);
+    await sendText(conv, phoneRaw, await summaryText(c));
+    if (conv) await addTag(conv.id);
+    if (!String(c.birthdate || '').trim()) {
+      await queryRun(
+        `INSERT INTO cb_signup_state (phone, state, tries, updated_at) VALUES ($1,'await_birth',0,NOW())
+         ON CONFLICT (phone) DO UPDATE SET state='await_birth', tries=0, updated_at=NOW()`, [phoneDigits]);
+      await sendText(conv, phoneRaw, await getSetting('cb_ask_birth'));
+    }
+    return { enrolled: true, tier: c.tier || 'BLACK' };
+  }
+  await queryRun(
+    `INSERT INTO cb_signup_state (phone, state, tries, updated_at) VALUES ($1,'await_cpf',0,NOW())
+     ON CONFLICT (phone) DO UPDATE SET state='await_cpf', tries=0, updated_at=NOW()`, [phoneDigits]);
+  await sendText(conv, phoneRaw, fillName(await getSetting('cb_ask_cpf'), pushName));
+  return { started: true };
 }
 
 // ─── Worker de notificações: lê o outbox do ERP e envia WhatsApp ───
@@ -388,4 +398,4 @@ function init(d) {
   console.log('🖤 Cliente Black: fluxo de adesão + worker de mensagens ativos');
 }
 
-module.exports = { init, handleIncoming, processEvents, isValidCPF, renderEvent, parseBirthDate };
+module.exports = { init, handleIncoming, processEvents, isValidCPF, renderEvent, parseBirthDate, startSignup };
