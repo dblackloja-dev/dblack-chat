@@ -43,6 +43,20 @@ function normPhone(p) {
   return d;
 }
 
+// Data de nascimento: aceita DD/MM/AAAA, DD/MM/AA ou só DD/MM.
+// Salva 'YYYY-MM-DD' (ou 'MM-DD' sem ano) — os dois formatos que o ERP entende.
+function parseBirthDate(text) {
+  const m = String(text || '').trim().match(/^(\d{1,2})[\/\-. ](\d{1,2})(?:[\/\-. ](\d{2,4}))?$/);
+  if (!m) return null;
+  const d = +m[1], mo = +m[2];
+  let y = m[3] ? +m[3] : null;
+  if (y !== null && y < 100) y += y > 26 ? 1900 : 2000;
+  if (y !== null && (y < 1900 || y > 2020)) return null;
+  if (d < 1 || d > 31 || mo < 1 || mo > 12) return null;
+  const dd = String(d).padStart(2, '0'), mm = String(mo).padStart(2, '0');
+  return y ? `${y}-${mm}-${dd}` : `${mm}-${dd}`;
+}
+
 const DEFAULTS = {
   cb_enabled: 'true',
   cb_keywords: 'cliente black',
@@ -51,6 +65,9 @@ const DEFAULTS = {
   cb_give_up: 'Sem problema! Quando quiser ativar é só mandar *cliente black* de novo. 🖤',
   cb_optout_done: 'Pronto! Você não vai mais receber mensagens do Cliente Black. Pra voltar é só mandar *cliente black*. 🖤',
   cb_cpf_conflict: 'Esse CPF já está cadastrado com outro WhatsApp. Fala com uma das nossas atendentes que a gente resolve rapidinho! 😉',
+  cb_ask_birth: 'Pra completar seu cadastro: me manda sua data de nascimento (ex: 24/09/1990) — tem mimo de aniversário! 🎁\n\nSe preferir não informar, responda PULAR.',
+  cb_birth_ok: 'Anotado, {nome}! 🎁 Seu cadastro Cliente Black está completo.',
+  cb_birth_skip: 'Tudo bem! Se mudar de ideia é só mandar *cliente black* de novo. 😉',
   cb_template: '', // nome de template UTILITY aprovado p/ fallback fora da janela de 24h (vazio = sem fallback)
 };
 async function getSetting(key) {
@@ -219,9 +236,34 @@ async function handleIncoming(conv, msg) {
       txt += `\n\nPra sair do programa é só responder SAIR.`;
       await sendText(conv, msg.phone, txt);
       if (conv) await addTag(conv.id);
+      if (!String(c.birthdate || '').trim()) {
+        await queryRun(
+          `INSERT INTO cb_signup_state (phone, state, tries, updated_at) VALUES ($1,'await_birth',0,NOW())
+           ON CONFLICT (phone) DO UPDATE SET state='await_birth', tries=0, updated_at=NOW()`, [phoneDigits]);
+        await sendText(conv, msg.phone, await getSetting('cb_ask_birth'));
+      }
       return true;
     }
     // mensagem sem CPF durante o fluxo: não engole (pode ser pergunta pra atendente/Lê)
+    return false;
+  }
+
+  // aguardando data de nascimento (etapa final do cadastro)
+  if (st && st.state === 'await_birth') {
+    if (norm === 'pular') {
+      await queryRun('DELETE FROM cb_signup_state WHERE phone = $1', [phoneDigits]);
+      await sendText(conv, msg.phone, await getSetting('cb_birth_skip'));
+      return true;
+    }
+    const bd = parseBirthDate(msg.content);
+    if (bd) {
+      const c = await findErpByPhone(msg.phone);
+      if (c) await erpQuery('UPDATE customers SET birthdate = $1 WHERE id = $2', [bd, c.id]);
+      await queryRun('DELETE FROM cb_signup_state WHERE phone = $1', [phoneDigits]);
+      await sendText(conv, msg.phone, fillName(await getSetting('cb_birth_ok'), msg.pushName || conv?.name));
+      return true;
+    }
+    // não parece data nem PULAR: não engole (pode ser pergunta pra atendente/Lê)
     return false;
   }
 
@@ -232,6 +274,12 @@ async function handleIncoming(conv, msg) {
       if (Number(c.whatsapp_opt_out) === 1) await erpQuery('UPDATE customers SET whatsapp_opt_out = 0 WHERE id = $1', [c.id]);
       await sendText(conv, msg.phone, await summaryText(c));
       if (conv) await addTag(conv.id);
+      if (!String(c.birthdate || '').trim()) {
+        await queryRun(
+          `INSERT INTO cb_signup_state (phone, state, tries, updated_at) VALUES ($1,'await_birth',0,NOW())
+           ON CONFLICT (phone) DO UPDATE SET state='await_birth', tries=0, updated_at=NOW()`, [phoneDigits]);
+        await sendText(conv, msg.phone, await getSetting('cb_ask_birth'));
+      }
       return true;
     }
     await queryRun(
@@ -340,4 +388,4 @@ function init(d) {
   console.log('🖤 Cliente Black: fluxo de adesão + worker de mensagens ativos');
 }
 
-module.exports = { init, handleIncoming, processEvents, isValidCPF, renderEvent };
+module.exports = { init, handleIncoming, processEvents, isValidCPF, renderEvent, parseBirthDate };

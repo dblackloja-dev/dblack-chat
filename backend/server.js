@@ -1851,6 +1851,14 @@ app.get('/api/erp/customer/:phone', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Promoção Leve 4 Pague 3 — mesma config do ERP (⚙️ Configurações, setting promo_leve4)
+app.get('/api/erp/promo-leve4', auth, async (req, res) => {
+  try {
+    const row = await erp.erpQueryOne("SELECT value FROM settings WHERE key = 'promo_leve4'");
+    res.json(row?.value ? JSON.parse(row.value) : { active: false });
+  } catch (e) { res.json({ active: false }); }
+});
+
 // Finalizar venda e enviar cupom via WhatsApp
 app.post('/api/erp/sales', auth, async (req, res) => {
   try {

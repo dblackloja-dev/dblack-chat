@@ -45,19 +45,34 @@ async function cleanup() {
   h = await cb.handleIncoming(CONV, msg('pra que voces precisam disso?'));
   check('não tratada (vai p/ atendente)', h === false);
 
-  console.log('4) CPF válido cadastra e dá boas-vindas');
+  console.log('4) CPF válido cadastra, dá boas-vindas e pede aniversário');
   h = await cb.handleIncoming(CONV, msg('meu cpf é 529.982.247-25'));
   check('handled', h === true);
-  check('boas-vindas', /Bem-vindo/.test(sent.at(-1)?.text||''), sent.at(-1));
+  check('boas-vindas', /Bem-vindo/.test(sent.at(-2)?.text||''), sent.at(-2));
+  check('pediu data de nascimento', /nascimento/i.test(sent.at(-1)?.text||''), sent.at(-1));
   const c = (await erpDb.query('SELECT * FROM customers WHERE cpf=$1', [CPF])).rows[0];
   check('cliente no ERP com CPF e LGPD', c && c.whatsapp === DIG && !!c.lgpd_consent_at, c);
-  check('estado limpo', (await chatDb.query('SELECT COUNT(*)::int n FROM cb_signup_state WHERE phone=$1', [DIG])).rows[0].n === 0);
+  check('estado await_birth', (await chatDb.query('SELECT state FROM cb_signup_state WHERE phone=$1', [DIG])).rows[0]?.state === 'await_birth');
   check('tag na conversa', (await chatDb.query('SELECT COUNT(*)::int n FROM conversation_tags WHERE conversation_id=$1', [CONV.id])).rows[0].n === 1);
   check('welcome já marcado enviado', (await erpDb.query(`SELECT COUNT(*)::int n FROM loyalty_events WHERE customer_id=$1 AND event='welcome' AND notified_at IS NOT NULL`, [c.id])).rows[0].n === 1);
 
-  console.log('5) keyword de novo mostra resumo');
+  console.log('4b) pergunta no meio do fluxo de aniversário NÃO é engolida');
+  h = await cb.handleIncoming(CONV, msg('vcs abrem amanha?'));
+  check('não tratada (vai p/ atendente)', h === false);
+
+  console.log('4c) data de nascimento é salva no ERP');
+  h = await cb.handleIncoming(CONV, msg('24/09/1990'));
+  check('handled', h === true);
+  check('confirmação', /Anotado/.test(sent.at(-1)?.text||''), sent.at(-1));
+  const cbd = (await erpDb.query('SELECT birthdate FROM customers WHERE cpf=$1', [CPF])).rows[0];
+  check('birthdate 1990-09-24', cbd.birthdate === '1990-09-24', cbd);
+  check('estado limpo', (await chatDb.query('SELECT COUNT(*)::int n FROM cb_signup_state WHERE phone=$1', [DIG])).rows[0].n === 0);
+
+  console.log('5) keyword de novo mostra resumo (sem pedir aniversário de novo)');
+  const beforeSummary = sent.length;
   h = await cb.handleIncoming(CONV, msg('cliente black'));
   check('resumo com nível', /Você já é BLACK/.test(sent.at(-1)?.text||''), sent.at(-1));
+  check('só 1 mensagem (não pediu nascimento)', sent.length === beforeSummary + 1, sent.length - beforeSummary);
 
   console.log('6) SAIR faz opt-out');
   h = await cb.handleIncoming(CONV, msg('SAIR'));

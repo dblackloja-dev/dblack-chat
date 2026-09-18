@@ -74,6 +74,10 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     }
   }, [customerPhone]);
 
+  // Promoção Leve 4 Pague 3 (mesma config do ERP) — a cada 4 peças do MESMO valor, 1 de brinde
+  const [promo43Cfg, setPromo43Cfg] = useState(null);
+  useEffect(() => { api.getPromoLeve4().then(setPromo43Cfg).catch(() => {}); }, []);
+
   // Busca com debounce; searchSeq descarta respostas atrasadas de buscas antigas
   const searchSeq = useRef(0);
   const doSearch = (term) => {
@@ -147,7 +151,23 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     }
   }
   discountVal = Math.min(discountVal, subtotal);
-  const total = Math.max(0, subtotal - discountVal);
+
+  // Leve 4 Pague 3: aplica sozinho no período configurado
+  const p43Today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  const promo43On = !!(promo43Cfg?.active && (!promo43Cfg.from || p43Today >= promo43Cfg.from) && (!promo43Cfg.to || p43Today <= promo43Cfg.to));
+  let promo43Val = 0, promo43Free = 0, promo43Hint = 0;
+  if (promo43On && cart.length > 0) {
+    const byPrice = {};
+    cart.forEach(i => { const k = (Math.round(i.price * 100) / 100).toFixed(2); byPrice[k] = (byPrice[k] || 0) + i.quantity; });
+    Object.entries(byPrice).forEach(([price, qty]) => {
+      const free = Math.floor(qty / 4);
+      if (free > 0) { promo43Free += free; promo43Val += free * (+price); }
+      if (qty % 4 === 3 && !promo43Hint) promo43Hint = +price; // falta 1 peça pra fechar o brinde
+    });
+    promo43Val = Math.round(Math.min(promo43Val, Math.max(0, subtotal - discountVal)) * 100) / 100;
+  }
+
+  const total = Math.max(0, subtotal - discountVal - promo43Val);
 
   // Entrega/retirada é obrigatório — venda só finaliza classificada
   const deliveryOk = tipoEntrega === 'entrega' || (tipoEntrega === 'retirada' && lojaRetirada);
@@ -164,9 +184,9 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         customer_name: customerName || customer?.name || null,
         items: cart.map(i => ({ product_id: i.product_id, name: i.name, sku: i.sku, price: i.price, quantity: i.quantity })),
         payment_method: payment,
-        discount: discountVal,
+        discount: Math.round((discountVal + promo43Val) * 100) / 100,
         discount_type: 'fixed',
-        discount_label: discountLabel,
+        discount_label: [promo43Val > 0 ? `Leve 4 Pague 3 (${promo43Free} peça${promo43Free > 1 ? 's' : ''} de brinde)` : '', discountLabel].filter(Boolean).join(' + '),
         tipo_entrega: tipoEntrega,
         loja_retirada: tipoEntrega === 'retirada' ? lojaRetirada : null,
       });
@@ -401,6 +421,15 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.red, marginBottom: 4 }}>
           <span style={{ fontSize: 10 }}>{discountLabel || 'Desconto'}:</span><span>- R$ {discountVal.toFixed(2)}</span>
         </div>
+      )}
+      {promo43Val > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: C.gold, fontWeight: 700 }}>🎁 Leve 4 Pague 3 ({promo43Free} brinde{promo43Free > 1 ? 's' : ''}):</span>
+          <span style={{ color: C.grn, fontWeight: 700 }}>- R$ {promo43Val.toFixed(2)}</span>
+        </div>
+      )}
+      {promo43On && promo43Hint > 0 && (
+        <div style={{ fontSize: 11, color: C.gold, fontWeight: 600, marginBottom: 4 }}>🎁 Falta 1 peça de R$ {promo43Hint.toFixed(2)} pra levar 1 de brinde!</div>
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 900, color: C.grn, marginBottom: 10 }}>
         <span>TOTAL:</span><span>R$ {total.toFixed(2)}</span>
