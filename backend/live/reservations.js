@@ -299,9 +299,45 @@ async function vitrine() {
   return { session: { id: session.id, title: session.title }, items: out };
 }
 
+// Peça avulsa por código (pra página /peca/:code do checkout — link peça a peça na
+// live do Instagram). Ignora on_stage: o link vale mesmo sem sala aberta.
+async function pecaByCode(code) {
+  const session = await queryOne("SELECT id, title FROM live_sessions WHERE status = 'active' ORDER BY id DESC LIMIT 1");
+  if (!session) return null;
+  const i = await queryOne("SELECT * FROM live_items WHERE session_id = $1 AND code = UPPER($2)", [session.id, code]);
+  if (!i) return null;
+  const counts = await queryAll(
+    `SELECT size, COUNT(*)::int AS c FROM live_reservations
+     WHERE item_id = $1 AND (status = 'paid' OR (status = 'reserved' AND expires_at > NOW()))
+     GROUP BY size`, [i.id]);
+  const used = new Map();
+  for (const r of counts) used.set(r.size ?? '', r.c);
+  const sizes = i.sizes || {};
+  const hasSizes = Object.keys(sizes).length > 0;
+  let sizeAvail = null, soldOut;
+  if (hasSizes) {
+    sizeAvail = {};
+    for (const [s, cap] of Object.entries(sizes)) {
+      sizeAvail[s] = Math.max(0, parseInt(cap, 10) - (used.get(s) || 0));
+    }
+    soldOut = Object.values(sizeAvail).every(v => v <= 0);
+  } else {
+    soldOut = (1 - (used.get('') || 0)) <= 0;
+  }
+  return {
+    session: { id: session.id, title: session.title },
+    item: {
+      id: i.id, code: i.code, name: i.name,
+      priceCents: i.live_price_cents,
+      photoUrl: i.photo_media_id ? `/media/${i.photo_media_id}` : null,
+      sizes: sizeAvail, soldOut,
+    },
+  };
+}
+
 // Marca/desmarca a peça como "em cena" (visível nos cards da sala)
 async function setStage(itemId, on) {
   return queryOne("UPDATE live_items SET on_stage = $2 WHERE id = $1 RETURNING *", [itemId, !!on]);
 }
 
-module.exports = { initTables, init, reserve, getByToken, markPaid, expireStale, board, vitrine, setStage };
+module.exports = { initTables, init, reserve, getByToken, markPaid, expireStale, board, vitrine, setStage, pecaByCode };

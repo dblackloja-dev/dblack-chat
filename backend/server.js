@@ -205,6 +205,16 @@ const auth = (req, res, next) => {
   }
 };
 
+// Rotas de live aceitam também o token de serviço do checkout (painel Lives de lá)
+const liveAuth = (req, res, next) => {
+  const svc = req.headers['x-live-token'];
+  if (svc && process.env.ASAAS_WEBHOOK_TOKEN && svc === process.env.ASAAS_WEBHOOK_TOKEN) {
+    req.user = { id: 0, name: 'checkout' };
+    return next();
+  }
+  return auth(req, res, next);
+};
+
 // ─── WebSocket ───
 const wss = new WebSocketServer({ server, path: '/ws' });
 const clients = new Map(); // userId -> ws
@@ -2178,14 +2188,14 @@ app.post('/api/vip/broadcast/:id/retry', auth, async (req, res) => {
 // ═══════════════════════════════════════════
 
 // Lista as lives (painel do moderador)
-app.get('/api/live/sessions', auth, async (req, res) => {
+app.get('/api/live/sessions', liveAuth, async (req, res) => {
   try {
     res.json(await queryAll("SELECT * FROM live_sessions ORDER BY id DESC LIMIT 50"));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Cria live
-app.post('/api/live/sessions', auth, async (req, res) => {
+app.post('/api/live/sessions', liveAuth, async (req, res) => {
   try {
     const { title, starts_at } = req.body || {};
     if (!title) return res.status(400).json({ error: 'title é obrigatório' });
@@ -2198,7 +2208,7 @@ app.post('/api/live/sessions', auth, async (req, res) => {
 });
 
 // Ativa a live (só pode haver uma ativa — desativa qualquer outra)
-app.post('/api/live/sessions/:id/activate', auth, async (req, res) => {
+app.post('/api/live/sessions/:id/activate', liveAuth, async (req, res) => {
   try {
     await queryRun("UPDATE live_sessions SET status = 'closed' WHERE status = 'active' AND id != $1", [req.params.id]);
     const row = await queryOne("UPDATE live_sessions SET status = 'active' WHERE id = $1 RETURNING *", [req.params.id]);
@@ -2209,7 +2219,7 @@ app.post('/api/live/sessions/:id/activate', auth, async (req, res) => {
 });
 
 // Encerra a live
-app.post('/api/live/sessions/:id/close', auth, async (req, res) => {
+app.post('/api/live/sessions/:id/close', liveAuth, async (req, res) => {
   try {
     const row = await queryOne("UPDATE live_sessions SET status = 'closed' WHERE id = $1 RETURNING *", [req.params.id]);
     if (!row) return res.status(404).json({ error: 'Live não encontrada' });
@@ -2219,7 +2229,7 @@ app.post('/api/live/sessions/:id/close', auth, async (req, res) => {
 });
 
 // Adiciona peça ao catálogo da live
-app.post('/api/live/sessions/:id/items', auth, async (req, res) => {
+app.post('/api/live/sessions/:id/items', liveAuth, async (req, res) => {
   try {
     const { code, erp_product_id, name, live_price_cents, sizes } = req.body || {};
     if (!code || !name || !Number.isInteger(live_price_cents)) {
@@ -2253,7 +2263,7 @@ app.get('/api/live/banner.png', async (req, res) => {
 });
 
 // "Em cena": moderador escolhe quais peças aparecem nos cards da sala durante a live
-app.post('/api/live/items/:id/stage', auth, async (req, res) => {
+app.post('/api/live/items/:id/stage', liveAuth, async (req, res) => {
   try {
     const row = await liveReservations.setStage(req.params.id, req.body?.on);
     if (!row) return res.status(404).json({ error: 'Peça não encontrada' });
@@ -2264,7 +2274,7 @@ app.post('/api/live/items/:id/stage', auth, async (req, res) => {
 });
 
 // Painel do moderador: peças com reservado/pago/expirado/fila
-app.get('/api/live/sessions/:id/board', auth, async (req, res) => {
+app.get('/api/live/sessions/:id/board', liveAuth, async (req, res) => {
   try {
     const data = await liveReservations.board(req.params.id);
     if (!data) return res.status(404).json({ error: 'Live não encontrada' });
@@ -2290,6 +2300,17 @@ app.get('/api/live/vitrine', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Peça avulsa por código (página /peca/:code do checkout — link peça a peça no IG)
+app.get('/api/live/peca/:code', async (req, res) => {
+  try {
+    const data = await liveReservations.pecaByCode(req.params.code);
+    if (!data) return res.status(404).json({ error: 'Peça não encontrada' });
+    const base = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
+    if (data.item.photoUrl) data.item.photoUrl = base + data.item.photoUrl;
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // QUERO da sala de live: cria a reserva e devolve o token do checkout (público, com rate limit)
 const queroLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, message: { error: 'Calma! Muitas tentativas — espera um minutinho.' } });
 app.post('/api/live/quero', queroLimiter, async (req, res) => {
@@ -2307,7 +2328,7 @@ app.post('/api/live/quero', queroLimiter, async (req, res) => {
 });
 
 // Foto da peça da live (painel do moderador)
-app.post('/api/live/items/:id/photo', auth, upload.single('photo'), async (req, res) => {
+app.post('/api/live/items/:id/photo', liveAuth, upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Foto não enviada' });
     const buffer = await sharp(req.file.buffer).rotate().resize({ width: 800, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
