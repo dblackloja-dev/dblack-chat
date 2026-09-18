@@ -292,6 +292,7 @@ async function vitrine() {
       id: i.id, code: i.code, name: i.name,
       priceCents: i.live_price_cents,
       photoUrl: i.photo_media_id ? `/media/${i.photo_media_id}` : null,
+      photoMediaId: i.photo_media_id || null,
       sizes: sizeAvail, soldOut,
     };
   });

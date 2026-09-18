@@ -2239,6 +2239,19 @@ app.post('/api/live/sessions/:id/items', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Banner PNG das peças em cena (o dblack-live carimba no vídeo do Instagram)
+app.get('/api/live/banner.png', async (req, res) => {
+  try {
+    const buf = await require('./live/banner').bannerPng();
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'no-store');
+    res.send(buf);
+  } catch (e) {
+    console.error('[live] banner.png:', e.message);
+    res.status(500).end();
+  }
+});
+
 // "Em cena": moderador escolhe quais peças aparecem nos cards da sala durante a live
 app.post('/api/live/items/:id/stage', auth, async (req, res) => {
   try {
