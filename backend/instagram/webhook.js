@@ -62,7 +62,7 @@ async function handleComment(value, isLive) {
   let text;
   switch (result.status) {
     case 'reserved':
-      text = `Reservei a ${code}${size ? ' ' + size : ''} pra você por ${result.minutes} min 🖤\n` +
+      text = `Reservei a ${code}${size ? ' ' + size : ''} pra você por ${result.minutes} min ✨\n` +
              `Paga no Pix aqui: ${CHECKOUT_BASE}/${result.token}`;
       break;
     case 'needs_size':
