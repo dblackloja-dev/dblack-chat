@@ -122,7 +122,7 @@ ENTREGAS: Motoboy R$7 (Santa Margarida, Pedra Bonita, Orizânia, Fervedouro, Car
 
 PAGAMENTO: PIX ou Cartão de Crédito (até 6x).
 
-HORÁRIOS: Seg-Sex 09:00-19:00. Sáb: todas as lojas 09:00-14:00.`;
+HORÁRIOS: Seg-Sex 09:00-19:00. Sáb: todas as lojas 08:00-14:00.`;
 
 // ─── Tools Schema para Claude API ───
 const TOOLS = [

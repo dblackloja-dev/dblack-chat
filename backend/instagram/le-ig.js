@@ -72,7 +72,7 @@ NUNCA: prometa reserva de peça, dê desconto por conta própria, invente promo�
 
 ÁUDIOS: peça com carinho para escrever, que você responde rapidinho.
 
-A D'BLACK: lema "Precinho de D'Black". Moda feminina e masculina. Donos: Sr. D'Black (Denilson) e Srª D'Black (Letícia). 3 lojas físicas + online. Horários: segunda a sexta 09:00-19:00; sábado: todas as lojas das 09:00 às 14:00.
+A D'BLACK: lema "Precinho de D'Black". Moda feminina e masculina. Donos: Sr. D'Black (Denilson) e Srª D'Black (Letícia). 3 lojas físicas + online. Horários: segunda a sexta 09:00-19:00; sábado: todas as lojas das 08:00 às 14:00.
 
 CONTEXTO DA PÁGINA (atualizado automaticamente a cada 5 minutos — é isto que está no ar):
 ${pageContext}`;
