@@ -156,7 +156,7 @@ function generateCupom() {
 }
 
 // Cria venda no ERP
-async function createSale({ store_id, customer_id, customer_name, customer_phone, seller_name, seller_id, items, payment_method, discount, discount_type, discount_label }) {
+async function createSale({ store_id, customer_id, customer_name, customer_phone, seller_name, seller_id, items, payment_method, discount, discount_type, discount_label, discount_auth_by }) {
   const saleId = require('crypto').randomUUID();
   const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   // Desconto já vem calculado do frontend (mesma lógica do ERP)
@@ -178,9 +178,9 @@ async function createSale({ store_id, customer_id, customer_name, customer_phone
 
   // Cria a venda (usando colunas reais do ERP)
   await erpRun(
-    `INSERT INTO sales (id, store_id, date, customer, customer_id, customer_whatsapp, seller, seller_id, items, subtotal, discount, discount_label, total, payment, payments, status, cupom, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'Concluída', $16, NOW())`,
-    [saleId, store_id, today, customer_name || 'Cliente WhatsApp', customer_id || '', customer_phone || '', seller_name, seller_id || '', JSON.stringify(items), subtotal, discountValue, discountLabelFinal, total, payLabels[payment_method] || payment_method, payments, cupom]
+    `INSERT INTO sales (id, store_id, date, customer, customer_id, customer_whatsapp, seller, seller_id, items, subtotal, discount, discount_label, discount_auth_by, total, payment, payments, status, cupom, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'Concluída', $17, NOW())`,
+    [saleId, store_id, today, customer_name || 'Cliente WhatsApp', customer_id || '', customer_phone || '', seller_name, seller_id || '', JSON.stringify(items), subtotal, discountValue, discountLabelFinal, discount_auth_by || '', total, payLabels[payment_method] || payment_method, payments, cupom]
   );
 
   // Deduz estoque

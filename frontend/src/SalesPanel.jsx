@@ -63,6 +63,11 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   const [tierOverride, setTierOverride] = useState(null);
   const [tierEditing, setTierEditing] = useState(false);
   const [tierEditVal, setTierEditVal] = useState('');
+  // Limite de desconto (mesma config do ERP) + liberação remota pelo sino 🔓 do admin
+  const [discountLimit, setDiscountLimit] = useState(0);
+  const [discountAuth, setDiscountAuth] = useState(null); // {by, value} — liberação concedida
+  const [remoteReq, setRemoteReq] = useState(null); // {id, value} — pedido aguardando decisão
+  useEffect(() => { api.getDiscountLimit().then(r => setDiscountLimit(Number(r?.percent) || 0)).catch(() => {}); }, []);
   const [tipoEntrega, setTipoEntrega] = useState(null); // 'entrega' | 'retirada' — obrigatório
   const [lojaRetirada, setLojaRetirada] = useState(null);
   const [finishing, setFinishing] = useState(false);
@@ -201,12 +206,48 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
 
   const total = Math.max(0, subPagavel - discountVal - tierVal);
 
+  // Bloqueio por limite (só desconto MANUAL conta — o de nível é do programa e tem regra própria)
+  const discountPct = subPagavel > 0 ? (discountVal / subPagavel) * 100 : 0;
+  const discountAuthValid = discountAuth && discountVal <= discountAuth.value + 0.001;
+  const discountBlocked = discountLimit > 0 && discountPct > discountLimit + 0.001 && !discountAuthValid;
+
+  const requestRemoteAuth = async () => {
+    try {
+      const r = await api.requestDiscountAuth({ subtotal: subPagavel, discount_value: discountVal, discount_pct: Math.round(discountPct * 10) / 10, customer_name: customerName || customer?.name || '' });
+      setRemoteReq({ id: r.id, value: discountVal });
+    } catch (e) { alert('Erro ao pedir liberação: ' + e.message); }
+  };
+  const cancelRemoteAuth = () => {
+    if (remoteReq?.id) api.cancelDiscountAuth(remoteReq.id).catch(() => {});
+    setRemoteReq(null);
+  };
+  // Polla o pedido a cada 3s enquanto aguarda a decisão do admin
+  useEffect(() => {
+    if (!remoteReq?.id) return;
+    const t = setInterval(async () => {
+      try {
+        const r = await api.getDiscountAuth(remoteReq.id);
+        if (!r || r.status === 'pending') return;
+        setRemoteReq(null);
+        if (r.status === 'approved') {
+          setDiscountAuth({ by: (r.decided_by_name || 'Gerente') + ' (remoto)', value: Number(remoteReq.value) });
+        } else if (r.status === 'denied') {
+          alert('Liberação NEGADA por ' + (r.decided_by_name || 'gerente') + '.');
+        } else {
+          alert('Pedido de liberação expirou — peça de novo.');
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteReq?.id]);
+
   // Entrega/retirada é obrigatório — venda só finaliza classificada
   const deliveryOk = tipoEntrega === 'entrega' || (tipoEntrega === 'retirada' && lojaRetirada);
 
   // Finalizar venda
   const finishSale = async () => {
-    if (cart.length === 0 || finishing || !deliveryOk) return;
+    if (cart.length === 0 || finishing || !deliveryOk || discountBlocked) return;
     setFinishing(true);
     try {
       // Leve 4 Pague 3: brinde vira item de R$0 (baixa estoque, fora da conta e do desconto)
@@ -238,6 +279,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         discount: Math.round((discountVal + tierVal) * 100) / 100,
         discount_type: 'fixed',
         discount_label: tierVal > 0 ? `Cliente Black ${loyal.tier} ${tierPctShown}% à vista${tierOverrideOn ? ' (ajustado)' : ''}` : discountLabel,
+        discount_auth_by: (discountVal > 0 && discountAuthValid) ? discountAuth.by : '',
         tipo_entrega: tipoEntrega,
         loja_retirada: tipoEntrega === 'retirada' ? lojaRetirada : null,
       });
@@ -249,6 +291,8 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       setShowDiscountPanel(false);
       setTierOverride(null);
       setTierEditing(false);
+      setDiscountAuth(null);
+      setRemoteReq(null);
       setTipoEntrega(null);
       setLojaRetirada(null);
     } catch (e) {
@@ -518,12 +562,28 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       {loyal?.enrolled && Number(loyal.balance || 0) > 0 && (
         <div style={{ fontSize: 10, color: C.dim, marginBottom: 4 }}>🪙 Saldo cashback do cliente: R$ {Number(loyal.balance).toFixed(2)}</div>
       )}
+      {discountBlocked && (
+        <div style={{ marginBottom: 8, padding: '8px 10px', background: 'rgba(255,143,0,.08)', border: '1px solid rgba(255,143,0,.35)', borderRadius: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#FF8F00', marginBottom: 4 }}>🔒 Desconto acima do limite de {discountLimit}%</div>
+          <div style={{ fontSize: 10, color: C.dim, marginBottom: 6 }}>Este desconto é de {discountPct.toFixed(1)}%. Peça a liberação — o gerente aprova do computador dele.</div>
+          {remoteReq
+            ? <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: C.gold, fontWeight: 600, flex: 1 }}>⏳ Aguardando liberação do gerente...</span>
+                <button style={{ padding: '5px 10px', borderRadius: 7, border: `1px solid ${C.brd}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontSize: 10, fontFamily: 'inherit' }} onClick={cancelRemoteAuth}>✕ Cancelar</button>
+              </div>
+            : <button style={{ width: '100%', padding: '8px', borderRadius: 7, border: '1px solid #FF8F00', background: 'transparent', color: '#FF8F00', cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit' }} onClick={requestRemoteAuth}>📡 Pedir liberação remota</button>}
+        </div>
+      )}
+      {discountVal > 0 && discountAuthValid && (
+        <div style={{ marginBottom: 8, padding: '6px 8px', background: 'rgba(0,230,118,.08)', border: '1px solid rgba(0,230,118,.3)', borderRadius: 6, fontSize: 11, color: C.grn, fontWeight: 600 }}>✓ Desconto liberado por {discountAuth.by}</div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 900, color: C.grn, marginBottom: 10 }}>
         <span>TOTAL:</span><span>R$ {total.toFixed(2)}</span>
       </div>
-      <button style={{ ...btnGold, opacity: cart.length === 0 || finishing || !deliveryOk ? 0.5 : 1 }}
-        onClick={finishSale} disabled={cart.length === 0 || finishing || !deliveryOk}>
+      <button style={{ ...btnGold, opacity: cart.length === 0 || finishing || !deliveryOk || discountBlocked ? 0.5 : 1 }}
+        onClick={finishSale} disabled={cart.length === 0 || finishing || !deliveryOk || discountBlocked}>
         {finishing ? '⏳ Finalizando...'
+          : discountBlocked ? '🔒 Aguardando liberação do desconto'
           : cart.length > 0 && !deliveryOk ? (tipoEntrega === 'retirada' ? '🏪 Escolha a loja da retirada' : '📦 Marque entrega ou retirada')
           : '✅ Finalizar Venda'}
       </button>

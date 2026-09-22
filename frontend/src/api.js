@@ -234,6 +234,10 @@ const api = {
   getCustomerDetails: (phone) => request(`/erp/customer-details/${phone}`),
   createSale: (data) => request('/erp/sales', { method: 'POST', body: data }),
   getPromoLeve4: () => request('/erp/promo-leve4'),
+  getDiscountLimit: () => request('/erp/discount-limit'),
+  requestDiscountAuth: (data) => request('/erp/discount-auth', { method: 'POST', body: data }),
+  getDiscountAuth: (id) => request(`/erp/discount-auth/${id}`),
+  cancelDiscountAuth: (id) => request(`/erp/discount-auth/${id}/cancel`, { method: 'POST' }),
   cbStart: (convId) => request(`/cb/start/${convId}`, { method: 'POST' }),
 };
 

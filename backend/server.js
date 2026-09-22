@@ -1900,10 +1900,54 @@ app.get('/api/erp/promo-leve4', auth, async (req, res) => {
   } catch (e) { res.json({ active: false }); }
 });
 
+// ─── LIMITE DE DESCONTO + LIBERAÇÃO REMOTA (mesma config/tabela do ERP) ───
+// Desconto manual acima do limite bloqueia o Vender; a atendente pede a liberação
+// e o pedido cai no sino 🔓 do ERP, onde o admin aprova de qualquer computador.
+app.get('/api/erp/discount-limit', auth, async (req, res) => {
+  try {
+    const row = await erp.erpQueryOne("SELECT value FROM settings WHERE key = 'discount_limit'");
+    let percent = 0;
+    if (row?.value) { try { percent = Number(JSON.parse(row.value)?.percent) || 0; } catch { percent = Number(row.value) || 0; } }
+    res.json({ percent });
+  } catch (e) { res.json({ percent: 0 }); }
+});
+
+app.post('/api/erp/discount-auth', auth, async (req, res) => {
+  try {
+    const { subtotal, discount_value, discount_pct, customer_name } = req.body;
+    if (!(Number(discount_value) > 0)) return res.status(400).json({ error: 'Desconto inválido' });
+    // Um pedido ativo por atendente — pedir de novo cancela o anterior
+    await erp.erpQuery("UPDATE discount_auth_requests SET status = 'canceled' WHERE status = 'pending' AND requested_by_id = $1", [req.user.id]);
+    const id = require('crypto').randomUUID();
+    await erp.erpQuery(
+      `INSERT INTO discount_auth_requests (id, store_id, requested_by_id, requested_by_name, subtotal, discount_value, discount_pct, customer_name, status, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',NOW())`,
+      [id, 'loja4', req.user.id, `${req.user.name || 'Atendente'} (chat)`, Number(subtotal) || 0, Number(discount_value), Number(discount_pct) || 0, customer_name || '']
+    );
+    res.json({ id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/erp/discount-auth/:id', auth, async (req, res) => {
+  try {
+    const r = await erp.erpQueryOne('SELECT * FROM discount_auth_requests WHERE id = $1', [req.params.id]);
+    if (!r) return res.status(404).json({ error: 'Pedido não encontrado' });
+    if (r.status === 'pending' && new Date(r.created_at).getTime() < Date.now() - 15 * 60 * 1000) r.status = 'expired';
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/erp/discount-auth/:id/cancel', auth, async (req, res) => {
+  try {
+    await erp.erpQuery("UPDATE discount_auth_requests SET status = 'canceled' WHERE id = $1 AND status = 'pending' AND requested_by_id = $2", [req.params.id, req.user.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Finalizar venda e enviar cupom via WhatsApp
 app.post('/api/erp/sales', auth, async (req, res) => {
   try {
-    const { store_id, customer_id, customer_phone, customer_name, items, payment_method, discount, discount_type, discount_label } = req.body;
+    const { store_id, customer_id, customer_phone, customer_name, items, payment_method, discount, discount_type, discount_label, discount_auth_by } = req.body;
     if (!items?.length) return res.status(400).json({ error: 'Carrinho vazio' });
 
     // Usa o nome que veio do frontend (pushName do WhatsApp) ou busca no ERP
@@ -1926,6 +1970,7 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       discount: discount || 0,
       discount_type: discount_type || 'fixed',
       discount_label: discount_label || '',
+      discount_auth_by: discount_auth_by || '',
     });
 
     // Registra no dblack-entregas conforme o tipo escolhido pelo vendedor.
