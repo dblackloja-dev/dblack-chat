@@ -58,6 +58,14 @@ async function sendMediaMessage(igsid, type, url) {
   });
 }
 
+// DM com botões (button template): texto + até 3 botões; web_url esconde o link atrás do botão
+async function sendButtonMessage(igsid, text, buttons) {
+  return igGraph('POST', `${IG_USER_ID}/messages`, {
+    recipient: { id: igsid },
+    message: { attachment: { type: 'template', payload: { template_type: 'button', text, buttons } } },
+  });
+}
+
 // Perfil de quem mandou DM (nome, @username, foto) a partir do IGSID
 async function getUserProfile(igsid) {
   return igGraph('GET', `${igsid}?fields=name,username,profile_pic`);
@@ -68,4 +76,4 @@ async function igGet(pathPart) {
   return igGraph('GET', pathPart);
 }
 
-module.exports = { sendPrivateReply, sendDirectMessage, sendMediaMessage, replyToComment, getUserProfile, igGet };
+module.exports = { sendPrivateReply, sendDirectMessage, sendMediaMessage, sendButtonMessage, replyToComment, getUserProfile, igGet };

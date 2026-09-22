@@ -2,7 +2,7 @@
 // (stories/feed indexados pelo content.js) como fonte de verdade de preço e tamanho.
 // NÃO consulta o ERP: preço/tamanho estão na arte que a Srª D'Black posta.
 const { queryAll, queryOne, queryRun } = require('../database');
-const { sendDirectMessage } = require('./api');
+const { sendDirectMessage, sendButtonMessage } = require('./api');
 const content = require('./content');
 
 const MODEL = 'claude-sonnet-4-6';
@@ -33,7 +33,7 @@ function buildSystemPrompt(pageContext, waNumber) {
   // Com o número da loja disponível, o fechamento manda a cliente pro WhatsApp (onde a equipe
   // fecha as vendas de verdade) via marcador [ZAP: ...] que o código troca por link wa.me.
   const fechamento = waNumber
-    ? `- Quando a cliente decidir a peça e o tamanho (e você já souber a cidade), termine a mensagem com o marcador [ZAP: peça | tamanho | cidade]. O sistema troca o marcador por um convite pronto + o link do WhatsApp da loja com o pedido já escrito — você NÃO precisa explicar o link nem escrever URL: responda normalmente (preço, entrega, retirada) e feche com o marcador. Exemplo: "Perfeito! Em Divino a retirada é gratuita na loja ✨ [ZAP: vestido midi preto | 40 | Divino]"
+    ? `- Quando a cliente decidir a peça e o tamanho (e você já souber a cidade), termine a mensagem com o marcador [ZAP: peça | tamanho | cidade]. O sistema troca o marcador por uma mensagem pronta com um BOTÃO que abre o WhatsApp da loja com o pedido já escrito — você NÃO precisa explicar nem escrever link: responda normalmente (preço, entrega, retirada) e feche com o marcador. Exemplo: "Perfeito! Em Divino a retirada é gratuita na loja ✨ [ZAP: vestido midi preto | 40 | Divino]"
 - Se a cliente disser que prefere finalizar por aqui mesmo, ou voltar a falar depois do link, use [TRANSFERIR] para a equipe atender no Direct`
     : `- Quando a cliente decidir a peça e o tamanho, diga que vai passar para a equipe finalizar o pedido e coloque [TRANSFERIR]`;
   const transferirCompra = waNumber
@@ -202,40 +202,63 @@ async function generateAndSend(convStale, msg) {
     let shouldTransfer = text.includes('[TRANSFERIR]');
     text = text.replace(/\[TRANSFERIR\]/g, '').trim();
 
-    // [ZAP: peça | tamanho | cidade] → link wa.me com o pedido pré-escrito.
+    // [ZAP: peça | tamanho | cidade] → mensagem com BOTÃO "Abrir WhatsApp" (a URL fica oculta).
     // A frase "Vim do Instagram" é o marcador que o server.js usa pra etiquetar a
     // origem quando a cliente chega no WhatsApp — não mudar sem mudar lá também.
+    let zapButton = null;
     const zapMatch = text.match(/\[ZAP:?\s*([^\]]*)\]/i);
     if (zapMatch) {
       text = text.replace(zapMatch[0], '').trim();
       const detalhes = zapMatch[1].split('|').map(s => s.trim()).filter(Boolean).join(', ');
       if (waNumber && detalhes) {
-        // O convite é fixo (garantido pelo código): a Lê às vezes mandava só o link, sem explicar
         const prefill = `Oi! Vim do Instagram e quero: ${detalhes}`;
-        text += `\n\nPra finalizar é só tocar no link abaixo, tá bom? Seu pedido já chega prontinho no nosso WhatsApp e a equipe fecha tudo com você por lá 😉`;
-        text += `\n\nhttps://wa.me/${waNumber}?text=${encodeURIComponent(prefill)}`;
+        zapButton = {
+          text: 'Pra finalizar é só tocar no botão abaixo, tá bom? Seu pedido já chega prontinho no nosso WhatsApp e a equipe fecha tudo com você por lá 😉',
+          url: `https://wa.me/${waNumber}?text=${encodeURIComponent(prefill)}`,
+        };
       }
-      // Com ou sem link, a equipe assume a partir daqui (no WhatsApp ou no Direct)
+      // Com ou sem botão, a equipe assume a partir daqui (no WhatsApp ou no Direct)
       shouldTransfer = true;
     }
     // Garantia: transferência NUNCA acontece em silêncio — se veio sem texto, avisa com a frase padrão
-    if (shouldTransfer && !text) {
+    if (shouldTransfer && !text && !zapButton) {
       text = 'Vou te passar para uma das meninas da nossa equipe, elas continuam com você por aqui rapidinho, tá bom? 😉';
     }
-    if (!text) return;
+    if (!text && !zapButton) return;
 
-    const igResult = await sendDirectMessage(conv.phone, text);
-    const msgId = igResult?.message_id || genId();
-    await queryRun(
-      "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, 'Lê (IA)', $3, 1, NOW()) ON CONFLICT (id) DO NOTHING",
-      [msgId, conv.id, text]);
-    await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", [text, conv.id]);
+    // Salva no histórico e notifica o painel (uma chamada por mensagem enviada)
+    const recordSent = async (content, sentId) => {
+      const msgId = sentId || genId();
+      await queryRun(
+        "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, 'Lê (IA)', $3, 1, NOW()) ON CONFLICT (id) DO NOTHING",
+        [msgId, conv.id, content]);
+      await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", [content, conv.id]);
+      notify('new_message', {
+        conversation: { ...conv, last_message: content, last_message_from_me: true },
+        message: { id: msgId, conversation_id: conv.id, from_me: true, sender: 'Lê (IA)', content, ack: 1, timestamp: new Date().toISOString() },
+      });
+    };
 
-    notify('new_message', {
-      conversation: { ...conv, last_message: text, last_message_from_me: true },
-      message: { id: msgId, conversation_id: conv.id, from_me: true, sender: 'Lê (IA)', content: text, ack: 1, timestamp: new Date().toISOString() },
-    });
-    console.log(`🤖 [le-ig] Lê respondeu ${conv.customer_push_name || conv.phone}${shouldTransfer ? ' (transferindo)' : ''}`);
+    if (text) {
+      const igResult = await sendDirectMessage(conv.phone, text);
+      await recordSent(text, igResult?.message_id);
+    }
+
+    if (zapButton) {
+      const buttons = [{ type: 'web_url', url: zapButton.url, title: 'Abrir WhatsApp' }];
+      try {
+        const btnResult = await sendButtonMessage(conv.phone, zapButton.text, buttons);
+        await recordSent(`${zapButton.text}\n\n🔘 Abrir WhatsApp → ${zapButton.url}`, btnResult?.message_id);
+      } catch (e) {
+        // Botão falhou (conta/janela sem suporte) → manda o link como texto mesmo
+        console.error('[le-ig] botão do WhatsApp falhou, enviando link em texto:', e.message);
+        const fallback = `${zapButton.text.replace('no botão abaixo', 'no link abaixo')}\n\n${zapButton.url}`;
+        const igResult = await sendDirectMessage(conv.phone, fallback).catch(() => null);
+        if (igResult) await recordSent(fallback, igResult?.message_id);
+      }
+    }
+
+    console.log(`🤖 [le-ig] Lê respondeu ${conv.customer_push_name || conv.phone}${zapButton ? ' (botão WhatsApp)' : ''}${shouldTransfer ? ' (transferindo)' : ''}`);
 
     if (shouldTransfer) {
       await queryRun("UPDATE conversations SET ai_muted = true WHERE id = $1", [conv.id]);
