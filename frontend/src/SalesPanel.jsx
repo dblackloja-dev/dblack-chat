@@ -59,6 +59,10 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   const [itemDiscounts, setItemDiscounts] = useState({}); // { product_id: valor }
   const [showDiscountPanel, setShowDiscountPanel] = useState(false);
   const [customer, setCustomer] = useState(null);
+  // Ajuste do desconto BLACK (igual ao PDV): só nível BLACK, valor em R$, teto 30%
+  const [tierOverride, setTierOverride] = useState(null);
+  const [tierEditing, setTierEditing] = useState(false);
+  const [tierEditVal, setTierEditVal] = useState('');
   const [tipoEntrega, setTipoEntrega] = useState(null); // 'entrega' | 'retirada' — obrigatório
   const [lojaRetirada, setLojaRetirada] = useState(null);
   const [finishing, setFinishing] = useState(false);
@@ -73,6 +77,9 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       }).catch(() => {});
     }
   }, [customerPhone]);
+
+  // O ajuste do desconto BLACK fica amarrado ao cliente — trocou, volta ao padrão
+  useEffect(() => { setTierOverride(null); setTierEditing(false); }, [customer?.id]);
 
   // Promoção Leve 4 Pague 3 (mesma config do ERP) — a cada 4 peças do MESMO valor, 1 de brinde
   const [promo43Cfg, setPromo43Cfg] = useState(null);
@@ -175,8 +182,22 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   // assim como promoção ativa na config do programa.
   const loyal = customer?.loyalty;
   const cashPayment = payment === 'pix' || payment === 'dinheiro';
-  const tierPct = (loyal?.enrolled && cashPayment && !loyal.promo_active && discountVal === 0) ? (loyal.discount_pct || 0) : 0;
-  const tierVal = Math.round(subPagavel * tierPct) / 100;
+  const tierActive = !!(loyal?.enrolled && cashPayment && !loyal.promo_active && discountVal === 0 && (loyal.discount_pct || 0) > 0);
+  const tierAutoVal = tierActive ? Math.round(subPagavel * loyal.discount_pct) / 100 : 0;
+  // Só o nível BLACK permite ajustar o desconto (peça anunciada com preço arredondado);
+  // GOLD/DIAMOND ficam travados nos 12/14%. Teto de 30% contra erro de digitação.
+  const tierEditable = tierActive && loyal.tier === 'BLACK';
+  const tierMaxEdit = Math.round(subPagavel * 30) / 100;
+  const tierOverrideOn = tierEditable && tierOverride > 0;
+  const tierVal = tierOverrideOn ? Math.min(tierOverride, tierMaxEdit, subPagavel) : tierAutoVal;
+  const tierPctShown = subPagavel > 0 && tierVal > 0 ? Math.round(tierVal / subPagavel * 1000) / 10 : 0;
+
+  const applyTierEdit = () => {
+    const v = Math.round((parseFloat(String(tierEditVal).replace(',', '.')) || 0) * 100) / 100;
+    if (v <= 0) { setTierOverride(null); setTierEditing(false); return; }
+    if (v > tierMaxEdit) return alert(`Ajuste máximo de 30% do subtotal (R$ ${tierMaxEdit.toFixed(2)})`);
+    setTierOverride(v); setTierEditing(false);
+  };
 
   const total = Math.max(0, subPagavel - discountVal - tierVal);
 
@@ -216,7 +237,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         payment_method: payment,
         discount: Math.round((discountVal + tierVal) * 100) / 100,
         discount_type: 'fixed',
-        discount_label: tierVal > 0 ? `Cliente Black ${loyal.tier} ${tierPct}% à vista` : discountLabel,
+        discount_label: tierVal > 0 ? `Cliente Black ${loyal.tier} ${tierPctShown}% à vista${tierOverrideOn ? ' (ajustado)' : ''}` : discountLabel,
         tipo_entrega: tipoEntrega,
         loja_retirada: tipoEntrega === 'retirada' ? lojaRetirada : null,
       });
@@ -226,6 +247,8 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       setItemDiscounts({});
       setDiscountScope('sale');
       setShowDiscountPanel(false);
+      setTierOverride(null);
+      setTierEditing(false);
       setTipoEntrega(null);
       setLojaRetirada(null);
     } catch (e) {
@@ -462,8 +485,30 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         <div style={{ fontSize: 11, color: C.gold, fontWeight: 600, marginBottom: 4 }}>🎁 Falta 1 peça de R$ {promo43Hint.toFixed(2)} pra levar 1 de brinde!</div>
       )}
       {tierVal > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-          <span style={{ fontSize: 10, color: C.gold, fontWeight: 700 }}>🖤 Cliente Black {loyal.tier} ({tierPct}% à vista):</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: C.gold, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+            🖤 Cliente Black {loyal.tier} ({tierPctShown}% à vista){tierOverrideOn ? ' ✎' : ''}
+            {tierEditable && !tierEditing && (
+              <button onClick={() => { setTierEditVal(String(tierVal.toFixed(2)).replace('.', ',')); setTierEditing(true); }}
+                title="Ajustar desconto BLACK (peça com preço arredondado na postagem)"
+                style={{ padding: '2px 8px', borderRadius: 6, border: `1px solid ${C.brd}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontSize: 10, fontFamily: 'inherit' }}>✏️ ajustar</button>
+            )}
+            {tierOverrideOn && !tierEditing && (
+              <button onClick={() => setTierOverride(null)} title={`Voltar ao desconto padrão de ${loyal.discount_pct}%`}
+                style={{ padding: '2px 8px', borderRadius: 6, border: `1px solid ${C.brd}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontSize: 10, fontFamily: 'inherit' }}>↩ {loyal.discount_pct}%</button>
+            )}
+            {tierEditable && tierEditing && (
+              <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                <span style={{ fontSize: 10, color: C.dim }}>R$</span>
+                <input autoFocus value={tierEditVal} inputMode="decimal"
+                  onChange={e => setTierEditVal(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') applyTierEdit(); if (e.key === 'Escape') setTierEditing(false); }}
+                  style={{ width: 64, padding: '3px 6px', borderRadius: 6, border: `1px solid ${C.gold}`, background: 'transparent', color: '#fff', fontSize: 11, fontFamily: 'inherit' }} />
+                <button onClick={applyTierEdit} style={{ padding: '3px 8px', borderRadius: 6, border: 'none', background: C.gold, color: '#000', cursor: 'pointer', fontSize: 10, fontWeight: 800, fontFamily: 'inherit' }}>OK</button>
+                <button onClick={() => setTierEditing(false)} style={{ padding: '3px 6px', borderRadius: 6, border: `1px solid ${C.brd}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontSize: 10, fontFamily: 'inherit' }}>✕</button>
+              </span>
+            )}
+          </span>
           <span style={{ color: C.grn, fontWeight: 700 }}>- R$ {tierVal.toFixed(2)}</span>
         </div>
       )}
