@@ -4,6 +4,7 @@
 const { sendPrivateReply, sendDirectMessage } = require('./api');
 const reservations = require('../live/reservations');
 const dm = require('./dm');
+const comments = require('./comments');
 
 const IG_USER_ID = process.env.META_IG_USER_ID;
 const CHECKOUT_BASE = process.env.LIVE_CHECKOUT_URL || 'https://dblack.com.br/live';
@@ -45,7 +46,11 @@ async function handleComment(value, isLive) {
   seen.add(value.id);
 
   const m = value.text.match(QUERO_RE);
-  if (!m) return;                                     // comentário comum, ignora
+  if (!m) {
+    // Comentário comum: em POST do feed a Lê responde (em live, não — fluxo próprio)
+    if (!isLive) comments.maybeReplyComment(value).catch(e => console.error('[ig-comments]', e.message));
+    return;
+  }
 
   const code = m[1].toUpperCase();
   const size = m[2] ? m[2].toUpperCase() : null;
