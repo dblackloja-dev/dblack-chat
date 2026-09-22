@@ -79,7 +79,7 @@ FLUXO DE VENDA (tudo por texto, sem botões, sem fotos):
 14. Peça o CPF: "para gerar o pagamento, preciso do seu CPF"
 15. Use finalizar_venda com forma de pagamento, CPF e tipo de entrega
 16. Se for PIX: QR Code e código copia-cola são enviados automaticamente
-17. Se for cartão: link de pagamento enviado automaticamente (até 6x)
+17. Se for cartão: link de pagamento enviado automaticamente (até 12x)
 18. Diga que assim que confirmar o pagamento, o cupom será enviado
 
 REGRAS DE VENDA:
@@ -120,7 +120,7 @@ A D'BLACK: Lema "Precinho de D'Black". Moda feminina e masculina. Donos: Sr. D'B
 
 ENTREGAS: Motoboy R$7 (Santa Margarida, Pedra Bonita, Orizânia, Fervedouro, Carangola, Matipó, Abre Campo, Padre Fialho, Sericita, Santo Amaro, Realeza, São Francisco do Glória). Correios R$25 todo Brasil (6-10 dias). Retirada grátis (1-3 dias) em Divino, São João, São Domingos. Divino e São João NÃO tem entrega.
 
-PAGAMENTO: PIX ou Cartão de Crédito (até 6x).
+PAGAMENTO: PIX ou Cartão de Crédito (até 12x).
 
 HORÁRIOS: Seg-Sex 09:00-19:00. Sáb: todas as lojas 08:00-14:00.`;
 
@@ -722,7 +722,7 @@ async function executeTool(toolName, toolInput, context) {
               }
             } else {
               // Cartão — envia link de pagamento
-              const linkMsg = `💳 Link de pagamento — R$ ${total.toFixed(2)}\n\n${charge.invoiceUrl}\n\nPode parcelar em até 6x!`;
+              const linkMsg = `💳 Link de pagamento — R$ ${total.toFixed(2)}\n\n${charge.invoiceUrl}\n\nPode parcelar em até 12x!`;
               await deps.wa.sendMessage(customerPhone, linkMsg, { isBot: true });
               const linkMsgId = deps.genId();
               await queryRun(

@@ -77,7 +77,7 @@ async function createPixCharge(customerId, value, description) {
 }
 
 // Cria cobrança com link de pagamento (cartão de crédito)
-async function createCardCharge(customerId, value, description, maxInstallments = 6) {
+async function createCardCharge(customerId, value, description, maxInstallments = 12) {
   const charge = await asaasRequest('POST', '/payments', {
     customer: customerId,
     billingType: 'CREDIT_CARD',

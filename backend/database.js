@@ -165,9 +165,9 @@ async function initDB() {
   if (parseInt(qrCount.c) === 0) {
     const defaults = [
       ['qr1', '👋 Saudação', 'Olá! Tudo bem? Como posso te ajudar?', 'atendimento', 1],
-      ['qr2', '⏰ Horário', '⏰ Nosso horário de atendimento:\nSeg a Sex: 9h às 18h\nSábado: 9h às 13h', 'info', 2],
+      ['qr2', '⏰ Horário', '⏰ Nosso horário de atendimento:\nSeg a Sex: 9h às 19h\nSábado: 8h às 14h', 'info', 2],
       ['qr3', '📍 Endereço', '📍 Nossas lojas:\n🏪 D\'Black Divino-MG\n🏪 D\'Black São João-MG\n🏪 D\'Black Matriz - Ribeirão de São Domingos-MG', 'info', 3],
-      ['qr4', '💳 Pagamento', '💳 Formas de pagamento:\n✅ PIX\n✅ Cartão de Crédito (até 6x)\n✅ Cartão de Débito\n✅ Dinheiro\n✅ Crediário', 'info', 4],
+      ['qr4', '💳 Pagamento', '💳 Formas de pagamento:\n✅ PIX\n✅ Cartão de Crédito (até 12x)\n✅ Cartão de Débito\n✅ Dinheiro\n✅ Crediário', 'info', 4],
       ['qr5', '📦 Frete', '📦 Enviamos para todo o Brasil!\nFrete calculado no momento da compra.', 'info', 5],
       ['qr6', '🔄 Troca', '🔄 Política de troca:\nVocê tem até 7 dias para trocar.\nProduto deve estar com etiqueta e sem uso.', 'info', 6],
       ['qr7', '✅ Obrigado', 'Muito obrigado pela preferência! 🖤\nQualquer dúvida, estamos à disposição.\nSiga @d_blackloja no Instagram! 📱', 'atendimento', 7],
@@ -182,12 +182,12 @@ async function initDB() {
   // Insere configurações padrão se tabela vazia
   const settingsCount = await queryOne("SELECT COUNT(*) as c FROM chat_settings");
   if (parseInt(settingsCount.c) === 0) {
-    const greeting = `Olá! 👋 Seja bem-vindo(a) à *D'Black Store*! 🖤\n\nAgradecemos sua mensagem! Um de nossos atendentes vai te responder em breve.\n\n⏰ *Horário de atendimento:*\nSeg a Sex: 9h às 18h\nSábado: 9h às 13h\n\nEnquanto isso, confira nossas novidades no Instagram: @d_blackloja 📱`;
+    const greeting = `Olá! 👋 Seja bem-vindo(a) à *D'Black Store*! 🖤\n\nAgradecemos sua mensagem! Um de nossos atendentes vai te responder em breve.\n\n⏰ *Horário de atendimento:*\nSeg a Sex: 9h às 19h\nSábado: 8h às 14h\n\nEnquanto isso, confira nossas novidades no Instagram: @d_blackloja 📱`;
     await queryRun("INSERT INTO chat_settings (key, value) VALUES ('greeting_enabled', 'true') ON CONFLICT DO NOTHING");
     await queryRun("INSERT INTO chat_settings (key, value) VALUES ('greeting_text', $1) ON CONFLICT DO NOTHING", [greeting]);
     await queryRun("INSERT INTO chat_settings (key, value) VALUES ('company_name', 'D''Black Store') ON CONFLICT DO NOTHING");
     await queryRun("INSERT INTO chat_settings (key, value) VALUES ('company_instagram', '@d_blackloja') ON CONFLICT DO NOTHING");
-    await queryRun("INSERT INTO chat_settings (key, value) VALUES ('business_hours', 'Seg a Sex: 9h às 18h | Sábado: 9h às 13h') ON CONFLICT DO NOTHING");
+    await queryRun("INSERT INTO chat_settings (key, value) VALUES ('business_hours', 'Seg a Sex: 9h às 19h | Sábado: 8h às 14h') ON CONFLICT DO NOTHING");
     console.log('⚙️ Configurações padrão criadas');
   }
 
