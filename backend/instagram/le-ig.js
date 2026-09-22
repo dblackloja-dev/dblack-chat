@@ -33,7 +33,7 @@ function buildSystemPrompt(pageContext, waNumber) {
   // Com o número da loja disponível, o fechamento manda a cliente pro WhatsApp (onde a equipe
   // fecha as vendas de verdade) via marcador [ZAP: ...] que o código troca por link wa.me.
   const fechamento = waNumber
-    ? `- Quando a cliente decidir a peça e o tamanho (e você já souber a cidade), termine a mensagem com o marcador [ZAP: peça | tamanho | cidade]. O sistema troca o marcador por uma mensagem pronta com um BOTÃO que abre o WhatsApp da loja com o pedido já escrito — você NÃO precisa explicar nem escrever link: responda normalmente (preço, entrega, retirada) e feche com o marcador. Exemplo: "Perfeito! Em Divino a retirada é gratuita na loja ✨ [ZAP: vestido midi preto | 40 | Divino]"
+    ? `- Quando a cliente decidir a peça e o tamanho (e você já souber a cidade), termine a mensagem com o marcador [ZAP: peça tamanho X | cidade]. UMA peça por barra, com o tamanho junto dela, e a cidade SEMPRE sozinha na última barra. O sistema troca o marcador por uma mensagem pronta com um BOTÃO que abre o WhatsApp da loja com o pedido já escrito — você NÃO precisa explicar nem escrever link: responda normalmente (preço, entrega, retirada) e feche com o marcador. Exemplo com uma peça: "Perfeito! Em Divino a retirada é gratuita na loja ✨ [ZAP: vestido midi preto tamanho 40 | Divino]". Exemplo com mais de uma: "[ZAP: cropped branco tamanho G | t-shirt poá marrom tamanho M | Realeza]"
 - Se a cliente disser que prefere finalizar por aqui mesmo, ou voltar a falar depois do link, use [TRANSFERIR] para a equipe atender no Direct`
     : `- Quando a cliente decidir a peça e o tamanho, diga que vai passar para a equipe finalizar o pedido e coloque [TRANSFERIR]`;
   const transferirCompra = waNumber
@@ -213,9 +213,12 @@ async function generateAndSend(convStale, msg) {
     const zapMatch = text.match(/\[ZAP:?\s*([^\]]*)\]/i);
     if (zapMatch) {
       text = text.replace(zapMatch[0], '').trim();
-      const detalhes = zapMatch[1].split('|').map(s => s.trim()).filter(Boolean).join(', ');
-      if (waNumber && detalhes) {
-        const prefill = `Oi! Vim do Instagram e quero: ${detalhes}`;
+      // Formato: [ZAP: peça tamanho X | peça tamanho Y | cidade] — última barra é a cidade
+      const partes = zapMatch[1].split('|').map(s => s.trim()).filter(Boolean);
+      if (waNumber && partes.length) {
+        const cidade = partes.length > 1 ? partes.pop() : null;
+        const linhas = partes.map(p => `- ${p}`).join('\n');
+        const prefill = `Oi! Vim do Instagram e quero finalizar meu pedido:\n${linhas}${cidade ? `\nCidade: ${cidade}` : ''}`;
         zapButton = {
           text: 'Pra finalizar é só tocar no botão abaixo, tá bom? Seu pedido já chega prontinho no nosso WhatsApp e a equipe fecha tudo com você por lá 😉',
           url: `https://wa.me/${waNumber}?text=${encodeURIComponent(prefill)}`,
