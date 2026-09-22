@@ -615,6 +615,21 @@ wa.on('message', (msg) => {
         [msgId, conv.id, msg.pushName || msg.phone, msg.content, msg.mediaType || null, msg.mediaUrl || null, msg.replyTo || null, msg.timestamp]
       );
 
+      // Cliente veio do funil da Lê no Instagram (link wa.me com pedido pré-escrito
+      // gerado pelo le-ig.js) → etiqueta a conversa pra medir o funil IG → WhatsApp
+      if (/vim do instagram/i.test(msg.content || '')) {
+        try {
+          const hasTag = await queryOne("SELECT id FROM conversation_tags WHERE conversation_id = $1 AND tag = 'Instagram'", [conv.id]);
+          if (!hasTag) {
+            await queryRun("INSERT INTO conversation_tags (id, conversation_id, tag, color) VALUES ($1, $2, 'Instagram', '#E1306C')", [genId(), conv.id]);
+            const tags = await queryAll("SELECT tag FROM conversation_tags WHERE conversation_id = $1", [conv.id]);
+            await queryRun("UPDATE conversations SET tags = $1 WHERE id = $2", [tags.map(t => t.tag).join(','), conv.id]);
+            conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
+            console.log(`🛍 ${conv.phone} chegou pelo funil do Instagram — conversa etiquetada`);
+          }
+        } catch (e) { console.error('Erro ao etiquetar origem Instagram:', e.message); }
+      }
+
       // Notifica todos os atendentes em tempo real
       broadcast('new_message', {
         conversation: conv,

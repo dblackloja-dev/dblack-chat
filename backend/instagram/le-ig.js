@@ -29,7 +29,16 @@ async function getApiKey() {
   return apiKey ? apiKey.trim() : null;
 }
 
-function buildSystemPrompt(pageContext) {
+function buildSystemPrompt(pageContext, waNumber) {
+  // Com o número da loja disponível, o fechamento manda a cliente pro WhatsApp (onde a equipe
+  // fecha as vendas de verdade) via marcador [ZAP: ...] que o código troca por link wa.me.
+  const fechamento = waNumber
+    ? `- Quando a cliente decidir a peça e o tamanho (e você já souber a cidade), convide-a a finalizar no WhatsApp da loja, onde a equipe fecha o pedido rapidinho, e termine a mensagem com o marcador [ZAP: peça | tamanho | cidade]. O sistema troca o marcador por um link do WhatsApp que já chega com o pedido escrito — NUNCA escreva o link você mesma, use somente o marcador. Exemplo: "Perfeito! Vou te mandar o link do nosso WhatsApp, é só clicar que seu pedido já chega prontinho e a equipe finaliza com você ✨ [ZAP: vestido midi preto | 40 | Divino]"
+- Se a cliente disser que prefere finalizar por aqui mesmo, ou voltar a falar depois do link, use [TRANSFERIR] para a equipe atender no Direct`
+    : `- Quando a cliente decidir a peça e o tamanho, diga que vai passar para a equipe finalizar o pedido e coloque [TRANSFERIR]`;
+  const transferirCompra = waNumber
+    ? '- Cliente quer comprar mas prefere finalizar pelo Direct (senão, use o [ZAP: ...])'
+    : '- Cliente decidiu comprar (fechar pedido/pagamento)';
   return `Você é a Lê, vendedora online da D'Black Store, respondendo os Directs do Instagram @d_blackloja.
 
 QUEM VOCÊ É: Lê, 25 anos, mineira, simpática, acolhedora e carinhosa. Tom leve, descontraído, informal e humano — o mesmo tom da Srª D'Black nos stories. Você faz a cliente se sentir especial.
@@ -60,10 +69,10 @@ FECHAMENTO DA VENDA:
 - Pergunte o tamanho desejado e a cidade da cliente
 - Entrega: retirada grátis nas lojas (São Domingos, Divino e São João do Manhuaçu); motoboy R$7 (Santa Margarida, Matipó, Abre Campo, Sericita, Padre Fialho, São Francisco do Glória, Fervedouro, Carangola, Pedra Bonita, Orizânia, Santo Amaro e Realeza); Correios R$25 para todo o Brasil (6 a 10 dias)
 - Pagamento: Pix ou cartão de crédito parcelado (cite as condições da arte quando houver)
-- Quando a cliente decidir a peça e o tamanho, diga que vai passar para a equipe finalizar o pedido e coloque [TRANSFERIR]
+${fechamento}
 
 QUANDO TRANSFERIR (texto curto + [TRANSFERIR] no final):
-- Cliente decidiu comprar (fechar pedido/pagamento)
+${transferirCompra}
 - Informação que não está no contexto
 - Reclamação, troca ou problema com pedido
 - Cliente pede para falar com uma pessoa
@@ -159,7 +168,8 @@ async function generateAndSend(convStale, msg) {
     if (!apiKey) return;
 
     const pageContext = await content.getPageContext();
-    let system = buildSystemPrompt(pageContext);
+    const waNumber = (await setting('wa_number', '')).replace(/\D/g, '');
+    let system = buildSystemPrompt(pageContext, waNumber);
 
     // Resposta de story: busca (e indexa se preciso) o story exato + a sequência vizinha
     // (o padrão da loja é look → detalhe → arte com preço nos minutos seguintes)
@@ -189,8 +199,23 @@ async function generateAndSend(convStale, msg) {
 
     if (text.includes('[SKIP]')) return; // nada novo a dizer — não envia
 
-    const shouldTransfer = text.includes('[TRANSFERIR]');
+    let shouldTransfer = text.includes('[TRANSFERIR]');
     text = text.replace(/\[TRANSFERIR\]/g, '').trim();
+
+    // [ZAP: peça | tamanho | cidade] → link wa.me com o pedido pré-escrito.
+    // A frase "Vim do Instagram" é o marcador que o server.js usa pra etiquetar a
+    // origem quando a cliente chega no WhatsApp — não mudar sem mudar lá também.
+    const zapMatch = text.match(/\[ZAP:?\s*([^\]]*)\]/i);
+    if (zapMatch) {
+      text = text.replace(zapMatch[0], '').trim();
+      const detalhes = zapMatch[1].split('|').map(s => s.trim()).filter(Boolean).join(', ');
+      if (waNumber && detalhes) {
+        const prefill = `Oi! Vim do Instagram e quero finalizar minha compra: ${detalhes}`;
+        text += `\n\nhttps://wa.me/${waNumber}?text=${encodeURIComponent(prefill)}`;
+      }
+      // Com ou sem link, a equipe assume a partir daqui (no WhatsApp ou no Direct)
+      shouldTransfer = true;
+    }
     // Garantia: transferência NUNCA acontece em silêncio — se veio sem texto, avisa com a frase padrão
     if (shouldTransfer && !text) {
       text = 'Vou te passar para uma das meninas da nossa equipe, elas continuam com você por aqui rapidinho, tá bom? 😉';

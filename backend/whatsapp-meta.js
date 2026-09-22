@@ -100,6 +100,14 @@ class WhatsAppMeta extends EventEmitter {
     try {
       const info = await this.graph('GET', `${PHONE_ID}?fields=display_phone_number,verified_name,quality_rating`);
       this.connected = true;
+      // Guarda o número da loja (só dígitos) — a Lê do Instagram usa pra montar o link wa.me do fechamento
+      try {
+        const digits = String(info.display_phone_number || '').replace(/\D/g, '');
+        if (digits) {
+          const { queryRun } = require('./database');
+          await queryRun("INSERT INTO chat_settings (key, value) VALUES ('wa_number', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [digits]);
+        }
+      } catch {}
       console.log(`✅ WhatsApp (Meta Cloud API) conectado! Número: ${info.display_phone_number} | Nome: ${info.verified_name} | Qualidade: ${info.quality_rating}`);
       this.emit('connected');
       return info;
