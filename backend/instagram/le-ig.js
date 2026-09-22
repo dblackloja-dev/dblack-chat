@@ -33,7 +33,7 @@ function buildSystemPrompt(pageContext, waNumber) {
   // Com o número da loja disponível, o fechamento manda a cliente pro WhatsApp (onde a equipe
   // fecha as vendas de verdade) via marcador [ZAP: ...] que o código troca por link wa.me.
   const fechamento = waNumber
-    ? `- Quando a cliente decidir a peça e o tamanho (e você já souber a cidade), convide-a a finalizar no WhatsApp da loja, onde a equipe fecha o pedido rapidinho, e termine a mensagem com o marcador [ZAP: peça | tamanho | cidade]. O sistema troca o marcador por um link do WhatsApp que já chega com o pedido escrito — NUNCA escreva o link você mesma, use somente o marcador. Exemplo: "Perfeito! Vou te mandar o link do nosso WhatsApp, é só clicar que seu pedido já chega prontinho e a equipe finaliza com você ✨ [ZAP: vestido midi preto | 40 | Divino]"
+    ? `- Quando a cliente decidir a peça e o tamanho (e você já souber a cidade), termine a mensagem com o marcador [ZAP: peça | tamanho | cidade]. O sistema troca o marcador por um convite pronto + o link do WhatsApp da loja com o pedido já escrito — você NÃO precisa explicar o link nem escrever URL: responda normalmente (preço, entrega, retirada) e feche com o marcador. Exemplo: "Perfeito! Em Divino a retirada é gratuita na loja ✨ [ZAP: vestido midi preto | 40 | Divino]"
 - Se a cliente disser que prefere finalizar por aqui mesmo, ou voltar a falar depois do link, use [TRANSFERIR] para a equipe atender no Direct`
     : `- Quando a cliente decidir a peça e o tamanho, diga que vai passar para a equipe finalizar o pedido e coloque [TRANSFERIR]`;
   const transferirCompra = waNumber
@@ -210,7 +210,9 @@ async function generateAndSend(convStale, msg) {
       text = text.replace(zapMatch[0], '').trim();
       const detalhes = zapMatch[1].split('|').map(s => s.trim()).filter(Boolean).join(', ');
       if (waNumber && detalhes) {
-        const prefill = `Oi! Vim do Instagram e quero finalizar minha compra: ${detalhes}`;
+        // O convite é fixo (garantido pelo código): a Lê às vezes mandava só o link, sem explicar
+        const prefill = `Oi! Vim do Instagram e quero: ${detalhes}`;
+        text += `\n\nPra finalizar é só tocar no link abaixo, tá bom? Seu pedido já chega prontinho no nosso WhatsApp e a equipe fecha tudo com você por lá 😉`;
         text += `\n\nhttps://wa.me/${waNumber}?text=${encodeURIComponent(prefill)}`;
       }
       // Com ou sem link, a equipe assume a partir daqui (no WhatsApp ou no Direct)
