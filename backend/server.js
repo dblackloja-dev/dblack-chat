@@ -1329,13 +1329,15 @@ app.get('/api/erp/customer-details/:phone', auth, async (req, res) => {
     const customer = await erp.findCustomerByPhone(req.params.phone);
     if (!customer) return res.json({ not_found: true });
 
-    // Busca últimas compras do cliente
+    // Busca últimas compras do cliente (últimos 8 dígitos: estáveis com ou sem o nono dígito)
+    const last8 = String(req.params.phone).replace(/\D/g, '').slice(-8);
     const sales = await erp.erpQuery(
       "SELECT id, total, payment, status, date, items FROM sales WHERE customer_id = $1 OR customer_whatsapp LIKE $2 ORDER BY created_at DESC LIMIT 10",
-      [customer.id, `%${req.params.phone.slice(-9)}%`]
+      [customer.id, `%${last8}`]
     );
+    const loyalty = await erp.loyaltySummary(customer).catch(() => null);
 
-    res.json({ ...customer, recent_sales: sales });
+    res.json({ ...customer, loyalty, recent_sales: sales });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1868,11 +1870,13 @@ app.get('/api/erp/stores', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Buscar cliente por telefone
+// Buscar cliente por telefone (com resumo Cliente Black p/ o painel Vender)
 app.get('/api/erp/customer/:phone', auth, async (req, res) => {
   try {
     const customer = await erp.findCustomerByPhone(req.params.phone);
-    res.json(customer || { not_found: true });
+    if (!customer) return res.json({ not_found: true });
+    const loyalty = await erp.loyaltySummary(customer).catch(() => null);
+    res.json({ ...customer, loyalty });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

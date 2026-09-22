@@ -66,19 +66,65 @@ async function getStores() {
   return erpQuery("SELECT id, name FROM stores ORDER BY name");
 }
 
-// Busca cliente por telefone
+// Variações de um número BR: com/sem prefixo 55 e com/sem o NONO dígito.
+// O wa_id da Meta muitas vezes vem SEM o 9 (55 + DDD + 8 dígitos) enquanto o
+// cadastro do ERP tem o 9 — por isso o LIKE antigo nunca casava.
+function phoneVariants(phone) {
+  const clean = String(phone || '').replace(/\D/g, '');
+  let local = clean.length >= 12 && clean.startsWith('55') ? clean.slice(2) : clean;
+  const locals = new Set();
+  if (local.length >= 8) locals.add(local);
+  if (local.length === 11 && local[2] === '9') locals.add(local.slice(0, 2) + local.slice(3)); // tira o 9
+  if (local.length === 10) locals.add(local.slice(0, 2) + '9' + local.slice(2)); // põe o 9
+  const all = [];
+  for (const v of locals) all.push(v, '55' + v);
+  return all;
+}
+
+// Busca cliente por telefone (compara whatsapp E phone, normalizados)
 async function findCustomerByPhone(phone) {
-  // Tenta variações do número
-  const clean = phone.replace(/\D/g, '');
-  const variations = [clean, clean.slice(-11), clean.slice(-10), clean.slice(-9)];
-  for (const v of variations) {
-    const customer = await erpQueryOne(
-      "SELECT * FROM customers WHERE REPLACE(REPLACE(REPLACE(REPLACE(whatsapp, ' ', ''), '-', ''), '(', ''), ')', '') LIKE $1",
-      [`%${v}%`]
-    );
-    if (customer) return customer;
-  }
-  return null;
+  const variants = phoneVariants(phone);
+  if (!variants.length) return null;
+  return erpQueryOne(
+    `SELECT * FROM customers
+     WHERE regexp_replace(COALESCE(whatsapp,''), '[^0-9]', '', 'g') = ANY($1)
+        OR regexp_replace(COALESCE(phone,''), '[^0-9]', '', 'g') = ANY($1)
+     ORDER BY created_at LIMIT 1`,
+    [variants]
+  );
+}
+
+// Resumo Cliente Black do cliente (nível, desconto à vista, cashback, saldo).
+// Usa as funções SQL que já existem no banco do ERP (loyalty_balance) — as
+// regras de acúmulo continuam 100% nos triggers de lá.
+async function loyaltySummary(customer) {
+  if (!customer) return null;
+  const cpfDigits = String(customer.cpf || '').replace(/\D/g, '');
+  const enrolled = cpfDigits.length === 11 && !String(customer.tags || '').includes('Interno');
+  if (!enrolled) return { enrolled: false };
+  const tier = customer.tier || 'BLACK';
+  const rows = await erpQuery(
+    'SELECT key, value FROM loyalty_config WHERE key = ANY($1)',
+    [[`discount_${tier}`, `cashback_${tier}`, 'promo_active', 'promo_from', 'promo_to']]
+  );
+  const cfg = {};
+  for (const r of rows) cfg[r.key] = r.value;
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const promo_active = Number(cfg.promo_active) === 1 ||
+    !!(cfg.promo_from && cfg.promo_to && today >= cfg.promo_from && today <= cfg.promo_to);
+  let balance = 0;
+  try {
+    const b = await erpQueryOne('SELECT loyalty_balance($1) AS b', [customer.id]);
+    balance = Math.round((Number(b?.b) || 0) * 100) / 100;
+  } catch (e) { console.error('loyaltySummary balance:', e.message); }
+  return {
+    enrolled: true,
+    tier,
+    discount_pct: Number(cfg[`discount_${tier}`]) || 0,
+    cashback_pct: Number(cfg[`cashback_${tier}`]) || 0,
+    balance,
+    promo_active, // promoção ativa suspende o desconto de nível
+  };
 }
 
 // Garante que o caixa da loja está aberto (abre com R$ 0 se estiver fechado)
@@ -194,4 +240,4 @@ async function getProductVariants(ref, storeId = 'loja4') {
   );
 }
 
-module.exports = { searchProducts, getProductStock, getStores, findCustomerByPhone, createSale, ensureCashOpen, findUser, listUsers, erpQuery, erpQueryOne, getProductsByRefs, getProductVariants };
+module.exports = { searchProducts, getProductStock, getStores, findCustomerByPhone, loyaltySummary, createSale, ensureCashOpen, findUser, listUsers, erpQuery, erpQueryOne, getProductsByRefs, getProductVariants };

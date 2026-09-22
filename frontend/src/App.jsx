@@ -1133,7 +1133,14 @@ export default function App() {
                       {customerInfo.email && <InfoRow label="Email" value={customerInfo.email} />}
                       {customerInfo.whatsapp && <InfoRow label="WhatsApp" value={customerInfo.whatsapp} />}
                       {customerInfo.tags && <InfoRow label="Tags" value={customerInfo.tags} />}
-                      {customerInfo.points !== undefined && <InfoRow label="Pontos" value={customerInfo.points} />}
+                      {customerInfo.loyalty?.enrolled ? (
+                        <>
+                          <InfoRow label="Cliente Black" value={`🖤 ${customerInfo.loyalty.tier} — ${customerInfo.loyalty.discount_pct}% à vista`} />
+                          <InfoRow label="Saldo cashback" value={`R$ ${Number(customerInfo.loyalty.balance || 0).toFixed(2)}`} />
+                        </>
+                      ) : (
+                        <InfoRow label="Cliente Black" value="Não cadastrado — use o botão 🖤" />
+                      )}
                       {customerInfo.total_purchases !== undefined && <InfoRow label="Compras" value={customerInfo.total_purchases} />}
                       {customerInfo.last_visit && <InfoRow label="Última visita" value={new Date(customerInfo.last_visit).toLocaleDateString('pt-BR')} />}
                     </div>

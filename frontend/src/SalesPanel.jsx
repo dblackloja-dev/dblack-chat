@@ -170,7 +170,15 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   }
   discountVal = Math.min(discountVal, subPagavel);
 
-  const total = Math.max(0, subPagavel - discountVal);
+  // Cliente Black: desconto de nível automático à vista (PIX/Dinheiro), mesma
+  // regra do PDV — desconto manual conta como promo e ZERA o desconto de nível,
+  // assim como promoção ativa na config do programa.
+  const loyal = customer?.loyalty;
+  const cashPayment = payment === 'pix' || payment === 'dinheiro';
+  const tierPct = (loyal?.enrolled && cashPayment && !loyal.promo_active && discountVal === 0) ? (loyal.discount_pct || 0) : 0;
+  const tierVal = Math.round(subPagavel * tierPct) / 100;
+
+  const total = Math.max(0, subPagavel - discountVal - tierVal);
 
   // Entrega/retirada é obrigatório — venda só finaliza classificada
   const deliveryOk = tipoEntrega === 'entrega' || (tipoEntrega === 'retirada' && lojaRetirada);
@@ -206,9 +214,9 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         customer_name: customerName || customer?.name || null,
         items: saleItems,
         payment_method: payment,
-        discount: Math.round(discountVal * 100) / 100,
+        discount: Math.round((discountVal + tierVal) * 100) / 100,
         discount_type: 'fixed',
-        discount_label: discountLabel,
+        discount_label: tierVal > 0 ? `Cliente Black ${loyal.tier} ${tierPct}% à vista` : discountLabel,
         tipo_entrega: tipoEntrega,
         loja_retirada: tipoEntrega === 'retirada' ? lojaRetirada : null,
       });
@@ -452,6 +460,18 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       )}
       {promo43On && promo43Hint > 0 && (
         <div style={{ fontSize: 11, color: C.gold, fontWeight: 600, marginBottom: 4 }}>🎁 Falta 1 peça de R$ {promo43Hint.toFixed(2)} pra levar 1 de brinde!</div>
+      )}
+      {tierVal > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: C.gold, fontWeight: 700 }}>🖤 Cliente Black {loyal.tier} ({tierPct}% à vista):</span>
+          <span style={{ color: C.grn, fontWeight: 700 }}>- R$ {tierVal.toFixed(2)}</span>
+        </div>
+      )}
+      {loyal?.enrolled && !cashPayment && !loyal.promo_active && (loyal.discount_pct || 0) > 0 && cart.length > 0 && (
+        <div style={{ fontSize: 10, color: C.dim, marginBottom: 4 }}>🖤 {loyal.tier}: {loyal.discount_pct}% de desconto só à vista (PIX/Dinheiro)</div>
+      )}
+      {loyal?.enrolled && Number(loyal.balance || 0) > 0 && (
+        <div style={{ fontSize: 10, color: C.dim, marginBottom: 4 }}>🪙 Saldo cashback do cliente: R$ {Number(loyal.balance).toFixed(2)}</div>
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 900, color: C.grn, marginBottom: 10 }}>
         <span>TOTAL:</span><span>R$ {total.toFixed(2)}</span>
