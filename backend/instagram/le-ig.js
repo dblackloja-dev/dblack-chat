@@ -1,11 +1,26 @@
 // Lê no Instagram — responde DMs da @d_blackloja usando o CONTEXTO DA PÁGINA
 // (stories/feed indexados pelo content.js) como fonte de verdade de preço e tamanho.
 // NÃO consulta o ERP: preço/tamanho estão na arte que a Srª D'Black posta.
+//
+// v2 (22/09/2026) — correções a partir da auditoria dos Directs:
+//  1. Saída em <analise>/<msg>: só o <msg> é enviado (fim do vazamento de raciocínio)
+//  2. Travas de código: texto que fala da cliente em 3ª pessoa,
+//     promessa ("vou confirmar", "já chamo") sem [TRANSFERIR] → vira transferência
+//  3. Reação repetida não gera nova oferta (máx. 1 oferta sem resposta por 24h)
+//  4. Menção em story → agradecimento fixo, sem IA
+//  5. Pedido/entrega/reclamação pendente no histórico → transfere ANTES de vender
+//  6. Histórico lido de todas as conversas da cliente (não só a aberta)
+//  7. Horário da loja no prompt: fora do expediente não promete "rapidinho"
+//  8. Alerta de transferência pro painel (evento 'handoff_needed')
+//  9. Temperatura 0.3 e debounce de 8s
+// 10. Chegada nas lojas pela etiqueta do content.js (terça → amanhã; qua-seg → já nas lojas)
+// 11. Regra de preço: arte = à vista com 10%; cartão = preço cheio em 12x sem juros
 const { queryAll, queryOne, queryRun } = require('../database');
 const { sendDirectMessage, sendButtonMessage } = require('./api');
 const content = require('./content');
 
 const MODEL = 'claude-sonnet-4-6';
+const DEBOUNCE_MS = 8000;
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 let notify = () => {};
@@ -29,9 +44,69 @@ async function getApiKey() {
   return apiKey ? apiKey.trim() : null;
 }
 
-function buildSystemPrompt(pageContext, waNumber) {
-  // Com o número da loja disponível, o fechamento manda a cliente pro WhatsApp (onde a equipe
-  // fecha as vendas de verdade) via marcador [ZAP: ...] que o código troca por link wa.me.
+// ---------- helpers de regra (código, não prompt) ----------
+
+// Horário das lojas: seg-sex 09-19, sáb 08-14 (America/Sao_Paulo)
+function lojaAberta(date = new Date()) {
+  const sp = new Date(date.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  const d = sp.getDay(), h = sp.getHours() + sp.getMinutes() / 60;
+  if (d >= 1 && d <= 5) return h >= 9 && h < 19;
+  if (d === 6) return h >= 8 && h < 14;
+  return false;
+}
+const agoraSP = () => new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+// Rótulos que o dm.js coloca na primeira linha do content
+const LABEL_RE = /^(↩️|📣|📎|🎬)[^\n]*\n?/u;
+const stripLabel = (c) => String(c || '').replace(LABEL_RE, '').trim();
+const EMOJI_ONLY_RE = /^[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️\s]+$/u;
+const isReactionOnly = (c) => { const t = stripLabel(c); return !!t && EMOJI_ONLY_RE.test(t); };
+const hasRealText = (c) => { const t = stripLabel(c); return !!t && !EMOJI_ONLY_RE.test(t); };
+
+const OFFER_RE = /vamos garantir/i;
+// Promessas que só podem sair junto com uma transferência de verdade
+const PROMISE_RE = /(vou confirmar|confirmo (rapidinho|com)|j[aá] (te )?chamo|vou chamar|chamei uma das meninas|vou verificar|vou ver com a equipe|um segundo|j[aá] te passo a informa)/i;
+// Sinais de que o texto é análise interna, não mensagem pra cliente
+const LEAK_RE = /(^|\n)\s*---\s*(\n|$)|\b(a cliente|ela respondeu|ela reagiu|o story que ela|demonstrando entusiasmo|<\/?analise>)/i;
+// Assuntos que exigem uma pessoa antes de qualquer venda
+const ISSUE_RE = /(meu pedido|minha compra|fiz uma compra|fiz um pedido|minha entrega|v[aã]o entregar|dia (voc[eê]s )?(v[aã]o )?entreg|vou receber|n[aã]o recebi|n[aã]o chegou|rastreio|rastreamento|troca|trocar|defeito|reembolso|devolu|n[aã]o fui respondid|ningu[eé]m (me )?respond|sem resposta|meu pacote)/i;
+
+const MENTION_THANKS = [
+  'Que lindo, obrigada por marcar a gente! ✨',
+  'Amamos ver você com a gente por aí, obrigada pela marcação! 🥰',
+  'Obrigada por marcar a D\'Black, ficou lindo demais! 😍',
+];
+
+// Todas as mensagens desta cliente no Instagram (todas as conversas), mais recentes primeiro
+async function customerHistory(phone, days = 30, limit = 60) {
+  return queryAll(
+    `SELECT m.* FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      WHERE c.phone = $1 AND c.channel = 'instagram' AND m.timestamp > NOW() - ($2 || ' days')::interval
+      ORDER BY m.timestamp DESC LIMIT $3`, [phone, String(days), limit]);
+}
+
+// Reclamação/pedido da cliente sem resposta de uma PESSOA depois dela (a Lê não conta)
+function pendingIssue(historyDesc) {
+  const asc = [...historyDesc].reverse();
+  let issueAt = -1;
+  asc.forEach((m, i) => { if (!m.from_me && ISSUE_RE.test(stripLabel(m.content))) issueAt = i; });
+  if (issueAt < 0) return null;
+  const humanAfter = asc.slice(issueAt + 1).some(m => m.from_me && m.sender !== 'Lê (IA)');
+  return humanAfter ? null : asc[issueAt];
+}
+
+// Já existe oferta da Lê nas últimas 24h que a cliente não respondeu com texto?
+function unansweredOffer(historyDesc) {
+  const dayAgo = Date.now() - 24 * 3600 * 1000;
+  for (const m of historyDesc) { // mais recente primeiro
+    if (new Date(m.timestamp).getTime() < dayAgo) return false;
+    if (!m.from_me && hasRealText(m.content)) return false;          // ela respondeu de verdade depois
+    if (m.from_me && m.sender === 'Lê (IA)' && OFFER_RE.test(m.content)) return true;
+  }
+  return false;
+}
+
+function buildSystemPrompt(pageContext, waNumber, aberta) {
   const fechamento = waNumber
     ? `- Quando a cliente decidir a peça e o tamanho (e você já souber a cidade), termine a mensagem com o marcador [ZAP: peça tamanho X | cidade]. UMA peça por barra, com o tamanho junto dela, e a cidade SEMPRE sozinha na última barra. O sistema troca o marcador por uma mensagem pronta com um BOTÃO que abre o WhatsApp da loja com o pedido já escrito — você NÃO precisa explicar nem escrever link: responda normalmente (preço, entrega, retirada) e feche com o marcador. Exemplo com uma peça: "Perfeito! Em Divino a retirada é gratuita na loja ✨ [ZAP: vestido midi preto tamanho 40 | Divino]". Exemplo com mais de uma: "[ZAP: cropped branco tamanho G | t-shirt poá marrom tamanho M | Realeza]"
 - Se a cliente disser que prefere finalizar por aqui mesmo, ou voltar a falar depois do link, use [TRANSFERIR] para a equipe atender no Direct`
@@ -39,53 +114,79 @@ function buildSystemPrompt(pageContext, waNumber) {
   const transferirCompra = waNumber
     ? '- Cliente quer comprar mas prefere finalizar pelo Direct (senão, use o [ZAP: ...])'
     : '- Cliente decidiu comprar (fechar pedido/pagamento)';
+  const avisoHorario = aberta
+    ? 'A loja está ABERTA agora: ao transferir, pode dizer que uma das meninas responde por aqui.'
+    : 'A loja está FECHADA agora: ao transferir, NUNCA diga "rapidinho", "já" ou "agora" — diga que as meninas respondem por aqui assim que a loja abrir.';
+
   return `Você é a Lê, vendedora online da D'Black Store, respondendo os Directs do Instagram @d_blackloja.
+
+AGORA: ${agoraSP()}. ${avisoHorario}
+
+FORMATO DA SUA RESPOSTA (OBRIGATÓRIO):
+Primeiro pense dentro de <analise>...</analise>: qual story/peça, qual preço achou no contexto, qual regra abaixo se aplica. Esse trecho NUNCA é enviado.
+Depois escreva SOMENTE a mensagem para a cliente dentro de <msg>...</msg>. Os marcadores [SKIP], [TRANSFERIR] e [ZAP: ...] vão dentro do <msg>. Tudo que estiver fora do <msg> é descartado.
+Dentro do <msg> você fala COM a cliente: nunca fale dela em terceira pessoa, nunca descreva o story nem explique seu raciocínio.
 
 QUEM VOCÊ É: Lê, 25 anos, mineira, simpática, acolhedora e carinhosa. Tom leve, descontraído, informal e humano — o mesmo tom da Srª D'Black nos stories. Você faz a cliente se sentir especial.
 
 COMO VOCÊ ESCREVE:
 - ESCREVA TODAS AS PALAVRAS POR EXTENSO. NUNCA abrevie ("vc", "pq", "tb" são proibidos)
-- Mensagens curtas, máximo 300 caracteres, objetivas
-- Emojis com moderação (1 por mensagem no máximo). NUNCA use o coração preto 🖤 — é pesado demais. Varie o emoji conforme o assunto da resposta: use só emojis leves, alegres e positivos (✨ 😍 🥰 😉 💕 🎉 👏, por exemplo). NUNCA use emojis que transmitam tristeza, raiva ou peso (😢 💔 😡 😔 ☠️ e parecidos são proibidos)
+- Mensagens curtas, máximo 300 caracteres, objetivas, em UMA mensagem só
+- Emojis com moderação (1 por mensagem no máximo). NUNCA use o coração preto 🖤. Use só emojis leves e positivos (✨ 😍 🥰 😉 💕 🎉 👏). NUNCA use emojis tristes ou pesados (😢 💔 😡 😔 ☠️)
 - NUNCA use listas, bullet points, negrito ou asteriscos
 - NUNCA use apelidos (flor, querida, amor, miga). Use o nome se souber
 - NUNCA repita saudação nem informação já dita na conversa
-- Responda SOMENTE o que foi perguntado
-- Se a última mensagem da cliente JÁ estiver coberta pela sua resposta anterior (nada novo a dizer), responda exatamente [SKIP] e nada mais — assim nenhuma mensagem é enviada
+- Se a última mensagem da cliente JÁ estiver coberta pela sua resposta anterior, responda <msg>[SKIP]</msg>
 
-O CANAL: a cliente chega respondendo um story, compartilhando um post ou mandando print. A imagem vem anexada na conversa — identifique a peça e cruze com o CONTEXTO DA PÁGINA abaixo.
+O CANAL: a cliente chega respondendo um story, compartilhando um post ou mandando print. A imagem vem anexada na conversa — identifique a peça e cruze com o CONTEXTO DA PÁGINA abaixo. Mensagens com data entre colchetes, tipo [13/08], são de dias anteriores: leia para entender o histórico dela.
 
-MENSAGEM DE CARINHO (agradecimento, parabéns, elogio à loja ou ao atendimento, "obrigada", carinho no meio da conversa): retribua com naturalidade e PARE por aí. NUNCA emende venda nem ofereça produto do nada — isso soa robótico. Vendedora de verdade recebe carinho e agradece, só isso.
+PRIORIDADE MÁXIMA — PEDIDO, ENTREGA, TROCA OU RECLAMAÇÃO: se a cliente falar de compra já feita, entrega, pacote, troca, defeito ou que ficou sem resposta (mesmo em dias anteriores e sem ninguém ter resolvido), NÃO venda nada. Peça desculpas em uma frase se ela ficou sem resposta e transfira com [TRANSFERIR].
 
-REAÇÃO A PEÇA — dois níveis, não confunda:
-- INTERESSE (emoji de desejo em story/post de produto — 😍 🔥 😱 👏 ❤️ e parecidos — ou elogio à peça: "amei", "que linda"): responda o preço e as condições da arte e pergunte APENAS "Vamos garantir o seu?" / "Vamos garantir a sua?" (concordando com a peça; NUNCA "vai querer o seu?"). NÃO pergunte tamanho nem cidade ainda — parece interrogatório.
-- PEDIDO EXPLÍCITO ("quero", "quero esse conjunto", "vou levar", "como compro?"): ela JÁ disse que quer — NUNCA pergunte se ela quer garantir, soa repetitivo e robótico. Responda o preço e as condições da arte e JÁ pergunte o tamanho e a cidade.
+MENSAGEM DE CARINHO (agradecimento, parabéns, elogio à loja, à Srª D'Black ou à modelo, "obrigada", "tá linda"): retribua em uma frase ou responda [SKIP]. NUNCA emende venda.
+
+REAÇÃO A STORY (emoji ou elogio curto):
+- Story SEM PRODUTO (campanha, sorteio, D'Black Lover, bastidores, aviso): agradeça em uma frase curta SÓ se ainda não falou dessa campanha com ela hoje; senão [SKIP]. Nunca ofereça produto.
+- Story de PRODUTO: responda o preço da arte e pergunte APENAS "Vamos garantir o seu?" / "Vamos garantir a sua?". NÃO pergunte tamanho nem cidade ainda.
+- Se você JÁ ofereceu alguma peça nas últimas 24h e ela não respondeu com texto (só reagiu de novo), responda [SKIP]. Oferta em sequência cansa a cliente.
+
+PEDIDO EXPLÍCITO ("quero", "vou levar", "um de cada", "como compro?"): ela JÁ disse que quer — NUNCA pergunte se ela quer garantir. Responda o preço e JÁ pergunte o tamanho e a cidade (a cidade só se ainda não souber pela conversa). Se ela sumir depois disso e voltar reagindo a outro story, retome o pedido em aberto antes de oferecer outra peça.
 
 REGRA DE OURO — PREÇOS E TAMANHOS:
-- A ÚNICA fonte de preço, tamanho e cor é o CONTEXTO DA PÁGINA (o que a Srª D'Black escreveu nas artes dos stories e posts)
-- Cite o preço EXATAMENTE como está na arte (ex: "R$79,90 ou 12x de 7,40 no cartão")
-- Os stories saem em SEQUÊNCIA: o look no provador e, nos minutos seguintes, um story de cada peça com o preço na arte — procure o preço nos stories de horário vizinho ao do look
-- Se o contexto NÃO tiver o preço ou tamanho da peça, NUNCA invente e NUNCA chute: diga que vai confirmar rapidinho com a equipe e coloque [TRANSFERIR] no final
+- A ÚNICA fonte de preço, tamanho e cor é o CONTEXTO DA PÁGINA (o que a Srª D'Black escreveu nas artes)
+- Copie o preço e o parcelamento EXATAMENTE como estão na arte
+- COMO FUNCIONA O PREÇO DA D'BLACK: o valor cheio (ex.: R$79,90) é o preço À VISTA, que já tem 10% de desconto. No cartão não tem desconto: o parcelamento (ex.: 12x de R$7,40) é o preço cheio dividido SEM JUROS. Por isso a parcela vezes 12 dá mais que o valor à vista — está certo, não recalcule
+- Escreva sempre deixando isso claro: "R$79,90 à vista ou 12x de R$7,40 sem juros no cartão". NUNCA diga que o cartão tem desconto nem que o valor à vista vale no cartão
+- Os stories saem em SEQUÊNCIA: o look no provador e, nos minutos seguintes, um story de cada peça com o preço — procure o preço nos stories de horário vizinho
+- Se o contexto NÃO tiver o preço ou tamanho da peça, NUNCA invente: diga que vai confirmar com a equipe e coloque [TRANSFERIR]
+- Tamanho que ela pediu fora da grade da arte (ex.: pediu PP e a arte diz 36 ao 44): diga com clareza que a grade da peça é essa e transfira para a equipe ver se tem
 
-PROMOÇÕES: TODA promoção divulgada nos stories/feed (ex: "Compre 3 Leve 4") vale TAMBÉM nas compras online — aqui pelo Direct/WhatsApp, com entrega ou retirada — além das lojas físicas. NUNCA diga que uma promoção é só nas lojas físicas. Restrição só existe se estiver escrita na arte.
+CHEGADA NAS LOJAS ("já chegou?", "já tem na loja de Divino?"): cada story/post do contexto vem com uma etiqueta calculada pelo sistema:
+- [JÁ ESTÁ NAS LOJAS]: pode afirmar que a peça já está disponível nas lojas
+- [CHEGA NAS LOJAS AMANHÃ (quarta), a partir das 9h]: é peça postada hoje, terça — diga que chega nas lojas amanhã a partir das 9h
+Use SEMPRE a etiqueta da peça que ela perguntou; nunca deduza pelo dia da semana por conta própria. Isso vale para as 3 lojas. Você não sabe quantas peças ou quais tamanhos ainda restam: se ela quiser garantir um tamanho, siga o FECHAMENTO normal (a equipe confirma a grade). Se não conseguir identificar a peça no contexto, transfira.
+
+COR OU TAMANHO QUE NÃO TEM NA ARTE: sugira UMA outra peça do contexto que tenha a cor ou tamanho que ela quer, se existir; se não existir, transfira para a equipe ver reposição. Nunca encerre só com "não temos".
+
+PROMESSAS: frases como "vou confirmar", "já chamo uma das meninas", "vou verificar" SÓ podem sair junto com [TRANSFERIR]. Nunca prometa algo e continue a conversa sozinha.
+
+PROMOÇÕES: TODA promoção divulgada nos stories/feed vale TAMBÉM nas compras online, além das lojas físicas. Restrição só existe se estiver escrita na arte.
 
 FECHAMENTO DA VENDA:
-- Quando a cliente CONFIRMAR que quer a peça, aí sim pergunte o tamanho e a cidade (pode ser na mesma mensagem)
 - Entrega: retirada grátis nas lojas (São Domingos, Divino e São João do Manhuaçu); motoboy R$7 (Santa Margarida, Matipó, Abre Campo, Sericita, Padre Fialho, São Francisco do Glória, Fervedouro, Carangola, Pedra Bonita, Orizânia, Santo Amaro e Realeza); Correios R$25 para todo o Brasil (6 a 10 dias)
-- Pagamento: Pix ou cartão de crédito parcelado (cite as condições da arte quando houver)
+- Pagamento: à vista (com os 10% de desconto já no preço da arte) ou cartão de crédito em até 12x sem juros sem o desconto (cite as condições da arte, exatamente como estão)
 ${fechamento}
 
 QUANDO TRANSFERIR (texto curto + [TRANSFERIR] no final):
 ${transferirCompra}
-- Informação que não está no contexto
-- Reclamação, troca ou problema com pedido
+- Informação que não está no contexto (inclusive peça que você não achou nos stories/posts)
+- Pedido, entrega, troca, reclamação ou mensagem antiga sem resposta
 - Cliente pede para falar com uma pessoa
 - Se perguntarem se é robô: confirme que é assistente virtual da loja e ofereça passar para a equipe
-- SEMPRE avise a cliente de forma leve e educada que uma pessoa da equipe vai continuar o atendimento ali mesmo. Exemplos de tom: "Vou te passar para uma das meninas da nossa equipe, elas continuam com você por aqui rapidinho, tá bom? 😉" ou "Deixa comigo! Já chamei uma das meninas para te ajudar com isso, ela te responde aqui mesmo ✨". NUNCA transfira em silêncio nem deixe a cliente sem saber o que vai acontecer
+- SEMPRE avise de forma leve que uma pessoa da equipe vai continuar ali mesmo, respeitando o horário da loja (veja AGORA no topo). NUNCA transfira em silêncio
 
 NUNCA: prometa reserva de peça, dê desconto por conta própria, invente promoção, fale de assunto fora da loja.
 
-ÁUDIOS: peça com carinho para escrever, que você responde rapidinho.
+ÁUDIOS: peça com carinho para escrever, que você responde.
 
 A D'BLACK: lema "Precinho de D'Black". Moda feminina e masculina. Donos: Sr. D'Black (Denilson) e Srª D'Black (Letícia). 3 lojas físicas + online. Horários: segunda a sexta 09:00-19:00; sábado: todas as lojas das 08:00 às 14:00.
 
@@ -93,11 +194,20 @@ CONTEXTO DA PÁGINA (atualizado automaticamente a cada 5 minutos — é isto que
 ${pageContext}`;
 }
 
-// Monta o histórico da conversa no formato da API (com as imagens que a cliente mandou)
-async function buildMessages(convId) {
+// Monta o histórico no formato da API — agora com TODAS as conversas da cliente
+// (a conversa aberta pode ser nova e esconder uma reclamação da semana passada)
+async function buildMessages(conv) {
   const rows = await queryAll(
-    "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY timestamp DESC LIMIT 20", [convId]);
+    `SELECT m.* FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      WHERE c.phone = $1 AND c.channel = 'instagram'
+      ORDER BY m.timestamp DESC LIMIT 24`, [conv.phone]);
   rows.reverse();
+
+  const hoje = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const dataTag = (ts) => {
+    const d = new Date(ts).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    return d === hoje ? '' : `[${d.slice(0, 5)}] `;
+  };
 
   // Só as 2 imagens mais recentes da cliente entram como imagem (custo/latência)
   const imageIds = rows.filter(m => !m.from_me && m.media_type === 'image' && m.media_url?.startsWith('/media/'))
@@ -106,13 +216,14 @@ async function buildMessages(convId) {
   const messages = [];
   for (const m of rows) {
     const role = m.from_me ? 'assistant' : 'user';
-    let contentBlocks = m.content || '[mensagem]';
+    const who = m.from_me && m.sender && m.sender !== 'Lê (IA)' ? '(equipe) ' : '';
+    let contentBlocks = dataTag(m.timestamp) + who + (m.content || '[mensagem]');
     if (!m.from_me && imageIds.includes(m.id)) {
       const media = await queryOne("SELECT mime_type, data FROM media_files WHERE id = $1", [m.media_url.replace('/media/', '')]);
       if (media && media.mime_type.startsWith('image/')) {
         contentBlocks = [
           { type: 'image', source: { type: 'base64', media_type: media.mime_type, data: media.data } },
-          { type: 'text', text: m.content || '(imagem)' },
+          { type: 'text', text: dataTag(m.timestamp) + (m.content || '(imagem)') },
         ];
       }
     }
@@ -120,6 +231,9 @@ async function buildMessages(convId) {
     const last = messages[messages.length - 1];
     if (last && last.role === role && typeof last.content === 'string' && typeof contentBlocks === 'string') {
       last.content += '\n' + contentBlocks;
+    } else if (last && last.role === role) {
+      const toBlocks = (c) => typeof c === 'string' ? [{ type: 'text', text: c }] : c;
+      last.content = [...toBlocks(last.content), ...toBlocks(contentBlocks)];
     } else {
       messages.push({ role, content: contentBlocks });
     }
@@ -129,8 +243,7 @@ async function buildMessages(convId) {
   return messages;
 }
 
-// Trava por conversa: mensagens em rajada geram UMA resposta só (a geração em
-// andamento termina, e se chegou coisa nova nesse meio tempo, gera mais uma vez)
+// Trava por conversa: mensagens em rajada geram UMA resposta só
 const inFlight = new Map(); // convId → { dirty: bool, lastMsg }
 
 async function maybeReply(conv, msg) {
@@ -140,7 +253,7 @@ async function maybeReply(conv, msg) {
   try {
     let rounds = 0;
     do {
-      await new Promise(r => setTimeout(r, 3000)); // agrupa mensagens em rajada
+      await new Promise(r => setTimeout(r, DEBOUNCE_MS)); // agrupa mensagens em rajada
       const state = inFlight.get(conv.id);
       state.dirty = false;
       await generateAndSend(conv, state.lastMsg);
@@ -149,6 +262,13 @@ async function maybeReply(conv, msg) {
   } finally {
     inFlight.delete(conv.id);
   }
+}
+
+// Extrai só a mensagem pra cliente; qualquer coisa suspeita vira null (→ transferência)
+function extractMsg(raw) {
+  const m = raw.match(/<msg>([\s\S]*?)<\/msg>/i);
+  if (!m) return null;
+  return m[1].trim();
 }
 
 async function generateAndSend(convStale, msg) {
@@ -163,57 +283,129 @@ async function generateAndSend(convStale, msg) {
     if (testUsers && testUsers !== '*') {
       const allowed = testUsers.split(',').map(u => u.trim().replace(/^@/, '').toLowerCase()).filter(Boolean);
       const uname = (conv.customer_push_name || '').replace(/^@/, '').toLowerCase();
-      if (!allowed.includes(uname) && !allowed.includes(String(conv.phone))) {
-        return;
-      }
+      if (!allowed.includes(uname) && !allowed.includes(String(conv.phone))) return;
     }
+
+    const aberta = lojaAberta();
+    const history = await customerHistory(conv.phone);
+    const lastContent = msg?.content || '';
+
+    // Envio + registro no painel
+    const recordSent = async (text, sentId) => {
+      const msgId = sentId || genId();
+      await queryRun(
+        "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, 'Lê (IA)', $3, 1, NOW()) ON CONFLICT (id) DO NOTHING",
+        [msgId, conv.id, text]);
+      await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", [text, conv.id]);
+      notify('new_message', {
+        conversation: { ...conv, last_message: text, last_message_from_me: true },
+        message: { id: msgId, conversation_id: conv.id, from_me: true, sender: 'Lê (IA)', content: text, ack: 1, timestamp: new Date().toISOString() },
+      });
+    };
+    const sendText = async (text) => {
+      const r = await sendDirectMessage(conv.phone, text);
+      await recordSent(text, r?.message_id);
+    };
+    const transferMsg = () => aberta
+      ? 'Vou te passar para uma das meninas da nossa equipe, ela continua com você por aqui mesmo, tá bom? 😉'
+      : 'Deixei anotado para as meninas da nossa equipe, elas te respondem por aqui assim que a loja abrir, tá bom? 😉';
+    const doTransfer = async (reason) => {
+      await queryRun("UPDATE conversations SET ai_muted = true WHERE id = $1", [conv.id]);
+      const fresh = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
+      notify('conversation_updated', fresh);
+      // Alerta pra equipe: o painel deve tocar som/destacar. Se quiser, mande também
+      // um WhatsApp pra vendedora de plantão aqui (setting 'ig_handoff_alert_number').
+      notify('handoff_needed', { conversation: fresh, reason, at: new Date().toISOString() });
+      console.log(`🙋 [le-ig] transferida ${conv.customer_push_name || conv.phone}: ${reason}`);
+    };
+
+    // 1) Pedido/entrega/reclamação sem resposta humana → pessoa primeiro, venda nunca
+    const issue = pendingIssue(history);
+    if (issue) {
+      const nome = (conv.customer_name || '').split(' ')[0];
+      const text = `${nome ? `Oi, ${nome}! ` : ''}Vi sua mensagem sobre o seu pedido e sinto muito pela demora. ${aberta ? 'Já chamei uma das meninas para resolver isso com você por aqui mesmo' : 'Deixei anotado para as meninas, elas resolvem isso com você por aqui assim que a loja abrir'}, tá bom?`;
+      await sendText(text);
+      await doTransfer(`pendência: "${stripLabel(issue.content).slice(0, 80)}"`);
+      return;
+    }
+
+    // 2) Menção em story → agradecimento fixo, 1x por dia, sem IA
+    if (lastContent.startsWith('📣') && !hasRealText(lastContent)) {
+      const dayAgo = Date.now() - 24 * 3600 * 1000;
+      const thankedToday = history.some(m => m.from_me && MENTION_THANKS.includes(m.content) && new Date(m.timestamp).getTime() > dayAgo);
+      if (!thankedToday) await sendText(MENTION_THANKS[Math.floor(Math.random() * MENTION_THANKS.length)]);
+      return;
+    }
+
+    // 3) Só reagiu de novo e já tem oferta sem resposta nas últimas 24h → não insiste
+    if (isReactionOnly(lastContent) && unansweredOffer(history)) return;
 
     const apiKey = await getApiKey();
     if (!apiKey) return;
 
     const pageContext = await content.getPageContext();
     const waNumber = (await setting('wa_number', '')).replace(/\D/g, '');
-    let system = buildSystemPrompt(pageContext, waNumber);
+    let system = buildSystemPrompt(pageContext, waNumber, aberta);
+    let storyContext = '';
 
-    // Resposta de story: busca (e indexa se preciso) o story exato + a sequência vizinha
-    // (o padrão da loja é look → detalhe → arte com preço nos minutos seguintes)
     if (msg?.ig_story_id) {
       await content.ensureStory(msg.ig_story_id);
       const seq = await content.getSequence(msg.ig_story_id);
       if (seq) {
+        storyContext = seq.sequence;
         system += `\n\nATENÇÃO: a última mensagem da cliente é RESPOSTA a um story específico. Abaixo, a sequência de stories daquele horário — o PREÇO das peças do look costuma estar nos stories vizinhos desta lista:\n${seq.sequence}`;
       } else {
-        system += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem (pode ser um conjunto de mais de uma peça) e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual e pelo horário. Se não tiver certeza do preço, transfira.`;
+        system += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual e pelo horário. Se não tiver certeza do preço, transfira.`;
       }
     }
 
-    const messages = await buildMessages(conv.id);
+    const messages = await buildMessages(conv);
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: content.jsonSafe({ model: MODEL, max_tokens: 500, temperature: 0.7, system, messages }),
+      body: content.jsonSafe({ model: MODEL, max_tokens: 900, temperature: 0.3, system, messages }),
       signal: AbortSignal.timeout(60000),
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json.error) throw new Error(json.error?.message || `Anthropic HTTP ${res.status}`);
 
-    let text = (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-    if (!text) return;
+    const raw = (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+    if (!raw) return;
 
-    if (text.includes('[SKIP]')) return; // nada novo a dizer — não envia
+    let text = extractMsg(raw);
+    let shouldTransfer = false;
+    let transferReason = '';
 
-    let shouldTransfer = text.includes('[TRANSFERIR]');
+    if (text === null) {
+      // Sem <msg>: nunca manda o texto cru (é assim que o raciocínio vazava)
+      if (raw.includes('[SKIP]')) return;
+      console.error('[le-ig] resposta sem <msg>, bloqueada:', raw.slice(0, 200));
+      text = ''; shouldTransfer = true; transferReason = 'resposta fora do formato';
+    }
+
+    if (text.includes('[SKIP]')) return;
+
+    if (text.includes('[TRANSFERIR]')) { shouldTransfer = true; transferReason = transferReason || 'IA pediu transferência'; }
     text = text.replace(/\[TRANSFERIR\]/g, '').trim();
 
-    // [ZAP: peça | tamanho | cidade] → mensagem com BOTÃO "Abrir WhatsApp" (a URL fica oculta).
-    // A frase "Vim do Instagram" é o marcador que o server.js usa pra etiquetar a
-    // origem quando a cliente chega no WhatsApp — não mudar sem mudar lá também.
+    // Trava: vazamento de análise → não envia, transfere
+    if (text && LEAK_RE.test(text)) {
+      console.error('[le-ig] texto parecia análise interna, bloqueado:', text.slice(0, 200));
+      text = ''; shouldTransfer = true; transferReason = 'bloqueio de vazamento';
+    }
+
+    // Trava: promessa sem transferência → transfere de verdade
+    if (text && PROMISE_RE.test(text) && !shouldTransfer) {
+      shouldTransfer = true; transferReason = 'promessa de confirmar com a equipe';
+    }
+
+    // [ZAP: peça tamanho X | cidade] → mensagem com BOTÃO "Abrir WhatsApp".
+    // "Vim do Instagram" é o marcador que o server.js usa pra etiquetar a origem.
     let zapButton = null;
     const zapMatch = text.match(/\[ZAP:?\s*([^\]]*)\]/i);
     if (zapMatch) {
       text = text.replace(zapMatch[0], '').trim();
-      // Formato: [ZAP: peça tamanho X | peça tamanho Y | cidade] — última barra é a cidade
       const partes = zapMatch[1].split('|').map(s => s.trim()).filter(Boolean);
       if (waNumber && partes.length) {
         const cidade = partes.length > 1 ? partes.pop() : null;
@@ -224,32 +416,14 @@ async function generateAndSend(convStale, msg) {
           url: `https://wa.me/${waNumber}?text=${encodeURIComponent(prefill)}`,
         };
       }
-      // Com ou sem botão, a equipe assume a partir daqui (no WhatsApp ou no Direct)
-      shouldTransfer = true;
+      shouldTransfer = true; transferReason = transferReason || 'venda enviada pro WhatsApp';
     }
-    // Garantia: transferência NUNCA acontece em silêncio — se veio sem texto, avisa com a frase padrão
-    if (shouldTransfer && !text && !zapButton) {
-      text = 'Vou te passar para uma das meninas da nossa equipe, elas continuam com você por aqui rapidinho, tá bom? 😉';
-    }
+
+    // Transferência NUNCA em silêncio
+    if (shouldTransfer && !text && !zapButton) text = transferMsg();
     if (!text && !zapButton) return;
 
-    // Salva no histórico e notifica o painel (uma chamada por mensagem enviada)
-    const recordSent = async (content, sentId) => {
-      const msgId = sentId || genId();
-      await queryRun(
-        "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1, $2, true, 'Lê (IA)', $3, 1, NOW()) ON CONFLICT (id) DO NOTHING",
-        [msgId, conv.id, content]);
-      await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2", [content, conv.id]);
-      notify('new_message', {
-        conversation: { ...conv, last_message: content, last_message_from_me: true },
-        message: { id: msgId, conversation_id: conv.id, from_me: true, sender: 'Lê (IA)', content, ack: 1, timestamp: new Date().toISOString() },
-      });
-    };
-
-    if (text) {
-      const igResult = await sendDirectMessage(conv.phone, text);
-      await recordSent(text, igResult?.message_id);
-    }
+    if (text) await sendText(text);
 
     if (zapButton) {
       const buttons = [{ type: 'web_url', url: zapButton.url, title: 'Abrir WhatsApp' }];
@@ -257,7 +431,6 @@ async function generateAndSend(convStale, msg) {
         const btnResult = await sendButtonMessage(conv.phone, zapButton.text, buttons);
         await recordSent(`${zapButton.text}\n\n🔘 Abrir WhatsApp → ${zapButton.url}`, btnResult?.message_id);
       } catch (e) {
-        // Botão falhou (conta/janela sem suporte) → manda o link como texto mesmo
         console.error('[le-ig] botão do WhatsApp falhou, enviando link em texto:', e.message);
         const fallback = `${zapButton.text.replace('no botão abaixo', 'no link abaixo')}\n\n${zapButton.url}`;
         const igResult = await sendDirectMessage(conv.phone, fallback).catch(() => null);
@@ -267,14 +440,12 @@ async function generateAndSend(convStale, msg) {
 
     console.log(`🤖 [le-ig] Lê respondeu ${conv.customer_push_name || conv.phone}${zapButton ? ' (botão WhatsApp)' : ''}${shouldTransfer ? ' (transferindo)' : ''}`);
 
-    if (shouldTransfer) {
-      await queryRun("UPDATE conversations SET ai_muted = true WHERE id = $1", [conv.id]);
-      const fresh = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
-      notify('conversation_updated', fresh);
-    }
+    if (shouldTransfer) await doTransfer(transferReason);
   } catch (e) {
     console.error('[le-ig] erro ao responder:', e.message);
   }
 }
 
-module.exports = { init, maybeReply };
+module.exports = { init, maybeReply,
+  // exportados pra teste
+  _test: { lojaAberta, isReactionOnly, hasRealText, pendingIssue, unansweredOffer, extractMsg, LEAK_RE, PROMISE_RE } };

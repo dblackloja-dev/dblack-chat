@@ -137,6 +137,16 @@ async function syncNow() {
   for (const p of feed.data || []) await ingestItem(p, 'feed');
 }
 
+// Regra de chegada nas lojas (definida pelo Denilson, 22/09/2026):
+// o que é postado na TERÇA chega nas lojas no dia seguinte (quarta, a partir das 9h);
+// de quarta até segunda, tudo que está postado já está nas lojas.
+const spDate = (d) => new Date(new Date(d).toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+function statusLoja(postedAt, now = new Date()) {
+  const p = spDate(postedAt), n = spDate(now);
+  if (p.getDay() === 2 && p.toDateString() === n.toDateString()) return 'CHEGA NAS LOJAS AMANHÃ (quarta), a partir das 9h';
+  return 'JÁ ESTÁ NAS LOJAS';
+}
+
 const fmtHora = (d) => new Date(d).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 // Contexto textual injetado no prompt da Lê
@@ -151,13 +161,13 @@ async function getPageContext() {
     out += 'STORIES RECENTES em ordem cronológica (últimas 48h). PADRÃO DA LOJA: os stories saem em SEQUÊNCIA — primeiro o look completo no provador, logo depois um story de cada peça com o PREÇO e tamanhos na arte. O preço de uma peça vista num look costuma estar nos stories dos MINUTOS SEGUINTES (mesma faixa de horário):\n';
     for (const s of stories) {
       const dead = s.expires_at && new Date(s.expires_at) < new Date() ? ' [EXPIRADO]' : '';
-      out += `- [${fmtHora(s.posted_at)}${dead}] ${s.analysis || s.caption || 'sem descrição'}\n`;
+      out += `- [${fmtHora(s.posted_at)}${dead}] [${statusLoja(s.posted_at)}] ${s.analysis || s.caption || 'sem descrição'}\n`;
     }
   }
   if (feed.length) {
     out += '\nPOSTS RECENTES DO FEED:\n';
     for (const p of feed) {
-      out += `- [${fmtHora(p.posted_at)}] ${p.analysis || ''}${p.caption ? ` | legenda: ${[...p.caption].slice(0, 150).join('')}` : ''}\n`;
+      out += `- [${fmtHora(p.posted_at)}] [${statusLoja(p.posted_at)}] ${p.analysis || ''}${p.caption ? ` | legenda: ${[...p.caption].slice(0, 150).join('')}` : ''}\n`;
     }
   }
   return out || '(nenhum conteúdo indexado ainda)';
@@ -198,9 +208,9 @@ async function getSequence(storyId) {
   let out = '';
   for (const s of neighbors) {
     const marker = s.id === storyId ? '  << ESTE é o story que a cliente respondeu' : '';
-    out += `- [${fmtHora(s.posted_at)}] ${s.analysis || s.caption || 'sem descrição'}${marker}\n`;
+    out += `- [${fmtHora(s.posted_at)}] [${statusLoja(s.posted_at)}] ${s.analysis || s.caption || 'sem descrição'}${marker}\n`;
   }
   return { row, sequence: out };
 }
 
-module.exports = { initTables, start, syncNow, getPageContext, getById, ensureStory, getSequence, jsonSafe };
+module.exports = { statusLoja, initTables, start, syncNow, getPageContext, getById, ensureStory, getSequence, jsonSafe };
