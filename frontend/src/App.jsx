@@ -480,6 +480,13 @@ export default function App() {
     if (!activeConv) return;
     try { await api.cbStart(activeConv.id); } catch (e) { alert('Cliente Black: ' + e.message); }
   };
+  // Botão 🔗: envia o link da página pública de cadastro (o cliente preenche sozinho)
+  const CB_SIGNUP_URL = 'https://dblack-erp-backend-production.up.railway.app/cliente-black';
+  const sendClienteBlackLink = async () => {
+    if (!activeConv) return;
+    const text = `Cadastre-se no *Cliente Black* 🖤 e ganhe desconto à vista + cashback em todas as compras!\n\nÉ rapidinho, leva menos de 1 minuto: 👇\n${CB_SIGNUP_URL}`;
+    try { await api.sendMessage({ conversation_id: activeConv.id, content: text }); } catch (e) { alert('Erro ao enviar o link: ' + e.message); }
+  };
   const [replyTo, setReplyTo] = useState(null); // mensagem citada (estilo responder do WhatsApp)
   const startReply = (m) => { setReplyTo(m); if (!isMobile) textareaRef.current?.focus(); };
 
@@ -895,6 +902,7 @@ export default function App() {
                       <div style={{ position: 'absolute', top: 'calc(52px + env(safe-area-inset-top))', right: 8, zIndex: 200, background: '#fff', borderRadius: 12, boxShadow: '0 4px 20px rgba(11,20,26,.25)', padding: '6px 0', minWidth: 220 }}>
                         {[
                           ...(activeConv.channel !== 'instagram' ? [{ label: '🖤  Cadastrar Cliente Black', fn: startClienteBlack }] : []),
+                          { label: '🔗  Enviar link de cadastro', fn: sendClienteBlackLink },
                           { label: '👤  Dados do cliente', fn: () => setShowCustomerPanel(true) },
                           { label: '🔍  Buscar mensagens', fn: () => setShowMsgSearch(true) },
                           { label: '🏷️  Etiquetas', fn: () => setShowTagMenu(true) },
@@ -915,6 +923,7 @@ export default function App() {
                   <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
                     <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(30,186,138,.1)', color: '#1eba8a', border: '1px solid rgba(30,186,138,.3)', fontWeight: 600 }} onClick={() => { setShowSales(true); setShowAdmin(false); }} title="Vender">🛒 Vender</button>
                     {activeConv.channel !== 'instagram' && <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(255,215,64,.12)', color: '#b8860b', border: '1px solid rgba(255,215,64,.4)', fontWeight: 600 }} onClick={startClienteBlack} title="Bot inicia o cadastro Cliente Black nesta conversa">🖤 Black</button>}
+                    <button style={{ ...smallBtn, padding: '5px 12px', fontSize: 11, background: 'rgba(255,215,64,.06)', color: '#b8860b', border: '1px solid rgba(255,215,64,.25)', fontWeight: 600 }} onClick={sendClienteBlackLink} title="Envia o link da página de cadastro do Cliente Black na conversa">🔗 Cadastro</button>
                     <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowCustomerPanel(!showCustomerPanel)} title="Cliente">👤</button>
                     <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowTagMenu(!showTagMenu)} title="Tags">🏷️</button>
                     <button style={{ ...smallBtn, padding: '4px 6px', fontSize: 11 }} onClick={() => setShowMsgSearch(!showMsgSearch)} title="Buscar">🔍</button>
