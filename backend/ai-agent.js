@@ -105,14 +105,17 @@ MENSAGEM DE CARINHO (agradecimento, parabéns, elogio à loja, à Srª D'Black o
 
 PEDIDO EXPLÍCITO ("quero", "vou levar", "pode fechar"): ela JÁ disse que quer — NUNCA pergunte se ela quer garantir nem repita a oferta. Vá direto para o próximo passo do fechamento (cor, tamanho, entrega, pagamento).
 
-CLIENTE QUE CHEGA DO INSTAGRAM: se a mensagem começa com "Oi! Vim do Instagram" ela JÁ escolheu a peça. NÃO faça saudação longa: cumprimente em poucas palavras, use ver_vitrine para achar a peça do pedido dela e siga direto para cor/tamanho/fechamento. Se a peça do pedido NÃO estiver na vitrine, diga que vai passar para a equipe confirmar e coloque [TRANSFERIR].
+CLIENTE QUE CHEGA DO INSTAGRAM: se a mensagem começa com "Oi! Vim do Instagram" ela JÁ escolheu a peça. NÃO faça saudação longa nem ofereça a vitrine: cumprimente em poucas palavras, use ver_vitrine para achar a peça do pedido dela e siga direto para cor/tamanho/fechamento. Se a peça do pedido NÃO estiver na vitrine, diga que vai passar para a equipe confirmar e coloque [TRANSFERIR].
 
-PRIMEIRA INTERAÇÃO (cliente novo, sem pedido pronto): UMA mensagem curta se apresentando como assistente virtual da D'Black e perguntando o nome e a cidade. Nunca mande duas saudações.
+PRIMEIRA INTERAÇÃO (cliente novo, sem pedido pronto): cumprimente pelo horário (bom dia/boa tarde/boa noite), diga que você é a Lê, assistente virtual da D'Black, que está ali para AGILIZAR o atendimento e que tem algumas peças em oferta que você mesma vende na hora, sem precisar esperar uma atendente. Faça isso usando enviar_botoes (a saudação vai no texto dos botões, NÃO mande mensagem separada antes): botões "Ver as peças ✨" e "Falar com equipe". NUNCA mande duas saudações.
+- Se ela quiser VER (clicou "Ver as peças" ou disse sim): use mostrar_vitrine — as fotos com preços e o menu de escolha são enviados automaticamente, você não precisa escrever nada junto
+- Se ela clicar "Falar com equipe" ou não quiser: pergunte em uma frase qual é a dúvida dela, responda o que conseguir e transfira com [TRANSFERIR], avisando com carinho que uma das meninas continua por ali
+- Se ela já chegar perguntando de uma peça específica: responda a dúvida primeiro (com ver_vitrine); ofereça a vitrine só se fizer sentido
 
 FLUXO DE VENDA:
 1. Use ver_vitrine para saber o que está à venda (é a ÚNICA fonte de peças, preços e estoque)
-2. Apresente as peças que interessam à cliente por texto curto e use enviar_fotos_produto na peça que ela demonstrar interesse (uma vez só por peça)
-3. Para a cliente ESCOLHER, prefira interações clicáveis: enviar_botoes para até 3 opções, enviar_lista para 4 a 10 opções (peças, tamanhos, cores). Título de botão bem curto ("P", "M", "G", "Pix", "Cartão 12x")
+2. Para apresentar as peças: mostrar_vitrine (fotos + menu de escolha, tudo automático)
+3. Para a cliente ESCOLHER qualquer outra coisa, prefira interações clicáveis: enviar_botoes para até 3 opções, enviar_lista para 4 a 10 opções (tamanhos, cores). Título de botão bem curto ("P", "M", "G", "Pix", "Cartão 12x")
 4. Quando escolher a peça: use verificar_estoque, pergunte cor (se tiver mais de uma) e tamanho (se não for Único) — com botões/lista
 5. Quantidade (assuma 1 se ela não falar em mais)
 6. adicionar_carrinho (informe item_id, cor, tamanho — o sistema busca o preço sozinho)
@@ -145,6 +148,11 @@ const TOOLS = [
   {
     name: 'ver_vitrine',
     description: 'Lista TODAS as peças à venda com preços (à vista e cartão), cores e tamanhos disponíveis. É a única fonte de produtos. Use no começo da conversa de venda e sempre que precisar conferir o que existe.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'mostrar_vitrine',
+    description: 'Mostra a vitrine completa para a cliente: envia UMA foto de cada peça à venda (com nome e os dois preços na legenda) e, no final, um menu clicável para ela escolher a peça. Tudo automático — não escreva as peças por texto. Use quando a cliente disser que quer ver as peças.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -289,6 +297,56 @@ async function executeTool(toolName, toolInput, context) {
       const vitrine = await getVitrine();
       if (vitrine.length === 0) return { resultado: 'A vitrine está vazia no momento. Transfira para a equipe com [TRANSFERIR].' };
       return { pecas: vitrine, total: vitrine.length, instrucao: 'Apresente por texto curto com os DOIS preços. Use enviar_fotos_produto quando a cliente se interessar por uma peça.' };
+    }
+
+    case 'mostrar_vitrine': {
+      const vitrine = await getVitrine();
+      if (vitrine.length === 0) return { resultado: 'A vitrine está vazia no momento. Diga que vai passar para a equipe e use [TRANSFERIR].' };
+      if (!deps.wa || !customerPhone) return { erro: 'WhatsApp não conectado.' };
+
+      let enviadas = 0;
+      for (const p of vitrine.slice(0, 10)) {
+        try {
+          const precos = [p.preco_avista ? `${p.preco_avista} à vista no Pix` : null, p.preco_cartao ? `${p.preco_cartao} no cartão` : null]
+            .filter(Boolean).join(' ou ');
+          const caption = `${p.nome}\n${precos}`;
+          const photo = await queryOne(
+            "SELECT id, data, mime_type FROM promo_photos WHERE promo_item_id = $1 ORDER BY created_at, id LIMIT 1", [p.item_id]);
+          if (photo?.data) {
+            await deps.wa.sendImage(customerPhone, Buffer.from(photo.data, 'base64'), caption, { isBot: true });
+            const mediaId = 'promo_' + photo.id;
+            await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+              [mediaId, photo.mime_type || 'image/jpeg', photo.data]);
+            await recordOutgoing(conversationId, `/media/${mediaId}|${caption}`, { type: 'image', url: `/media/${mediaId}` });
+          } else {
+            await deps.wa.sendMessage(customerPhone, caption, { isBot: true });
+            await recordOutgoing(conversationId, caption);
+          }
+          enviadas++;
+        } catch (e) {
+          console.error(`⚠️ Erro ao mostrar peça ${p.nome}:`, e.message);
+        }
+      }
+
+      // Menu de escolha no final
+      try {
+        const rows = vitrine.slice(0, 10).map(p => ({
+          id: p.item_id,
+          title: p.nome.slice(0, 24),
+          description: [p.preco_avista, p.preco_cartao ? `${p.preco_cartao.split(' em ')[0]} 12x` : null].filter(Boolean).join(' | '),
+        }));
+        await deps.wa.sendList(customerPhone, 'Nossas peças ✨', 'Toca no botão e escolhe a peça que você amou', 'Escolher peça', rows, { isBot: true });
+        await recordOutgoing(conversationId, `Nossas peças ✨\n[Lista: ${rows.map(r => r.title).join(' | ')}]`);
+      } catch (e) {
+        console.error('⚠️ Erro ao enviar menu da vitrine:', e.message);
+      }
+
+      return {
+        sucesso: true,
+        pecas_enviadas: enviadas,
+        pecas: vitrine.map(p => ({ item_id: p.item_id, nome: p.nome })),
+        instrucao: 'Vitrine enviada com fotos e menu de escolha. NÃO escreva as peças por texto — aguarde a cliente escolher no menu.',
+      };
     }
 
     case 'enviar_fotos_produto': {
@@ -681,7 +739,7 @@ async function generateResponse(conversationId, customerMessage, customerName, m
 
       // Botões/lista enviados nesta rodada: o texto capturado antes já foi dito nas
       // mensagens interativas — não repete depois
-      const interactiveSent = toolUseBlocks.some(b => b.name === 'enviar_botoes' || b.name === 'enviar_lista');
+      const interactiveSent = toolUseBlocks.some(b => ['enviar_botoes', 'enviar_lista', 'mostrar_vitrine'].includes(b.name));
 
       // Executa tools e monta resultado
       const toolResults = [];
