@@ -108,14 +108,27 @@ async function addTag(conversationId) {
 }
 
 // ─── ERP ───
+// Mesmo número ignorando o nono dígito (31 99554-5210 ≡ 31 9554-5210)
+function samePhone(a, b) {
+  const canon = (p) => { const d = normPhone(p); return d.length === 11 ? d.slice(0, 2) + d.slice(-8) : d; };
+  const ca = canon(a), cb = canon(b);
+  return !!ca && ca === cb;
+}
+
 async function findErpByPhone(phoneRaw) {
   const d = normPhone(phoneRaw);
   if (d.length < 8) return null;
+  // variantes com/sem o nono dígito, com/sem o 55
+  const vars = new Set([d]);
+  if (d.length === 11) vars.add(d.slice(0, 2) + d.slice(-8));
+  if (d.length === 10) vars.add(d.slice(0, 2) + '9' + d.slice(-8));
+  const list = [...vars];
+  const all = list.concat(list.map(v => '55' + v));
   return erpQueryOne(
     `SELECT * FROM customers
-     WHERE regexp_replace(COALESCE(whatsapp,''),'[^0-9]','','g') IN ($1, '55'||$1)
-        OR regexp_replace(COALESCE(phone,''),'[^0-9]','','g') IN ($1, '55'||$1)
-     ORDER BY created_at LIMIT 1`, [d]);
+     WHERE regexp_replace(COALESCE(whatsapp,''),'[^0-9]','','g') = ANY($1)
+        OR regexp_replace(COALESCE(phone,''),'[^0-9]','','g') = ANY($1)
+     ORDER BY created_at LIMIT 1`, [all]);
 }
 const isEnrolled = (c) => !!c && onlyDigits(c.cpf).length === 11 && !String(c.tags || '').includes('Interno');
 async function cfgNum(key) {
@@ -148,8 +161,14 @@ async function enroll(phoneRaw, cpf, pushName) {
   const byCpf = await erpQueryOne('SELECT * FROM customers WHERE cpf = $1', [cpf]);
   const byPhone = await findErpByPhone(phoneRaw);
   if (byCpf && byPhone && byCpf.id !== byPhone.id) return { conflict: true };
-  if (byCpf && !byPhone && normPhone(byCpf.whatsapp || byCpf.phone) !== phone) return { conflict: true };
+  if (byCpf && !byPhone && !samePhone(byCpf.whatsapp || byCpf.phone, phone)) return { conflict: true };
   if (byPhone && onlyDigits(byPhone.cpf).length === 11 && onlyDigits(byPhone.cpf) !== cpf) return { conflict: true };
+
+  // CPF já cadastrado e o número é da mesma pessoa → já é Cliente Black, não recadastra
+  if (byCpf && isEnrolled(byCpf) && (!byPhone || byPhone.id === byCpf.id)) {
+    await erpQuery("UPDATE customers SET whatsapp = COALESCE(NULLIF(whatsapp,''), $1) WHERE id = $2", [phone, byCpf.id]).catch(() => {});
+    return { customer: byCpf, already: true };
+  }
 
   let cid;
   const name = String(pushName || '').trim();
@@ -228,6 +247,7 @@ async function handleIncoming(conv, msg) {
       const r = await enroll(msg.phone, cpf, msg.pushName || conv?.name);
       await queryRun('DELETE FROM cb_signup_state WHERE phone = $1', [phoneDigits]);
       if (r.conflict) { await sendText(conv, msg.phone, await getSetting('cb_cpf_conflict')); return true; }
+      if (r.already) { await sendText(conv, msg.phone, await summaryText(r.customer)); return true; }
       const c = r.customer;
       const t = c.tier || 'BLACK';
       const [desc, cb] = [await cfgNum('discount_' + t), await cfgNum('cashback_' + t)];
