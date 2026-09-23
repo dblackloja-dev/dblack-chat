@@ -112,9 +112,11 @@ PRIMEIRA INTERAÇÃO (cliente novo, sem pedido pronto): cumprimente pelo horári
 - Se ela clicar "Falar com equipe" ou não quiser: pergunte em uma frase qual é a dúvida dela, responda o que conseguir e transfira com [TRANSFERIR], avisando com carinho que uma das meninas continua por ali
 - Se ela já chegar perguntando de uma peça específica: responda a dúvida primeiro (com ver_vitrine); ofereça a vitrine só se fizer sentido
 
+RESPOSTA DE BOTÃO OU MENU: quando a cliente responde exatamente com o texto de um botão ou com o NOME de uma peça do menu, ela CLICOU — isso é a escolha dela. Nome de peça = peça escolhida: chame verificar_estoque dessa peça e siga para cor/tamanho. NUNCA mostre a vitrine de novo na mesma conversa.
+
 FLUXO DE VENDA:
 1. Use ver_vitrine para saber o que está à venda (é a ÚNICA fonte de peças, preços e estoque)
-2. Para apresentar as peças: mostrar_vitrine (fotos + menu de escolha, tudo automático)
+2. Para apresentar as peças: mostrar_vitrine (fotos + menu de escolha, tudo automático — só UMA vez por conversa)
 3. Para a cliente ESCOLHER qualquer outra coisa, prefira interações clicáveis: enviar_botoes para até 3 opções, enviar_lista para 4 a 10 opções (tamanhos, cores). Título de botão bem curto ("P", "M", "G", "Pix", "Cartão 12x")
 4. Quando escolher a peça: use verificar_estoque, pergunte cor (se tiver mais de uma) e tamanho (se não for Único) — com botões/lista
 5. Quantidade (assuma 1 se ela não falar em mais)
@@ -303,6 +305,19 @@ async function executeTool(toolName, toolInput, context) {
       const vitrine = await getVitrine();
       if (vitrine.length === 0) return { resultado: 'A vitrine está vazia no momento. Diga que vai passar para a equipe e use [TRANSFERIR].' };
       if (!deps.wa || !customerPhone) return { erro: 'WhatsApp não conectado.' };
+
+      // Trava anti-loop: vitrine mostrada UMA vez por conversa. Se a cliente responde
+      // com o nome de uma peça depois disso, é ESCOLHA — nunca reexibição.
+      const jaMostrou = await queryOne(
+        "SELECT id FROM messages WHERE conversation_id = $1 AND from_me = true AND content LIKE 'Nossas peças ✨%' AND timestamp > NOW() - interval '6 hours' LIMIT 1",
+        [conversationId]);
+      if (jaMostrou) {
+        return {
+          ja_mostrada: true,
+          pecas: vitrine.map(p => ({ item_id: p.item_id, nome: p.nome })),
+          instrucao: 'A vitrine JÁ foi mostrada nesta conversa — NÃO mostre de novo. Se a última mensagem da cliente é o nome de uma peça, ela ESCOLHEU essa peça: use verificar_estoque com o item_id correspondente e siga para cor/tamanho.',
+        };
+      }
 
       let enviadas = 0;
       for (const p of vitrine.slice(0, 10)) {
