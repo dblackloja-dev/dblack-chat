@@ -436,6 +436,7 @@ class WhatsAppMeta extends EventEmitter {
           let content = '';
           let mediaType = null;
           let mediaUrl = null;
+          let interactiveId = null; // id do botão/opção de lista clicada (fluxo da Lê)
 
           switch (msg.type) {
             case 'text':
@@ -477,6 +478,7 @@ class WhatsAppMeta extends EventEmitter {
               break;
             case 'interactive':
               content = msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '🔘 Resposta interativa';
+              interactiveId = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id || null;
               break;
             case 'button':
               content = msg.button?.text || '🔘 Resposta de botão';
@@ -501,6 +503,7 @@ class WhatsAppMeta extends EventEmitter {
             content,
             mediaType,
             mediaUrl,
+            interactiveId,
             // Presente quando o cliente responde citando uma mensagem (wamid da original)
             replyTo: msg.context?.id || null,
             timestamp: new Date(parseInt(msg.timestamp, 10) * 1000 || Date.now()),

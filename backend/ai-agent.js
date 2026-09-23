@@ -56,14 +56,14 @@ async function getItemVariations(promoItemId) {
     [promoItemId]);
   if (grid.length > 0) {
     return grid
-      .map(g => ({ cor: g.color || '', tamanho: g.size || 'Único', estoque: g.stock_limit - (g.stock_sold || 0) }))
+      .map(g => ({ cor: (g.color || '').trim(), tamanho: (g.size || '').trim() || 'Único', estoque: g.stock_limit - (g.stock_sold || 0) }))
       .filter(v => v.estoque > 0);
   }
   const photos = await queryAll(
     "SELECT color, stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 AND stock_limit > 0",
     [promoItemId]);
   return photos
-    .map(p => ({ cor: p.color || '', tamanho: 'Único', estoque: p.stock_limit - (p.stock_sold || 0) }))
+    .map(p => ({ cor: (p.color || '').trim(), tamanho: 'Único', estoque: p.stock_limit - (p.stock_sold || 0) }))
     .filter(v => v.estoque > 0);
 }
 
@@ -112,7 +112,9 @@ PRIMEIRA INTERAÇÃO (cliente novo, sem pedido pronto): cumprimente pelo horári
 - Se ela clicar "Falar com equipe" ou não quiser: pergunte em uma frase qual é a dúvida dela, responda o que conseguir e transfira com [TRANSFERIR], avisando com carinho que uma das meninas continua por ali
 - Se ela já chegar perguntando de uma peça específica: responda a dúvida primeiro (com ver_vitrine); ofereça a vitrine só se fizer sentido
 
-RESPOSTA DE BOTÃO OU MENU: quando a cliente responde exatamente com o texto de um botão ou com o NOME de uma peça do menu, ela CLICOU — isso é a escolha dela. Nome de peça = peça escolhida: chame verificar_estoque dessa peça e siga para cor/tamanho. NUNCA mostre a vitrine de novo na mesma conversa.
+RESPOSTA DE BOTÃO OU MENU: quando a mensagem da cliente termina com [clique: X], ela CLICOU na opção de id X — isso é a escolha dela, não é conversa. Se X for um item_id da vitrine, essa é a peça escolhida: chame verificar_estoque com esse item_id e siga o fechamento. O mesmo vale se ela digitar o nome exato de uma peça ou o texto de um botão. NUNCA mostre a vitrine de novo na mesma conversa e NUNCA pergunte de novo o que ela acabou de escolher.
+
+VARIAÇÃO ÚNICA: se verificar_estoque mostrar que a peça só tem UMA variação disponível (uma cor, tamanho Único), NÃO pergunte cor nem tamanho — confirme a peça em uma frase e siga direto para a entrega.
 
 FLUXO DE VENDA:
 1. Use ver_vitrine para saber o que está à venda (é a ÚNICA fonte de peças, preços e estoque)

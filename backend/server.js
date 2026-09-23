@@ -307,12 +307,12 @@ async function confirmPendingPayment(chargeId) {
     const sizes = (!item.size || item.size === 'Único') ? ['', 'único'] : [String(item.size).toLowerCase()];
     const gridResult = await queryRun(
       `UPDATE promo_stock SET stock_sold = stock_sold + $1
-        WHERE ${whereItem} AND LOWER(color) = LOWER($3) AND LOWER(size) = ANY($4) AND stock_limit > 0`,
+        WHERE ${whereItem} AND LOWER(TRIM(color)) = LOWER(TRIM($3)) AND LOWER(TRIM(size)) = ANY($4) AND stock_limit > 0`,
       [item.quantity || 1, key, item.color || '', sizes]);
     if (gridResult.rowCount === 0) {
       await queryRun(
         `UPDATE promo_photos SET stock_sold = stock_sold + $1
-          WHERE ${whereItem} AND LOWER(color) = LOWER($3) AND stock_limit > 0`,
+          WHERE ${whereItem} AND LOWER(TRIM(color)) = LOWER(TRIM($3)) AND stock_limit > 0`,
         [item.quantity || 1, key, item.color || '']);
     }
   }
@@ -690,7 +690,9 @@ wa.on('message', (msg) => {
           const aiConvId = conv.id;
           const aiPhone = msg.phone;
           const aiPushName = msg.pushName;
-          const aiContent = msg.content;
+          // Clique em botão/menu chega com o id junto: a Lê identifica a escolha
+          // de forma determinística (o painel/histórico não mostra o marcador)
+          const aiContent = msg.interactiveId ? `${msg.content}\n[clique: ${msg.interactiveId}]` : msg.content;
           const aiMediaType = msg.mediaType;
 
           // Trava + debounce por conversa (padrão da Lê do IG): rajada de mensagens
