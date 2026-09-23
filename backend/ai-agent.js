@@ -7,6 +7,7 @@
 // A baixa de estoque no ERP é MANUAL: relatório diário no WhatsApp (regra do dono).
 const { queryAll, queryOne, queryRun } = require('./database');
 const asaas = require('./asaas');
+const erp = require('./erp'); // só leitura: reconhecer Cliente Black pelo CPF
 require('dotenv').config();
 
 // Dependências injetadas pelo server.js
@@ -127,8 +128,9 @@ FLUXO DE VENDA:
 8. Entrega: pergunte com botões — "Retirada grátis" (lojas de São Domingos, Divino e São João do Manhuaçu), "Motoboy R$7" (Santa Margarida, Matipó, Abre Campo, Sericita, Padre Fialho, São Francisco do Glória, Fervedouro, Carangola, Pedra Bonita, Orizânia, Santo Amaro e Realeza) ou "Correios R$25" (todo o Brasil, 6 a 10 dias). Se já souber a cidade, ofereça só o que faz sentido
 9. Pagamento: botões "Pix" (preço à vista) ou "Cartão 12x" (preço de cartão, até 12x sem juros)
 10. Peça o CPF ("para gerar o pagamento preciso do seu CPF")
-11. finalizar_venda — o QR Code do Pix com copia-e-cola (ou o link do cartão) é enviado automaticamente
-12. Avise que assim que o pagamento confirmar ela recebe a confirmação por aqui
+11. Assim que ela mandar o CPF, use consultar_cliente_black: se ela for do programa, comemore em UMA frase as vantagens (nível, desconto à vista nas lojas, cashback e saldo) — mas NÃO mude o valor da compra (os preços da vitrine já são promocionais). Se não for, não comente nada
+12. finalizar_venda — o QR Code do Pix com copia-e-cola (ou o link do cartão) é enviado automaticamente
+13. Avise que assim que o pagamento confirmar ela recebe a confirmação por aqui
 
 REGRA DE OURO — PREÇOS: cada peça tem DOIS preços: à vista no Pix e no cartão em até 12x sem juros. Sempre apresente os dois: "R$79,90 à vista no Pix ou R$88,90 em até 12x sem juros no cartão". NUNCA invente preço, tamanho ou estoque: use SEMPRE o que as ferramentas retornarem. Se a ferramenta diz que tem, TEM; se diz que não tem, NÃO TEM.
 
@@ -257,6 +259,15 @@ const TOOLS = [
         tamanho: { type: 'string', description: 'Tamanho do item a remover' },
       },
       required: ['item_id'],
+    },
+  },
+  {
+    name: 'consultar_cliente_black',
+    description: 'Consulta pelo CPF se a cliente é do programa Cliente Black e retorna as vantagens dela (nível, desconto à vista nas lojas, cashback e saldo). Use SEMPRE logo que a cliente informar o CPF, antes de finalizar_venda.',
+    input_schema: {
+      type: 'object',
+      properties: { cpf: { type: 'string', description: 'CPF informado pela cliente' } },
+      required: ['cpf'],
     },
   },
   {
@@ -532,6 +543,29 @@ async function executeTool(toolName, toolInput, context) {
         && (tamanho === undefined || i.size.toLowerCase() === (tamanho || '').toLowerCase())));
       const totPix = cart.items.reduce((s, i) => s + i.price_pix * i.quantity, 0);
       return { carrinho: cart.items.map(i => ({ nome: i.name, cor: i.color || '-', tamanho: i.size, quantidade: i.quantity })), total_avista: fmt(totPix), mensagem: 'Item removido.' };
+    }
+
+    case 'consultar_cliente_black': {
+      const cpfDigits = String(toolInput.cpf || '').replace(/\D/g, '');
+      if (cpfDigits.length !== 11) return { erro: 'CPF inválido. Peça para a cliente conferir os números.' };
+      try {
+        const customer = await erp.erpQueryOne(
+          "SELECT * FROM customers WHERE regexp_replace(COALESCE(cpf,''),'[^0-9]','','g') = $1 LIMIT 1", [cpfDigits]);
+        const s = await erp.loyaltySummary(customer);
+        if (!s || !s.enrolled) return { cliente_black: false, instrucao: 'Não é Cliente Black. Siga o fechamento normalmente, sem comentar nada sobre o programa.' };
+        return {
+          cliente_black: true,
+          nome: customer.name,
+          nivel: s.tier,
+          desconto_avista_lojas: `${s.discount_pct}%`,
+          cashback: `${s.cashback_pct}%`,
+          saldo_cashback: fmt(s.balance),
+          instrucao: 'É Cliente Black! Comemore em UMA frase curta contando as vantagens dela (nível, desconto à vista nas lojas físicas, cashback e saldo). IMPORTANTE: os preços da vitrine já são promocionais — NÃO altere o valor da compra por causa do nível. Depois siga direto para finalizar_venda.',
+        };
+      } catch (e) {
+        console.error('⚠️ consultar_cliente_black:', e.message);
+        return { cliente_black: false, instrucao: 'Não consegui consultar. Siga o fechamento normalmente.' };
+      }
     }
 
     case 'finalizar_venda': {
