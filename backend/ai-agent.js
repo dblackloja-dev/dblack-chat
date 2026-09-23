@@ -132,7 +132,7 @@ FLUXO DE VENDA:
 1. Use ver_vitrine para saber o que está à venda (é a ÚNICA fonte de peças, preços e estoque)
 2. Para apresentar as peças: mostrar_vitrine (fotos + menu de escolha, tudo automático — só UMA vez por conversa)
 3. Para a cliente ESCOLHER qualquer outra coisa, prefira interações clicáveis: enviar_botoes para até 3 opções, enviar_lista para 4 a 10 opções (tamanhos, cores). Título de botão bem curto ("P", "M", "G", "Pix", "Cartão 12x")
-4. Quando escolher a peça: use verificar_estoque, pergunte cor (se tiver mais de uma) e tamanho (se não for Único) — com botões/lista
+4. Quando escolher a peça: use verificar_estoque. Se a peça tiver MAIS DE UMA COR, use enviar_fotos_produto — a cliente recebe a foto de CADA COR disponível — e aí pergunte a cor com botões/lista. Depois o tamanho (se não for Único)
 5. Quantidade (assuma 1 se ela não falar em mais)
 6. adicionar_carrinho IMEDIATAMENTE quando peça, cor e tamanho estiverem definidos — SEMPRE ANTES de perguntar entrega ou pagamento (informe item_id, cor, tamanho — o sistema busca o preço sozinho)
 7. Pergunte se quer mais alguma peça ou fechar
@@ -360,7 +360,8 @@ async function executeTool(toolName, toolInput, context) {
         try {
           const precos = [p.preco_avista ? `${p.preco_avista} à vista no Pix` : null, p.preco_cartao ? `${p.preco_cartao} no cartão` : null]
             .filter(Boolean).join(' ou ');
-          const caption = `${p.nome}\n${precos}`;
+          const coresTxt = p.cores.length > 1 ? `\nCores: ${p.cores.join(', ')}` : '';
+          const caption = `${p.nome}${coresTxt}\n${precos}`;
           const photo = await queryOne(
             "SELECT id, data, mime_type FROM promo_photos WHERE promo_item_id = $1 ORDER BY created_at, id LIMIT 1", [p.item_id]);
           if (photo?.data) {
@@ -405,32 +406,39 @@ async function executeTool(toolName, toolInput, context) {
       const item = await queryOne("SELECT id, display_name, promo_price, promo_price_card FROM promo_items WHERE id = $1 AND active = true", [item_id]);
       if (!item) return { erro: 'Peça não encontrada na vitrine. Use o item_id de ver_vitrine.' };
 
-      // Trava: não envia fotos da mesma peça 2x na mesma conversa
+      // Trava: as fotos das CORES desta peça só vão 1x por conversa
+      // (a foto única da vitrine não conta — a legenda dela não tem "Cor:")
       const jaEnviou = await queryOne(
         "SELECT id FROM messages WHERE conversation_id = $1 AND from_me = true AND media_type = 'image' AND content LIKE $2 LIMIT 1",
-        [conversationId, `%${item.display_name}%`]);
-      if (jaEnviou) return { sucesso: true, ja_enviadas: true, instrucao: 'Fotos desta peça já foram enviadas antes. NÃO envie de novo. Siga para cor/tamanho.' };
+        [conversationId, `%${item.display_name} — Cor:%`]);
+      if (jaEnviou) return { sucesso: true, ja_enviadas: true, instrucao: 'As fotos das cores desta peça já foram enviadas. NÃO envie de novo — pergunte a cor com botões ou lista.' };
 
       const photos = await queryAll(
         "SELECT id, color, mime_type, stock_limit, stock_sold FROM promo_photos WHERE promo_item_id = $1 ORDER BY color", [item.id]);
       // Fotos com controle de estoque por cor só aparecem se ainda têm saldo;
-      // fotos sem controle (limit 0) são ilustrativas e sempre aparecem
+      // fotos sem controle (limit 0) aparecem se a cor tem estoque na grade
       const vars = await getItemVariations(item.id);
       const coresDisponiveis = new Set(vars.map(v => v.cor.toLowerCase()));
       const enviaveis = photos.filter(p =>
-        p.stock_limit > 0 ? (p.stock_limit - (p.stock_sold || 0)) > 0 : (coresDisponiveis.size === 0 || coresDisponiveis.has((p.color || '').toLowerCase()) || !p.color));
+        p.stock_limit > 0 ? (p.stock_limit - (p.stock_sold || 0)) > 0 : (coresDisponiveis.size === 0 || coresDisponiveis.has((p.color || '').trim().toLowerCase()) || !p.color));
       if (enviaveis.length === 0) return { resultado: 'Esta peça não tem foto cadastrada. Apresente por texto.' };
 
       const precos = [item.promo_price ? `${fmt(item.promo_price)} à vista no Pix` : null,
         item.promo_price_card ? `${fmt(item.promo_price_card)} em até 12x no cartão` : null].filter(Boolean).join(' ou ');
       let enviadas = 0;
       if (deps.wa && customerPhone) {
-        for (const photo of enviaveis.slice(0, 6)) {
+        // Uma foto por COR (a primeira de cada), com o nome da cor na legenda
+        const porCor = new Map();
+        for (const p of enviaveis) {
+          const key = (p.color || '').trim().toLowerCase();
+          if (!porCor.has(key)) porCor.set(key, p);
+        }
+        for (const photo of [...porCor.values()].slice(0, 8)) {
           try {
             const photoRow = await queryOne("SELECT data, mime_type FROM promo_photos WHERE id = $1", [photo.id]);
             if (!photoRow?.data) continue;
             const buffer = Buffer.from(photoRow.data, 'base64');
-            const caption = `${item.display_name}${photo.color ? ` — ${photo.color.trim()}` : ''}\n${precos}`;
+            const caption = `${item.display_name}${photo.color ? ` — Cor: ${photo.color.trim()}` : ''}\n${precos}`;
             await deps.wa.sendImage(customerPhone, buffer, caption, { isBot: true });
 
             const mediaId = 'promo_' + photo.id;
@@ -446,8 +454,8 @@ async function executeTool(toolName, toolInput, context) {
       return {
         sucesso: true,
         fotos_enviadas: enviadas,
-        cores: [...new Set(enviaveis.map(p => p.color).filter(Boolean))],
-        instrucao: 'Fotos enviadas. Siga para a escolha de cor/tamanho (verificar_estoque).',
+        cores: [...new Set(enviaveis.map(p => (p.color || '').trim()).filter(Boolean))],
+        instrucao: 'Foto de cada cor enviada. Agora pergunte a cor com botões (até 3) ou lista, e depois o tamanho.',
       };
     }
 
@@ -691,7 +699,7 @@ async function executeTool(toolName, toolInput, context) {
           try {
             if (forma_pagamento === 'pix' && charge.pixQrCodeBase64) {
               const qrBuffer = Buffer.from(charge.pixQrCodeBase64, 'base64');
-              const caption = `💰 PIX — R$ ${total.toFixed(2)}\n\nEscaneie o QR Code ou copie o código abaixo`;
+              const caption = `💰 PIX — ${fmt(total)}\n\nEscaneie o QR Code ou copie o código abaixo`;
               const waResult = await deps.wa.sendImage(customerPhone, qrBuffer, caption, { isBot: true });
               const mediaId = 'img_' + (waResult?._waId || deps.genId());
               await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
@@ -702,7 +710,7 @@ async function executeTool(toolName, toolInput, context) {
                 await recordOutgoing(conversationId, charge.pixCode);
               }
             } else {
-              const linkMsg = `💳 Link de pagamento — R$ ${total.toFixed(2)}\n\n${charge.invoiceUrl}\n\nPode parcelar em até 12x sem juros!`;
+              const linkMsg = `💳 Link de pagamento — ${fmt(total)}\n\n${charge.invoiceUrl}\n\nPode parcelar em até 12x sem juros!`;
               await deps.wa.sendMessage(customerPhone, linkMsg, { isBot: true });
               await recordOutgoing(conversationId, linkMsg);
             }

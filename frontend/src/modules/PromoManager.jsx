@@ -397,7 +397,7 @@ export default function PromoManager() {
                           {/* Lista de fotos */}
                           {(photos[item.id] || []).length === 0 ? (
                             <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>
-                              Nenhuma foto. Adicione fotos de cada cor para a Le enviar ao cliente.
+                              Nenhuma foto. Suba UMA foto de CADA COR (escreva a cor antes de enviar) — a Le mostra as variacoes de cor para a cliente escolher.
                             </p>
                           ) : (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
