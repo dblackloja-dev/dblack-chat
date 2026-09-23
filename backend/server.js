@@ -1715,22 +1715,22 @@ app.get('/api/promo-items', auth, async (req, res) => {
 app.post('/api/promo-items', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    const { ref, category, display_name, promo_price, promo_price_card } = req.body;
+    const { ref, category, display_name, promo_price, promo_price_card, obs } = req.body;
     // ref é opcional: cadastro manual (sem ERP) usa só nome + preços
     if (!category || !display_name) return res.status(400).json({ error: 'category e display_name são obrigatórios' });
     const id = genId();
     const price = promo_price ? parseFloat(promo_price) : null;
     const priceCard = promo_price_card ? parseFloat(promo_price_card) : null;
-    await queryRun("INSERT INTO promo_items (id, ref, category, display_name, promo_price, promo_price_card) VALUES ($1,$2,$3,$4,$5,$6)",
-      [id, ref || '', category, display_name, price, priceCard]);
-    res.json({ id, ref: ref || '', category, display_name, promo_price: price, promo_price_card: priceCard, active: true });
+    await queryRun("INSERT INTO promo_items (id, ref, category, display_name, promo_price, promo_price_card, obs) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+      [id, ref || '', category, display_name, price, priceCard, obs || null]);
+    res.json({ id, ref: ref || '', category, display_name, promo_price: price, promo_price_card: priceCard, obs: obs || null, active: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/api/promo-items/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    const { category, display_name, active, promo_price, promo_price_card } = req.body;
+    const { category, display_name, active, promo_price, promo_price_card, obs } = req.body;
     const sets = [];
     const params = [];
     const add = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`); };
@@ -1739,6 +1739,7 @@ app.put('/api/promo-items/:id', auth, async (req, res) => {
     if (active !== undefined) add('active', active);
     if (promo_price !== undefined) add('promo_price', promo_price ? parseFloat(promo_price) : null);
     if (promo_price_card !== undefined) add('promo_price_card', promo_price_card ? parseFloat(promo_price_card) : null);
+    if (obs !== undefined) add('obs', obs || null);
     if (sets.length === 0) return res.json({ success: true });
     params.push(req.params.id);
     await queryRun(`UPDATE promo_items SET ${sets.join(', ')} WHERE id = $${params.length}`, params);

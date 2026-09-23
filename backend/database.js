@@ -211,6 +211,8 @@ async function initDB() {
   await queryRun("ALTER TABLE promo_items ADD COLUMN IF NOT EXISTS promo_price NUMERIC(10,2)");
   await queryRun("ALTER TABLE promo_items ADD COLUMN IF NOT EXISTS promo_price_card NUMERIC(10,2)");
   await queryRun("ALTER TABLE promo_items ALTER COLUMN ref DROP NOT NULL");
+  // Observação da peça: a Lê SEMPRE avisa a cliente antes de fechar (ex: "forma pequena")
+  await queryRun("ALTER TABLE promo_items ADD COLUMN IF NOT EXISTS obs TEXT");
 
   // Fotos dos produtos da promoção (múltiplas por ref, uma por cor)
   await queryRun(`

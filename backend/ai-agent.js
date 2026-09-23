@@ -80,7 +80,7 @@ async function getItemVariations(promoItemId) {
 }
 
 async function getVitrine() {
-  const items = await queryAll("SELECT id, ref, category, display_name, promo_price, promo_price_card FROM promo_items WHERE active = true ORDER BY category, display_name");
+  const items = await queryAll("SELECT id, ref, category, display_name, promo_price, promo_price_card, obs FROM promo_items WHERE active = true ORDER BY category, display_name");
   const result = [];
   for (const item of items) {
     const vars = await getItemVariations(item.id);
@@ -93,6 +93,7 @@ async function getVitrine() {
       preco_cartao: item.promo_price_card ? `${fmt(item.promo_price_card)} em até 12x sem juros` : null,
       cores: [...new Set(vars.map(v => v.cor).filter(Boolean))],
       tamanhos: [...new Set(vars.map(v => v.tamanho))],
+      ...(item.obs ? { observacao: item.obs } : {}),
     });
   }
   return result;
@@ -146,6 +147,8 @@ FLUXO DE VENDA:
 13. Avise que assim que o pagamento confirmar ela recebe a confirmação por aqui
 
 REGRA DE OURO — PREÇOS: cada peça tem DOIS preços: à vista no Pix e no cartão em até 12x sem juros. Sempre apresente os dois: "R$79,90 à vista no Pix ou R$88,90 em até 12x sem juros no cartão". NUNCA invente preço, tamanho ou estoque: use SEMPRE o que as ferramentas retornarem. Se a ferramenta diz que tem, TEM; se diz que não tem, NÃO TEM.
+
+OBSERVAÇÃO DA PEÇA: quando a peça tiver "observacao" (ex: "forma pequena", "tamanho único, veste do 36 ao 42"), conte para a cliente de forma natural e SEMPRE ANTES de fechar a venda — ela precisa estar ciente antes de pagar. Nunca omita a observação.
 
 PEÇA QUE NÃO ESTÁ NA VITRINE (cliente pergunta de outra peça, story antigo, coleção): NÃO invente. Diga que vai passar para as meninas da equipe confirmarem essa peça e coloque [TRANSFERIR].
 
@@ -361,7 +364,8 @@ async function executeTool(toolName, toolInput, context) {
           const precos = [p.preco_avista ? `${p.preco_avista} à vista no Pix` : null, p.preco_cartao ? `${p.preco_cartao} no cartão` : null]
             .filter(Boolean).join(' ou ');
           const coresTxt = p.cores.length > 1 ? `\nCores: ${p.cores.join(', ')}` : '';
-          const caption = `${p.nome}${coresTxt}\n${precos}`;
+          const obsTxt = p.observacao ? `\n${p.observacao}` : '';
+          const caption = `${p.nome}${coresTxt}${obsTxt}\n${precos}`;
           const photo = await queryOne(
             "SELECT id, data, mime_type FROM promo_photos WHERE promo_item_id = $1 ORDER BY created_at, id LIMIT 1", [p.item_id]);
           if (photo?.data) {
@@ -461,7 +465,7 @@ async function executeTool(toolName, toolInput, context) {
 
     case 'verificar_estoque': {
       const { item_id } = toolInput;
-      const item = await queryOne("SELECT id, display_name, promo_price, promo_price_card FROM promo_items WHERE id = $1 AND active = true", [item_id]);
+      const item = await queryOne("SELECT id, display_name, promo_price, promo_price_card, obs FROM promo_items WHERE id = $1 AND active = true", [item_id]);
       if (!item) return { erro: 'Peça não encontrada na vitrine. Use o item_id de ver_vitrine.' };
       const vars = await getItemVariations(item.id);
       if (vars.length === 0) return { resultado: 'Todas as variações desta peça estão esgotadas.' };
@@ -470,6 +474,7 @@ async function executeTool(toolName, toolInput, context) {
         preco_avista: item.promo_price ? fmt(item.promo_price) : null,
         preco_cartao: item.promo_price_card ? `${fmt(item.promo_price_card)} em até 12x sem juros` : null,
         variacoes_disponiveis: vars.map(v => ({ cor: v.cor || '-', tamanho: v.tamanho, estoque: v.estoque })),
+        ...(item.obs ? { observacao: item.obs, instrucao_obs: 'IMPORTANTE: conte essa observação para a cliente de forma natural ANTES de fechar a venda.' } : {}),
       };
     }
 

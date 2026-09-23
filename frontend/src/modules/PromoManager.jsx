@@ -90,6 +90,24 @@ export default function PromoManager() {
     } catch (e) { alert(e.message); }
   };
 
+  // Tamanhos direto no card da cor (grava na grade cor+tamanho com a cor da foto)
+  const [cardSize, setCardSize] = useState({}); // photoId -> tam digitado
+  const [cardQty, setCardQty] = useState({});   // photoId -> qtd digitada
+  const addSizeForColor = async (item, photo) => {
+    const size = (cardSize[photo.id] || '').trim();
+    const qty = parseInt(cardQty[photo.id]) || 0;
+    if (!size) { alert('Escreva o tamanho (ex: M, 40, Unico)'); return; }
+    try {
+      const s = await api.addPromoStock(item.id, { color: photo.color || '', size, stock_limit: qty });
+      setStockData(prev => {
+        const existing = (prev[item.id] || []).filter(x => !(x.color === s.color && x.size === s.size));
+        return { ...prev, [item.id]: [...existing, s] };
+      });
+      setCardSize(prev => ({ ...prev, [photo.id]: '' }));
+      setCardQty(prev => ({ ...prev, [photo.id]: '' }));
+    } catch (e) { alert(e.message); }
+  };
+
   const renameItem = async (item) => {
     const novo = prompt('Apelido da peca (o que a cliente ve):', item.display_name);
     if (!novo || !novo.trim() || novo.trim() === item.display_name) return;
@@ -324,6 +342,7 @@ export default function PromoManager() {
                             {item.promo_price ? ` | A vista R$ ${parseFloat(item.promo_price).toFixed(2)}` : ' | SEM PRECO A VISTA'}
                             {item.promo_price_card ? ` | Cartao R$ ${parseFloat(item.promo_price_card).toFixed(2)}` : ' | SEM PRECO CARTAO'}
                             {photos[item.id] && ` | ${photos[item.id].length} foto(s)`}
+                            {item.obs && ` | 📝 ${String(item.obs).slice(0, 40)}${item.obs.length > 40 ? '…' : ''}`}
                           </div>
                         </div>
 
@@ -394,6 +413,25 @@ export default function PromoManager() {
                           border: `1px solid ${item.active ? 'rgba(30,186,138,0.2)' : 'rgba(255,255,255,0.05)'}`,
                           borderTop: 'none', borderRadius: '0 0 8px 8px',
                         }}>
+                          {/* Observacao pra Le avisar a cliente antes de fechar */}
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, whiteSpace: 'nowrap' }}>📝 Observacao:</span>
+                            <input
+                              style={{ ...inputStyle, flex: 1, padding: '8px 12px', fontSize: 13 }}
+                              placeholder='Ex: "forma pequena" ou "tamanho unico, veste do 36 ao 42" — a Le avisa a cliente antes de fechar'
+                              defaultValue={item.obs || ''}
+                              onBlur={async (e) => {
+                                const val = e.target.value.trim();
+                                if (val !== (item.obs || '')) {
+                                  try {
+                                    await api.updatePromoItem(item.id, { obs: val });
+                                    setItems(prev => prev.map(i => i.id === item.id ? { ...i, obs: val } : i));
+                                  } catch (err) { alert(err.message); }
+                                }
+                              }}
+                            />
+                          </div>
+
                           {/* Upload */}
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
                             <input
@@ -433,13 +471,13 @@ export default function PromoManager() {
                                   borderRadius: 8, overflow: 'hidden',
                                   border: esgotado ? '2px solid #ea0038' : '1px solid rgba(255,255,255,0.1)',
                                   background: 'rgba(0,0,0,0.3)',
-                                  width: 140,
+                                  width: 176,
                                   opacity: esgotado ? 0.5 : 1,
                                 }}>
                                   <img
                                     src={`${API_BASE}/api/promo-photos/${photo.id}/image`}
                                     alt={photo.color || 'Foto'}
-                                    style={{ width: 140, height: 140, objectFit: 'cover', display: 'block' }}
+                                    style={{ width: 176, height: 160, objectFit: 'cover', display: 'block' }}
                                   />
                                   <div style={{ padding: '6px 8px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -453,29 +491,97 @@ export default function PromoManager() {
                                         X
                                       </button>
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                      <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>Estoque:</span>
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        defaultValue={photo.stock_limit || 0}
-                                        style={{ width: 40, padding: '2px 4px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12, textAlign: 'center' }}
-                                        onBlur={async (e) => {
-                                          const val = parseInt(e.target.value) || 0;
-                                          if (val !== (photo.stock_limit || 0)) {
-                                            try {
-                                              await api.updatePromoPhoto(photo.id, { stock_limit: val });
-                                              setPhotos(prev => ({ ...prev, [item.id]: (prev[item.id] || []).map(p => p.id === photo.id ? { ...p, stock_limit: val } : p) }));
-                                            } catch (err) { alert(err.message); }
-                                          }
-                                        }}
-                                      />
-                                    </div>
-                                    {photo.stock_limit > 0 && (
-                                      <div style={{ fontSize: 11, marginTop: 2, color: esgotado ? '#ea0038' : '#1eba8a', fontWeight: 600 }}>
-                                        {esgotado ? 'ESGOTADO' : `${photo.stock_sold || 0} vendido(s), ${restante} restante(s)`}
-                                      </div>
-                                    )}
+                                    {(() => {
+                                      const colorRows = (stockData[item.id] || []).filter(s =>
+                                        (s.color || '').trim().toLowerCase() === (photo.color || '').trim().toLowerCase());
+                                      return (
+                                        <>
+                                          {colorRows.length === 0 ? (
+                                            <>
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>Estoque (tam. unico):</span>
+                                                <input
+                                                  type="number"
+                                                  min="0"
+                                                  defaultValue={photo.stock_limit || 0}
+                                                  style={{ width: 40, padding: '2px 4px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12, textAlign: 'center' }}
+                                                  onBlur={async (e) => {
+                                                    const val = parseInt(e.target.value) || 0;
+                                                    if (val !== (photo.stock_limit || 0)) {
+                                                      try {
+                                                        await api.updatePromoPhoto(photo.id, { stock_limit: val });
+                                                        setPhotos(prev => ({ ...prev, [item.id]: (prev[item.id] || []).map(p => p.id === photo.id ? { ...p, stock_limit: val } : p) }));
+                                                      } catch (err) { alert(err.message); }
+                                                    }
+                                                  }}
+                                                />
+                                              </div>
+                                              {photo.stock_limit > 0 && (
+                                                <div style={{ fontSize: 11, marginTop: 2, color: esgotado ? '#ea0038' : '#1eba8a', fontWeight: 600 }}>
+                                                  {esgotado ? 'ESGOTADO' : `${photo.stock_sold || 0} vendido(s), ${restante} restante(s)`}
+                                                </div>
+                                              )}
+                                            </>
+                                          ) : (
+                                            <div style={{ marginBottom: 4 }}>
+                                              {colorRows.map(s => {
+                                                const rest = (s.stock_limit || 0) - (s.stock_sold || 0);
+                                                return (
+                                                  <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                                                    <span style={{ color: '#fff', fontSize: 12, fontWeight: 600, width: 34 }}>{s.size || 'Unico'}</span>
+                                                    <input
+                                                      type="number" min="0"
+                                                      defaultValue={s.stock_limit || 0}
+                                                      style={{ width: 40, padding: '2px 4px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12, textAlign: 'center' }}
+                                                      onBlur={async (e) => {
+                                                        const val = parseInt(e.target.value) || 0;
+                                                        if (val !== (s.stock_limit || 0)) {
+                                                          try {
+                                                            await api.updatePromoStock(s.id, { stock_limit: val });
+                                                            setStockData(prev => ({ ...prev, [item.id]: (prev[item.id] || []).map(x => x.id === s.id ? { ...x, stock_limit: val } : x) }));
+                                                          } catch (err) { alert(err.message); }
+                                                        }
+                                                      }}
+                                                    />
+                                                    <span style={{ fontSize: 10, color: rest > 0 ? 'rgba(255,255,255,0.4)' : '#ea0038' }}>
+                                                      {rest > 0 ? `${rest} rest.` : 'ESG.'}
+                                                    </span>
+                                                    <button
+                                                      onClick={async () => {
+                                                        try {
+                                                          await api.deletePromoStock(s.id);
+                                                          setStockData(prev => ({ ...prev, [item.id]: (prev[item.id] || []).filter(x => x.id !== s.id) }));
+                                                        } catch (err) { alert(err.message); }
+                                                      }}
+                                                      style={{ background: 'none', border: 'none', color: '#ea0038', cursor: 'pointer', fontSize: 10, fontWeight: 600, marginLeft: 'auto' }}
+                                                    >X</button>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                          {/* Adicionar tamanho NESTA cor */}
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                                            <input
+                                              placeholder="Tam"
+                                              value={cardSize[photo.id] || ''}
+                                              onChange={e => setCardSize(prev => ({ ...prev, [photo.id]: e.target.value }))}
+                                              style={{ width: 44, padding: '3px 5px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12 }}
+                                            />
+                                            <input
+                                              placeholder="Qtd" type="number" min="0"
+                                              value={cardQty[photo.id] || ''}
+                                              onChange={e => setCardQty(prev => ({ ...prev, [photo.id]: e.target.value }))}
+                                              style={{ width: 40, padding: '3px 5px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12, textAlign: 'center' }}
+                                            />
+                                            <button
+                                              onClick={() => addSizeForColor(item, photo)}
+                                              style={{ ...btnStyle, padding: '3px 10px', background: '#1eba8a', color: '#0d1b18', fontSize: 12 }}
+                                            >+</button>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                                 );
