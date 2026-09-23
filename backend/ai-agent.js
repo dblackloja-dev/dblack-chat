@@ -48,6 +48,17 @@ function lojaAberta(date = new Date()) {
 }
 const agoraSP = () => new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
+// ─── Entrega: o SISTEMA decide motoboy x Correios pela cidade ───
+const normCidade = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+const CIDADES_MOTOBOY = ['santa margarida', 'matipo', 'abre campo', 'sericita', 'padre fialho',
+  'sao francisco do gloria', 'fervedouro', 'carangola', 'pedra bonita', 'orizania', 'santo amaro', 'realeza'];
+const CIDADES_LOJA = {
+  'divino': 'Divino',
+  'sao domingos': 'São Domingos das Dores', 'sao domingos das dores': 'São Domingos das Dores',
+  'sao joao': 'São João do Manhuaçu', 'sao joao do manhuacu': 'São João do Manhuaçu',
+};
+const LOJAS_RETIRADA = ['São Domingos das Dores', 'Divino', 'São João do Manhuaçu'];
+
 // ─── Vitrine (catálogo do chat, sem ERP) ───
 // Variações disponíveis de um item: grade cor+tamanho (promo_stock) manda;
 // sem grade, fotos com estoque por cor (promo_photos) = tamanho Único.
@@ -125,7 +136,9 @@ FLUXO DE VENDA:
 5. Quantidade (assuma 1 se ela não falar em mais)
 6. adicionar_carrinho IMEDIATAMENTE quando peça, cor e tamanho estiverem definidos — SEMPRE ANTES de perguntar entrega ou pagamento (informe item_id, cor, tamanho — o sistema busca o preço sozinho)
 7. Pergunte se quer mais alguma peça ou fechar
-8. Entrega: pergunte com botões — "Retirada grátis" (lojas de São Domingos, Divino e São João do Manhuaçu), "Motoboy R$7" (Santa Margarida, Matipó, Abre Campo, Sericita, Padre Fialho, São Francisco do Glória, Fervedouro, Carangola, Pedra Bonita, Orizânia, Santo Amaro e Realeza) ou "Correios R$25" (todo o Brasil, 6 a 10 dias). Se já souber a cidade, ofereça só o que faz sentido
+8. Entrega — pergunte com botões: "Retirada na loja" (grátis) ou "Entrega"
+   - RETIRADA: pergunte com botões em qual loja ela retira: "São Domingos", "Divino" ou "São João" — e passe a loja escolhida em finalizar_venda (loja_retirada)
+   - ENTREGA: pergunte a CIDADE dela (por texto) e use verificar_entrega com a cidade — o SISTEMA decide se é motoboy R$7 ou Correios R$25 (você nunca decide sozinha). Informe o valor e o prazo antes de seguir. Se a cidade tiver loja física, sugira a retirada grátis primeiro
 9. Pagamento: botões "Pix" (preço à vista) ou "Cartão 12x" (preço de cartão, até 12x sem juros)
 10. Peça o CPF ("para gerar o pagamento preciso do seu CPF")
 11. Assim que ela mandar o CPF, use consultar_cliente_black: se ela for do programa, comemore em UMA frase as vantagens (nível, desconto à vista, cashback e saldo). No Pix, o desconto do nível dela é aplicado AUTOMATICAMENTE pelo sistema no fechamento — você NUNCA calcula desconto por conta própria; se finalizar_venda mostrar desconto_cliente_black, conte pra ela o valor economizado. Se não for do programa, não comente nada
@@ -262,6 +275,15 @@ const TOOLS = [
     },
   },
   {
+    name: 'verificar_entrega',
+    description: 'Informa como a loja entrega na cidade da cliente: motoboy R$7, Correios R$25 ou cidade com loja física (retirada grátis). Use SEMPRE que a cliente escolher entrega e informar a cidade — é o sistema que decide, nunca você.',
+    input_schema: {
+      type: 'object',
+      properties: { cidade: { type: 'string', description: 'Cidade da cliente' } },
+      required: ['cidade'],
+    },
+  },
+  {
     name: 'consultar_cliente_black',
     description: 'Consulta pelo CPF se a cliente é do programa Cliente Black e retorna as vantagens dela (nível, desconto à vista nas lojas, cashback e saldo). Use SEMPRE logo que a cliente informar o CPF, antes de finalizar_venda.',
     input_schema: {
@@ -278,8 +300,9 @@ const TOOLS = [
       properties: {
         forma_pagamento: { type: 'string', enum: ['pix', 'credito'], description: '"pix" (preço à vista) ou "credito" (preço de cartão, até 12x)' },
         cpf: { type: 'string', description: 'CPF da cliente' },
-        tipo_entrega: { type: 'string', enum: ['entrega', 'retirada', 'correios'], description: '"entrega" = motoboy R$7 | "retirada" = grátis na loja | "correios" = R$25 todo o Brasil' },
-        cidade: { type: 'string', description: 'Cidade da cliente (para a equipe organizar a entrega)' },
+        tipo_entrega: { type: 'string', enum: ['entrega', 'retirada'], description: '"retirada" = grátis na loja (exige loja_retirada) | "entrega" = em casa (exige cidade; o sistema decide motoboy R$7 ou Correios R$25)' },
+        loja_retirada: { type: 'string', enum: ['São Domingos das Dores', 'Divino', 'São João do Manhuaçu'], description: 'Loja escolhida pela cliente (obrigatório na retirada)' },
+        cidade: { type: 'string', description: 'Cidade da cliente (obrigatório na entrega)' },
       },
       required: ['forma_pagamento', 'cpf', 'tipo_entrega'],
     },
@@ -545,6 +568,21 @@ async function executeTool(toolName, toolInput, context) {
       return { carrinho: cart.items.map(i => ({ nome: i.name, cor: i.color || '-', tamanho: i.size, quantidade: i.quantity })), total_avista: fmt(totPix), mensagem: 'Item removido.' };
     }
 
+    case 'verificar_entrega': {
+      const c = normCidade(toolInput.cidade);
+      if (!c) return { erro: 'Informe a cidade da cliente.' };
+      if (CIDADES_LOJA[c]) {
+        return {
+          cidade: toolInput.cidade, tem_loja: true, loja: CIDADES_LOJA[c],
+          instrucao: `Tem loja física em ${CIDADES_LOJA[c]} — sugira a RETIRADA GRÁTIS na loja (motoboy não atende cidade de loja). Se ela fizer questão de receber em casa, é Correios R$25.`,
+        };
+      }
+      if (CIDADES_MOTOBOY.includes(c)) {
+        return { cidade: toolInput.cidade, entrega: 'motoboy', taxa: 'R$ 7,00', instrucao: 'Entrega por motoboy, R$7. Informe o valor e siga para o pagamento.' };
+      }
+      return { cidade: toolInput.cidade, entrega: 'correios', taxa: 'R$ 25,00', prazo: '6 a 10 dias', instrucao: 'Entrega pelos Correios, R$25, 6 a 10 dias. Informe valor e prazo e siga para o pagamento.' };
+    }
+
     case 'consultar_cliente_black': {
       const cpfDigits = String(toolInput.cpf || '').replace(/\D/g, '');
       if (cpfDigits.length !== 11) return { erro: 'CPF inválido. Peça para a cliente conferir os números.' };
@@ -569,10 +607,24 @@ async function executeTool(toolName, toolInput, context) {
     }
 
     case 'finalizar_venda': {
-      const { forma_pagamento, cpf, tipo_entrega, cidade } = toolInput;
+      const { forma_pagamento, cpf, tipo_entrega, cidade, loja_retirada } = toolInput;
       const cart = getCart(conversationId);
       if (cart.items.length === 0) return { erro: 'Carrinho vazio. Adicione itens antes de finalizar.' };
-      const taxaEntrega = tipo_entrega === 'entrega' ? 7.00 : tipo_entrega === 'correios' ? 25.00 : 0;
+
+      // Entrega decidida pelo SISTEMA: retirada exige loja; entrega exige cidade
+      // e a cidade define motoboy (R$7) ou Correios (R$25) — o modelo não escolhe.
+      let tipoFinal = tipo_entrega;
+      let taxaEntrega = 0;
+      if (tipo_entrega === 'retirada') {
+        if (!loja_retirada || !LOJAS_RETIRADA.includes(loja_retirada)) {
+          return { erro: 'Falta a loja de retirada. Pergunte com botões: São Domingos, Divino ou São João do Manhuaçu — e passe em loja_retirada.' };
+        }
+      } else {
+        if (!normCidade(cidade)) return { erro: 'Falta a cidade da cliente. Pergunte a cidade e use verificar_entrega antes de finalizar.' };
+        const cN = normCidade(cidade);
+        if (CIDADES_MOTOBOY.includes(cN)) { tipoFinal = 'entrega'; taxaEntrega = 7.00; }
+        else { tipoFinal = 'correios'; taxaEntrega = 25.00; }
+      }
 
       try {
         // Revalida estoque de cada item na hora do fechamento
@@ -615,7 +667,7 @@ async function executeTool(toolName, toolInput, context) {
           ? Math.round(cart.items.reduce((s, i) => s + (i.price_pix - priceOf(i)) * i.quantity, 0) * 100) / 100
           : 0;
         const total = subtotal + taxaEntrega;
-        const descricao = cart.items.map(i => `${i.name} x${i.quantity}`).join(', ') + (taxaEntrega > 0 ? ` + ${tipo_entrega === 'correios' ? 'Correios' : 'Entrega'}` : '');
+        const descricao = cart.items.map(i => `${i.name} x${i.quantity}`).join(', ') + (taxaEntrega > 0 ? ` + ${tipoFinal === 'correios' ? 'Correios' : 'Entrega'}` : '');
 
         const asaasCustomer = await asaas.findOrCreateCustomer(customerName || 'Cliente WhatsApp', customerPhone, cpf);
 
@@ -628,11 +680,11 @@ async function executeTool(toolName, toolInput, context) {
 
         // Salva pagamento pendente (cart_data guarda a forma escolhida e o preço unitário cobrado)
         const paymentId = deps.genId();
-        const cartData = cart.items.map(i => ({ ...i, price: priceOf(i), cidade: cidade || '' }));
+        const cartData = cart.items.map(i => ({ ...i, price: priceOf(i), cidade: cidade || '', loja: loja_retirada || '' }));
         await queryRun(
           `INSERT INTO pending_payments (id, conversation_id, customer_phone, customer_name, asaas_charge_id, asaas_customer_id, payment_method, amount, cart_data, tipo_entrega, taxa_entrega)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [paymentId, conversationId, customerPhone || '', customerName || 'Cliente WhatsApp', charge.chargeId, asaasCustomer.id, forma_pagamento, total, JSON.stringify(cartData), tipo_entrega || 'retirada', taxaEntrega]);
+          [paymentId, conversationId, customerPhone || '', customerName || 'Cliente WhatsApp', charge.chargeId, asaasCustomer.id, forma_pagamento, total, JSON.stringify(cartData), tipoFinal || 'retirada', taxaEntrega]);
 
         // Envia QR Code do PIX ou link de pagamento via WhatsApp
         if (deps.wa?.connected && customerPhone) {
@@ -668,7 +720,9 @@ async function executeTool(toolName, toolInput, context) {
           aguardando_pagamento: true,
           subtotal: fmt(subtotal),
           ...(descontoBlack > 0 ? { desconto_cliente_black: `${fmt(descontoBlack)} (nível ${loyalty.tier}, ${loyalty.discount_pct}% à vista aplicado automaticamente)` } : {}),
-          entrega: taxaEntrega > 0 ? fmt(taxaEntrega) : 'grátis',
+          entrega: tipoFinal === 'retirada'
+            ? `Retirada grátis na loja de ${loja_retirada}`
+            : `${tipoFinal === 'entrega' ? 'Motoboy' : 'Correios'} ${fmt(taxaEntrega)} — ${cidade}`,
           total: fmt(total),
           mensagem: `Pagamento gerado e enviado (${forma_pagamento === 'pix' ? 'QR Code + copia-e-cola' : 'link do cartão'}).${descontoBlack > 0 ? ' Conte para a cliente que o desconto Cliente Black dela já está aplicado no valor.' : ''} Avise que assim que confirmar, ela recebe a confirmação por aqui.`,
         };

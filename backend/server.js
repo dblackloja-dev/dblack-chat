@@ -330,7 +330,8 @@ async function confirmPendingPayment(chargeId) {
       const tipoEntrega = pending.tipo_entrega || 'retirada';
       let proximoPasso;
       if (tipoEntrega === 'retirada') {
-        proximoPasso = 'Sua compra já vai ser separada! É só retirar na loja apresentando o seu nome. 🥰';
+        const loja = cartItems.find(i => i.loja)?.loja;
+        proximoPasso = `Sua compra já vai ser separada! É só retirar na loja${loja ? ` de ${loja}` : ''} apresentando o seu nome. 🥰`;
       } else {
         proximoPasso = `Para organizarmos o envio, preencha o formulário com seu endereço:\n\nhttps://dblack-entregas.vercel.app/formulario\n\nAssim que preencher, sua encomenda entra na fila de envio! 🚚`;
       }
