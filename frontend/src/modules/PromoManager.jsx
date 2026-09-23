@@ -127,6 +127,29 @@ export default function PromoManager() {
     } catch (e) { alert(e.message); }
   };
 
+  // Edição com botão SALVAR (onBlur não dispara direito no celular)
+  const [drafts, setDrafts] = useState({}); // itemId -> { promo_price, promo_price_card, obs }
+  const draftOf = (item) => drafts[item.id] || {};
+  const setDraft = (id, patch) => setDrafts(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
+  const isDirty = (item) => {
+    const d = drafts[item.id];
+    if (!d) return false;
+    return ['promo_price', 'promo_price_card', 'obs'].some(k => d[k] !== undefined && String(d[k] ?? '') !== String(item[k] ?? ''));
+  };
+  const saveItem = async (item) => {
+    const d = drafts[item.id];
+    if (!d) return;
+    try {
+      const payload = {};
+      if (d.promo_price !== undefined) payload.promo_price = d.promo_price ? parseFloat(d.promo_price) : null;
+      if (d.promo_price_card !== undefined) payload.promo_price_card = d.promo_price_card ? parseFloat(d.promo_price_card) : null;
+      if (d.obs !== undefined) payload.obs = String(d.obs).trim();
+      await api.updatePromoItem(item.id, payload);
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, ...payload } : i));
+      setDrafts(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+    } catch (e) { alert(e.message); }
+  };
+
   const renameItem = async (item) => {
     const novo = prompt('Apelido da peca (o que a cliente ve):', item.display_name);
     if (!novo || !novo.trim() || novo.trim() === item.display_name) return;
@@ -371,16 +394,9 @@ export default function PromoManager() {
                           title="Preco a vista (Pix)"
                           type="number"
                           step="0.01"
-                          defaultValue={item.promo_price || ''}
-                          onBlur={async (e) => {
-                            const val = e.target.value ? parseFloat(e.target.value) : null;
-                            if (val !== (item.promo_price ? parseFloat(item.promo_price) : null)) {
-                              try {
-                                await api.updatePromoItem(item.id, { promo_price: val });
-                                setItems(prev => prev.map(i => i.id === item.id ? { ...i, promo_price: val } : i));
-                              } catch (err) { alert(err.message); }
-                            }
-                          }}
+                          value={draftOf(item).promo_price ?? item.promo_price ?? ''}
+                          onChange={e => setDraft(item.id, { promo_price: e.target.value })}
+                          onKeyDown={e => e.key === 'Enter' && saveItem(item)}
                         />
 
                         <input
@@ -389,17 +405,18 @@ export default function PromoManager() {
                           title="Preco no cartao (12x)"
                           type="number"
                           step="0.01"
-                          defaultValue={item.promo_price_card || ''}
-                          onBlur={async (e) => {
-                            const val = e.target.value ? parseFloat(e.target.value) : null;
-                            if (val !== (item.promo_price_card ? parseFloat(item.promo_price_card) : null)) {
-                              try {
-                                await api.updatePromoItem(item.id, { promo_price_card: val });
-                                setItems(prev => prev.map(i => i.id === item.id ? { ...i, promo_price_card: val } : i));
-                              } catch (err) { alert(err.message); }
-                            }
-                          }}
+                          value={draftOf(item).promo_price_card ?? item.promo_price_card ?? ''}
+                          onChange={e => setDraft(item.id, { promo_price_card: e.target.value })}
+                          onKeyDown={e => e.key === 'Enter' && saveItem(item)}
                         />
+
+                        <button onClick={() => saveItem(item)} style={{
+                          ...btnStyle, padding: '6px 12px',
+                          background: isDirty(item) ? '#1eba8a' : 'rgba(255,255,255,0.08)',
+                          color: isDirty(item) ? '#0d1b18' : 'rgba(255,255,255,0.35)',
+                        }}>
+                          💾 Salvar
+                        </button>
 
                         <button onClick={() => togglePhotos(item.id)} style={{
                           ...btnStyle, padding: '6px 12px',
@@ -438,17 +455,17 @@ export default function PromoManager() {
                             <input
                               style={{ ...inputStyle, flex: 1, padding: '8px 12px', fontSize: 13 }}
                               placeholder='Ex: "forma pequena" ou "tamanho unico, veste do 36 ao 42" — a Le avisa a cliente antes de fechar'
-                              defaultValue={item.obs || ''}
-                              onBlur={async (e) => {
-                                const val = e.target.value.trim();
-                                if (val !== (item.obs || '')) {
-                                  try {
-                                    await api.updatePromoItem(item.id, { obs: val });
-                                    setItems(prev => prev.map(i => i.id === item.id ? { ...i, obs: val } : i));
-                                  } catch (err) { alert(err.message); }
-                                }
-                              }}
+                              value={draftOf(item).obs ?? item.obs ?? ''}
+                              onChange={e => setDraft(item.id, { obs: e.target.value })}
+                              onKeyDown={e => e.key === 'Enter' && saveItem(item)}
                             />
+                            <button onClick={() => saveItem(item)} style={{
+                              ...btnStyle, padding: '8px 14px', whiteSpace: 'nowrap',
+                              background: isDirty(item) ? '#1eba8a' : 'rgba(255,255,255,0.08)',
+                              color: isDirty(item) ? '#0d1b18' : 'rgba(255,255,255,0.35)',
+                            }}>
+                              💾 Salvar
+                            </button>
                           </div>
 
                           {/* Upload */}
