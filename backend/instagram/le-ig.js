@@ -277,9 +277,27 @@ function extractMsg(raw) {
 async function generateAndSend(convStale, msg) {
   try {
     // Estado fresco: a conversa pode ter sido aceita/transferida durante a espera
-    const conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convStale.id]);
-    if (!conv || conv.status !== 'aguardando' || conv.ai_muted || conv.channel !== 'instagram') return;
+    let conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [convStale.id]);
+    if (!conv || conv.channel !== 'instagram' || conv.status === 'finalizado') return;
     if ((await setting('ig_ai_enabled', 'false')) !== 'true') return;
+
+    // Conversa presa com a equipe (aceita ou transferida) SEM resposta humana há 30+ min
+    // e chegou mensagem nova: volta pra fila e a Lê reassume (decisão do dono, 23/09).
+    // Exceções: reclamação/pedido pendente continua com a equipe; msg da equipe nos
+    // últimos 30 min (inclusive echo "Instagram" do app) = atendimento ativo, Lê quieta.
+    if (conv.status === 'atendendo' || conv.ai_muted) {
+      const historyPeek = await customerHistory(conv.phone);
+      if (pendingIssue(historyPeek)) return;
+      const equipeAtiva = await queryOne(
+        `SELECT 1 FROM messages WHERE conversation_id = $1 AND from_me = true
+           AND sender IS DISTINCT FROM 'Lê (IA)' AND timestamp > NOW() - interval '30 minutes' LIMIT 1`,
+        [conv.id]);
+      if (equipeAtiva) return;
+      await queryRun("UPDATE conversations SET status = 'aguardando', agent_id = NULL, agent_name = NULL, ai_muted = false WHERE id = $1", [conv.id]);
+      conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
+      notify('conversation_updated', conv);
+      console.log(`♻️ [le-ig] equipe ociosa há 30min+ — Lê reassumiu ${conv.customer_push_name || conv.phone}`);
+    } else if (conv.status !== 'aguardando') return;
 
     // Modo teste: só responde os usuários da lista (ig_ai_test_users = '*' libera todos)
     const testUsers = (await setting('ig_ai_test_users', '')).trim();
