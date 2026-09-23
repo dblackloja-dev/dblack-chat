@@ -312,6 +312,31 @@ const TOOLS = [
   },
 ];
 
+// ─── Follow-up de 2 minutos: cliente não clicou em nada → oferece atendimento humano ───
+const followupTimers = new Map(); // conversationId → timeout
+const followupSent = new Set();   // conversas que já receberam o aviso (1x por conversa)
+function scheduleFollowup(conversationId, customerPhone) {
+  if (followupSent.has(conversationId)) return;
+  clearTimeout(followupTimers.get(conversationId));
+  followupTimers.set(conversationId, setTimeout(async () => {
+    followupTimers.delete(conversationId);
+    try {
+      if (followupSent.has(conversationId)) return;
+      const conv = await queryOne("SELECT status, ai_muted FROM conversations WHERE id = $1", [conversationId]);
+      if (!conv || conv.status !== 'aguardando' || conv.ai_muted) return;
+      const last = await queryOne("SELECT from_me FROM messages WHERE conversation_id = $1 ORDER BY timestamp DESC LIMIT 1", [conversationId]);
+      if (!last || !last.from_me) return; // cliente respondeu nesse meio tempo
+      followupSent.add(conversationId);
+      if (followupSent.size > 500) followupSent.clear();
+      const texto = 'Vi que você não escolheu nenhuma opção 😉 Se preferir, uma das meninas da nossa equipe continua o atendimento por aqui mesmo — é só tocar no botão.';
+      await deps.wa.sendButtons(customerPhone, 'Ainda por aqui?', texto,
+        [{ text: 'Atendimento humano', id: 'atendimento_humano' }], { isBot: true });
+      await recordOutgoing(conversationId, `Ainda por aqui?\n${texto}\n[Botões: Atendimento humano]`);
+      console.log('⏰ Follow-up 2min enviado (sem clique) →', customerPhone);
+    } catch (e) { console.error('⚠️ Follow-up 2min:', e.message); }
+  }, 2 * 60 * 1000));
+}
+
 // ─── Persistência de mensagens enviadas pelas tools ───
 async function recordOutgoing(conversationId, content, media = null) {
   const msgId = deps.genId();
@@ -393,6 +418,7 @@ async function executeTool(toolName, toolInput, context) {
         }));
         await deps.wa.sendList(customerPhone, 'Nossas peças ✨', 'Toca no botão e escolhe a peça que você amou', 'Escolher peça', rows, { isBot: true });
         await recordOutgoing(conversationId, `Nossas peças ✨\n[Lista: ${rows.map(r => r.title).join(' | ')}]`);
+        scheduleFollowup(conversationId, customerPhone);
       } catch (e) {
         console.error('⚠️ Erro ao enviar menu da vitrine:', e.message);
       }
@@ -488,6 +514,7 @@ async function executeTool(toolName, toolInput, context) {
           await deps.wa.sendButtons(customerPhone, titulo, descricao, btns, { isBot: true });
           const content = `${titulo}\n${descricao}\n[Botões: ${botoes.map(b => b.texto).join(' | ')}]`;
           await recordOutgoing(conversationId, content);
+          scheduleFollowup(conversationId, customerPhone);
           return { sucesso: true, mensagem: 'Botões enviados. NÃO repita a pergunta por texto.' };
         } catch (e) {
           console.error('⚠️ Erro ao enviar botões:', e.message);
@@ -507,6 +534,7 @@ async function executeTool(toolName, toolInput, context) {
           await deps.wa.sendList(customerPhone, titulo, descricao, botao || 'Ver opções', rows, { isBot: true });
           const content = `${titulo}\n${descricao}\n[Lista: ${opcoes.map(o => o.titulo).join(' | ')}]`;
           await recordOutgoing(conversationId, content);
+          scheduleFollowup(conversationId, customerPhone);
           return { sucesso: true, mensagem: 'Lista enviada. NÃO repita as opções por texto.' };
         } catch (e) {
           console.error('⚠️ Erro ao enviar lista:', e.message);

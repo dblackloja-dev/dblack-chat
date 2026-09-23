@@ -654,7 +654,8 @@ wa.on('message', (msg) => {
         }
       } else {
         // Atualiza conversa existente — se finalizada, reabre como aguardando
-        const reopen = conv.status === 'finalizado' ? ", status = 'aguardando', assigned_to = NULL" : '';
+        // (ai_muted volta a false: atendimento novo, a Lê tenta de novo)
+        const reopen = conv.status === 'finalizado' ? ", status = 'aguardando', assigned_to = NULL, ai_muted = false" : '';
         await queryRun(
           `UPDATE conversations SET unread_count = unread_count + 1, last_message = $1, last_message_at = NOW(), last_message_from_me = false, customer_push_name = COALESCE(NULLIF($2, ''), customer_push_name), real_phone = COALESCE(NULLIF($4, ''), real_phone)${reopen} WHERE id = $3`,
           [msg.content, msg.pushName || '', conv.id, msg.realPhone || '']
@@ -713,7 +714,31 @@ wa.on('message', (msg) => {
       // Responde automaticamente se: IA ativa + conversa aguardando (sem atendente humano)
       // IMPORTANTE: roda FORA da fila para não bloquear mensagens de outros clientes
       // (se o VIP já respondeu esta mensagem, a Lê não responde junto)
-      if (conv.status === 'aguardando' && !vipHandled) {
+      if (conv.status === 'aguardando' && !vipHandled && !conv.ai_muted) {
+        // Botão "Atendimento humano" (follow-up da Lê): transfere direto, sem passar pela IA
+        if (msg.interactiveId === 'atendimento_humano') {
+          setImmediate(async () => {
+            try {
+              const texto = 'Perfeito! Já avisei as meninas da nossa equipe — uma delas continua o atendimento com você por aqui mesmo, tá bom? 😉';
+              await wa.sendMessage(msg.phone, texto, { isBot: true });
+              const hMsgId = genId();
+              await queryRun(
+                "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+                [hMsgId, conv.id, 'Lê (IA)', texto]);
+              await queryRun("UPDATE conversations SET ai_muted = true, last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+                ['🙋 Cliente pediu atendimento humano', conv.id]);
+              const freshConv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
+              broadcast('new_message', {
+                conversation: freshConv || { id: conv.id },
+                message: { id: hMsgId, conversation_id: conv.id, from_me: true, sender: 'Lê (IA)', content: texto, timestamp: new Date().toISOString() },
+              });
+              broadcast('conversation_updated', freshConv);
+              console.log(`🙋 ${msg.pushName || msg.phone} pediu atendimento humano (botão do follow-up)`);
+            } catch (e) { console.error('❌ Erro ao transferir por botão:', e.message); }
+          });
+          return;
+        }
+
         const aiEnabled = await aiAgent.isAgentEnabled();
 
         // Modo teste: se ai_test_phones estiver configurado, só responde esses números
@@ -803,8 +828,9 @@ wa.on('message', (msg) => {
 
                 if (aiResponse.shouldTransfer) {
                   console.log(`🔀 Lê transferindo ${aiPushName || aiPhone} para atendente humano`);
+                  // ai_muted: a Lê para de responder nesta conversa (conversa nova reseta)
                   await queryRun(
-                    "UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+                    "UPDATE conversations SET ai_muted = true, last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
                     ['🔀 IA transferiu para atendente', aiConvId]
                   );
                   broadcast('conversation_updated', { ...freshConv, last_message: '🔀 IA transferiu para atendente' });
