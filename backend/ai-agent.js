@@ -128,7 +128,7 @@ FLUXO DE VENDA:
 8. Entrega: pergunte com botões — "Retirada grátis" (lojas de São Domingos, Divino e São João do Manhuaçu), "Motoboy R$7" (Santa Margarida, Matipó, Abre Campo, Sericita, Padre Fialho, São Francisco do Glória, Fervedouro, Carangola, Pedra Bonita, Orizânia, Santo Amaro e Realeza) ou "Correios R$25" (todo o Brasil, 6 a 10 dias). Se já souber a cidade, ofereça só o que faz sentido
 9. Pagamento: botões "Pix" (preço à vista) ou "Cartão 12x" (preço de cartão, até 12x sem juros)
 10. Peça o CPF ("para gerar o pagamento preciso do seu CPF")
-11. Assim que ela mandar o CPF, use consultar_cliente_black: se ela for do programa, comemore em UMA frase as vantagens (nível, desconto à vista nas lojas, cashback e saldo) — mas NÃO mude o valor da compra (os preços da vitrine já são promocionais). Se não for, não comente nada
+11. Assim que ela mandar o CPF, use consultar_cliente_black: se ela for do programa, comemore em UMA frase as vantagens (nível, desconto à vista, cashback e saldo). No Pix, o desconto do nível dela é aplicado AUTOMATICAMENTE pelo sistema no fechamento — você NUNCA calcula desconto por conta própria; se finalizar_venda mostrar desconto_cliente_black, conte pra ela o valor economizado. Se não for do programa, não comente nada
 12. finalizar_venda — o QR Code do Pix com copia-e-cola (ou o link do cartão) é enviado automaticamente
 13. Avise que assim que o pagamento confirmar ela recebe a confirmação por aqui
 
@@ -560,7 +560,7 @@ async function executeTool(toolName, toolInput, context) {
           desconto_avista_lojas: `${s.discount_pct}%`,
           cashback: `${s.cashback_pct}%`,
           saldo_cashback: fmt(s.balance),
-          instrucao: 'É Cliente Black! Comemore em UMA frase curta contando as vantagens dela (nível, desconto à vista nas lojas físicas, cashback e saldo). IMPORTANTE: os preços da vitrine já são promocionais — NÃO altere o valor da compra por causa do nível. Depois siga direto para finalizar_venda.',
+          instrucao: 'É Cliente Black! Comemore em UMA frase curta contando as vantagens dela (nível, desconto à vista, cashback e saldo). No Pix o desconto do nível é aplicado automaticamente pelo sistema no finalizar_venda — NÃO calcule você mesma. Siga direto para finalizar_venda.',
         };
       } catch (e) {
         console.error('⚠️ consultar_cliente_black:', e.message);
@@ -588,8 +588,32 @@ async function executeTool(toolName, toolInput, context) {
           return { erro: `Estoque insuficiente para: ${lista}. Verifique com a cliente se quer ajustar.` };
         }
 
-        const priceOf = (i) => forma_pagamento === 'pix' ? i.price_pix : i.price_card;
+        // Desconto Cliente Black: só à vista (Pix), automático pelo nível — igual ao PDV.
+        // Base = preço cheio (cartão); nunca cobra acima do preço à vista da vitrine.
+        // promo_active na config do programa suspende o desconto de nível.
+        let loyalty = null;
+        try {
+          const cpfDigits = String(cpf || '').replace(/\D/g, '');
+          if (forma_pagamento === 'pix' && cpfDigits.length === 11) {
+            const customer = await erp.erpQueryOne(
+              "SELECT * FROM customers WHERE regexp_replace(COALESCE(cpf,''),'[^0-9]','','g') = $1 LIMIT 1", [cpfDigits]);
+            const s = await erp.loyaltySummary(customer);
+            if (s?.enrolled && !s.promo_active && s.discount_pct > 0) loyalty = s;
+          }
+        } catch (e) { console.error('⚠️ Cliente Black no fechamento:', e.message); }
+
+        const priceOf = (i) => {
+          if (forma_pagamento !== 'pix') return i.price_card;
+          if (loyalty) {
+            const tierPrice = Math.round(i.price_card * (1 - loyalty.discount_pct / 100) * 100) / 100;
+            return Math.min(i.price_pix, tierPrice);
+          }
+          return i.price_pix;
+        };
         const subtotal = cart.items.reduce((s, i) => s + priceOf(i) * i.quantity, 0);
+        const descontoBlack = loyalty
+          ? Math.round(cart.items.reduce((s, i) => s + (i.price_pix - priceOf(i)) * i.quantity, 0) * 100) / 100
+          : 0;
         const total = subtotal + taxaEntrega;
         const descricao = cart.items.map(i => `${i.name} x${i.quantity}`).join(', ') + (taxaEntrega > 0 ? ` + ${tipo_entrega === 'correios' ? 'Correios' : 'Entrega'}` : '');
 
@@ -643,9 +667,10 @@ async function executeTool(toolName, toolInput, context) {
           sucesso: true,
           aguardando_pagamento: true,
           subtotal: fmt(subtotal),
+          ...(descontoBlack > 0 ? { desconto_cliente_black: `${fmt(descontoBlack)} (nível ${loyalty.tier}, ${loyalty.discount_pct}% à vista aplicado automaticamente)` } : {}),
           entrega: taxaEntrega > 0 ? fmt(taxaEntrega) : 'grátis',
           total: fmt(total),
-          mensagem: `Pagamento gerado e enviado (${forma_pagamento === 'pix' ? 'QR Code + copia-e-cola' : 'link do cartão'}). Avise que assim que confirmar, ela recebe a confirmação por aqui.`,
+          mensagem: `Pagamento gerado e enviado (${forma_pagamento === 'pix' ? 'QR Code + copia-e-cola' : 'link do cartão'}).${descontoBlack > 0 ? ' Conte para a cliente que o desconto Cliente Black dela já está aplicado no valor.' : ''} Avise que assim que confirmar, ela recebe a confirmação por aqui.`,
         };
       } catch (e) {
         console.error('❌ Erro ao gerar pagamento:', e.message);

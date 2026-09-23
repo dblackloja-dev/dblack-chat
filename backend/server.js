@@ -340,6 +340,49 @@ async function confirmPendingPayment(chargeId) {
       await queryRun(
         "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
         [confirmMsgId, pending.conversation_id, 'Lê (IA)', confirmMsg]);
+
+      // Cupom não fiscal (gerado dos dados da venda da Lê — sem ERP)
+      try {
+        const taxaEntrega = parseFloat(pending.taxa_entrega) || 0;
+        const items = cartItems.map(i => ({
+          quantity: i.quantity || 1,
+          name: [i.name, i.color, i.size && i.size !== 'Único' ? `tam ${i.size}` : ''].filter(Boolean).join(' '),
+          price: parseFloat(i.price ?? i.price_pix ?? 0),
+          sku: i.ref || '-',
+        }));
+        const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+        // Desconto Cliente Black aparece no cupom (diferença entre preço de vitrine e cobrado)
+        const descontoBlack = Math.max(0, Math.round(cartItems.reduce((s, i) =>
+          s + ((parseFloat(i.price_pix) || parseFloat(i.price) || 0) - (parseFloat(i.price) || 0)) * (i.quantity || 1), 0) * 100) / 100);
+        const sale = {
+          cupom: 'LE-' + String(pending.id).slice(-6).toUpperCase(),
+          items,
+          subtotal: subtotal + descontoBlack,
+          discount: descontoBlack,
+          taxa_entrega: taxaEntrega,
+          tipo_entrega: pending.tipo_entrega || 'retirada',
+          total,
+          payment_method: pending.payment_method,
+        };
+        const receiptBuffer = generateReceiptImage(sale, 'Lê (IA)', pending.customer_name || 'Cliente');
+        const caption = `🧾 Cupom D'Black Store — ${sale.cupom}\nObrigado pela compra! ✨`;
+        const cupomResult = await wa.sendImage(pending.customer_phone, receiptBuffer, caption, { isBot: true });
+        const cupomMsgId = cupomResult?._waId || genId();
+        const cupomMediaId = 'img_' + cupomMsgId;
+        await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
+          [cupomMediaId, 'image/png', receiptBuffer.toString('base64')]);
+        await queryRun(
+          "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
+          [cupomMsgId, pending.conversation_id, 'Lê (IA)', `/media/${cupomMediaId}|${caption}`, `/media/${cupomMediaId}`]);
+        if (broadcast) {
+          broadcast('new_message', {
+            conversation: { id: pending.conversation_id, last_message: '🧾 Cupom enviado', last_message_from_me: true },
+            message: { id: cupomMsgId, conversation_id: pending.conversation_id, from_me: true, sender: 'Lê (IA)', content: `/media/${cupomMediaId}|${caption}`, media_type: 'image', media_url: `/media/${cupomMediaId}`, timestamp: new Date().toISOString() },
+          });
+        }
+      } catch (e) {
+        console.error('⚠️ Erro ao gerar/enviar cupom:', e.message);
+      }
       const displayText = `🎉 Pagamento confirmado — R$ ${total.toFixed(2)}`;
       await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
         [displayText, pending.conversation_id]);
