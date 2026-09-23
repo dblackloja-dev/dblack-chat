@@ -116,14 +116,14 @@ function buildSystemPrompt(pageContext, waNumber, aberta) {
     : '- Cliente decidiu comprar (fechar pedido/pagamento)';
   const avisoHorario = aberta
     ? 'A loja está ABERTA agora: ao transferir, pode dizer que uma das meninas responde por aqui.'
-    : 'A loja está FECHADA agora: ao transferir, NUNCA diga "rapidinho", "já" ou "agora" — diga que as meninas respondem por aqui assim que a loja abrir.';
+    : 'A loja física está FECHADA agora, mas VENDA NUNCA ESPERA: o WhatsApp da loja recebe mensagem a qualquer hora e as meninas respondem por ordem de mensagem. NUNCA mande uma cliente que quer comprar esperar a loja abrir — use o FUNIL DE VENDA (WhatsApp). Só troca/reclamação espera: aí diga que as meninas respondem por aqui assim que a loja abrir, sem prometer "rapidinho", "já" ou "agora".';
 
   return `Você é a Lê, vendedora online da D'Black Store, respondendo os Directs do Instagram @d_blackloja.
 
 AGORA: ${agoraSP()}. ${avisoHorario}
 
 FORMATO DA SUA RESPOSTA (OBRIGATÓRIO):
-Primeiro pense dentro de <analise>...</analise>: qual story/peça, qual preço achou no contexto, qual regra abaixo se aplica. Esse trecho NUNCA é enviado.
+Primeiro pense dentro de <analise>...</analise>: qual story/peça, qual preço achou no contexto, qual regra abaixo se aplica. Esse trecho NUNCA é enviado. Análise CURTA: no máximo 4 frases. Use EXATAMENTE as tags <analise> e <msg> — nunca <thinking> nem variações.
 Depois escreva SOMENTE a mensagem para a cliente dentro de <msg>...</msg>. Os marcadores [SKIP], [TRANSFERIR] e [ZAP: ...] vão dentro do <msg>. Tudo que estiver fora do <msg> é descartado.
 Dentro do <msg> você fala COM a cliente: nunca fale dela em terceira pessoa, nunca descreva o story nem explique seu raciocínio.
 
@@ -157,17 +157,17 @@ REGRA DE OURO — PREÇOS E TAMANHOS:
 - COMO FUNCIONA O PREÇO DA D'BLACK: o valor cheio (ex.: R$79,90) é o preço À VISTA, que já tem 10% de desconto. No cartão não tem desconto: o parcelamento (ex.: 12x de R$7,40) é o preço cheio dividido SEM JUROS. Por isso a parcela vezes 12 dá mais que o valor à vista — está certo, não recalcule
 - Escreva sempre deixando isso claro: "R$79,90 à vista ou 12x de R$7,40 sem juros no cartão". NUNCA diga que o cartão tem desconto nem que o valor à vista vale no cartão
 - Os stories saem em SEQUÊNCIA: o look no provador e, nos minutos seguintes, um story de cada peça com o preço — procure o preço nos stories de horário vizinho
-- Se o contexto NÃO tiver o preço ou tamanho da peça, NUNCA invente: diga que vai confirmar com a equipe e coloque [TRANSFERIR]
-- Tamanho que ela pediu fora da grade da arte (ex.: pediu PP e a arte diz 36 ao 44): diga com clareza que a grade da peça é essa e transfira para a equipe ver se tem
+- Se o contexto NÃO tiver o preço ou tamanho da peça, NUNCA invente: mande para o WhatsApp com [ZAP: ...] (veja FUNIL DE VENDA) — lá as meninas confirmam e já finalizam
+- Tamanho que ela pediu fora da grade da arte (ex.: pediu PP e a arte diz 36 ao 44): diga com clareza que a grade da peça é essa e mande para o WhatsApp com [ZAP: ...] para as meninas verem se tem
 
 CHEGADA NAS LOJAS ("já chegou?", "já tem na loja de Divino?"): cada story/post do contexto vem com uma etiqueta calculada pelo sistema:
 - [JÁ ESTÁ NAS LOJAS]: pode afirmar que a peça já está disponível nas lojas
 - [CHEGA NAS LOJAS AMANHÃ (quarta), a partir das 9h]: é peça postada hoje, terça — diga que chega nas lojas amanhã a partir das 9h
-Use SEMPRE a etiqueta da peça que ela perguntou; nunca deduza pelo dia da semana por conta própria. Isso vale para as 3 lojas. Você não sabe quantas peças ou quais tamanhos ainda restam: se ela quiser garantir um tamanho, siga o FECHAMENTO normal (a equipe confirma a grade). Se não conseguir identificar a peça no contexto, transfira.
+Use SEMPRE a etiqueta da peça que ela perguntou; nunca deduza pelo dia da semana por conta própria. Isso vale para as 3 lojas. Você não sabe quantas peças ou quais tamanhos ainda restam: se ela quiser garantir um tamanho, siga o FECHAMENTO normal (a equipe confirma a grade). Se não conseguir identificar a peça no contexto, mande para o WhatsApp com [ZAP: ...].
 
-COR OU TAMANHO QUE NÃO TEM NA ARTE: sugira UMA outra peça do contexto que tenha a cor ou tamanho que ela quer, se existir; se não existir, transfira para a equipe ver reposição. Nunca encerre só com "não temos".
+COR OU TAMANHO QUE NÃO TEM NA ARTE: sugira UMA outra peça do contexto que tenha a cor ou tamanho que ela quer, se existir; se não existir, mande para o WhatsApp com [ZAP: ...] para as meninas verem reposição. Nunca encerre só com "não temos".
 
-PROMESSAS: frases como "vou confirmar", "já chamo uma das meninas", "vou verificar" SÓ podem sair junto com [TRANSFERIR]. Nunca prometa algo e continue a conversa sozinha.
+PROMESSAS: frases como "vou confirmar", "já chamo uma das meninas", "vou verificar" SÓ podem sair junto com [ZAP: ...] ou [TRANSFERIR]. Nunca prometa algo e continue a conversa sozinha. E NUNCA diga "as meninas te respondem quando a loja abrir" para quem quer COMPRAR — compra vai para o WhatsApp na hora.
 
 PROMOÇÕES: TODA promoção divulgada nos stories/feed vale TAMBÉM nas compras online, além das lojas físicas. Restrição só existe se estiver escrita na arte.
 
@@ -176,11 +176,13 @@ FECHAMENTO DA VENDA:
 - Pagamento: à vista (com os 10% de desconto já no preço da arte) ou cartão de crédito em até 12x sem juros sem o desconto (cite as condições da arte, exatamente como estão)
 ${fechamento}
 
-QUANDO TRANSFERIR (texto curto + [TRANSFERIR] no final):
+${waNumber ? `FUNIL DE VENDA — COMPRA NUNCA ESPERA: se a cliente demonstrou interesse em uma peça ("quero", "valor?", "tem?", "me separa", "reserva") e você NÃO consegue fechar sozinha — preço ou tamanho fora do contexto, pedido de reserva, cor/composição/equivalência a confirmar, peça que você não identificou — NÃO transfira para o Direct e NÃO prometa resposta depois. Responda o que souber e feche com [ZAP: ...] preenchendo o que já sabe: a peça como você a identificou (ou a dúvida dela), o tamanho e a cidade SE ela já disse. O WhatsApp funciona a qualquer hora, as meninas atendem por ordem de mensagem. Exemplos: "Esse conjunto é um arraso! As meninas confirmam o valor e já finalizam com você pelo WhatsApp 😉 [ZAP: conjunto jeans listrado]" · "[ZAP: vestido tule azul tamanho 42 | Santa Margarida]"
+
+QUANDO TRANSFERIR pro Direct (texto curto + [TRANSFERIR] no final) — SOMENTE nestes casos:` : `QUANDO TRANSFERIR (texto curto + [TRANSFERIR] no final):
 ${transferirCompra}
-- Informação que não está no contexto (inclusive peça que você não achou nos stories/posts)
-- Pedido, entrega, troca, reclamação ou mensagem antiga sem resposta
-- Cliente pede para falar com uma pessoa
+- Informação que não está no contexto (inclusive peça que você não achou nos stories/posts)`}
+- Pedido JÁ FEITO, entrega, troca, defeito, reclamação ou mensagem antiga sem resposta
+- Cliente pede para falar com uma pessoa, ou prefere finalizar a compra pelo Direct em vez do WhatsApp
 - Se perguntarem se é robô: confirme que é assistente virtual da loja e ofereça passar para a equipe
 - SEMPRE avise de forma leve que uma pessoa da equipe vai continuar ali mesmo, respeitando o horário da loja (veja AGORA no topo). NUNCA transfira em silêncio
 
@@ -264,9 +266,10 @@ async function maybeReply(conv, msg) {
   }
 }
 
-// Extrai só a mensagem pra cliente; qualquer coisa suspeita vira null (→ transferência)
+// Extrai só a mensagem pra cliente; qualquer coisa suspeita vira null (→ fallback).
+// Tolera </msg> ausente: com max_tokens a resposta pode ser cortada depois do <msg>.
 function extractMsg(raw) {
-  const m = raw.match(/<msg>([\s\S]*?)<\/msg>/i);
+  const m = raw.match(/<msg>([\s\S]*?)(?:<\/msg>|$)/i);
   if (!m) return null;
   return m[1].trim();
 }
@@ -355,33 +358,62 @@ async function generateAndSend(convStale, msg) {
         storyContext = seq.sequence;
         system += `\n\nATENÇÃO: a última mensagem da cliente é RESPOSTA a um story específico. Abaixo, a sequência de stories daquele horário — o PREÇO das peças do look costuma estar nos stories vizinhos desta lista:\n${seq.sequence}`;
       } else {
-        system += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual e pelo horário. Se não tiver certeza do preço, transfira.`;
+        system += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual e pelo horário. Se não tiver certeza do preço, mande para o WhatsApp com [ZAP: ...].`;
       }
     }
 
     const messages = await buildMessages(conv);
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: content.jsonSafe({ model: MODEL, max_tokens: 900, temperature: 0.3, system, messages }),
-      signal: AbortSignal.timeout(60000),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok || json.error) throw new Error(json.error?.message || `Anthropic HTTP ${res.status}`);
+    const callClaude = async (msgs) => {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: content.jsonSafe({ model: MODEL, max_tokens: 1200, temperature: 0.3, system, messages: msgs }),
+        signal: AbortSignal.timeout(60000),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.error) throw new Error(json.error?.message || `Anthropic HTTP ${res.status}`);
+      return (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+    };
 
-    const raw = (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+    let raw = await callClaude(messages);
     if (!raw) return;
 
     let text = extractMsg(raw);
+
+    // Sem <msg> (tag errada tipo <thinking>, typo, corte): UMA nova tentativa antes de desistir
+    if (text === null && !raw.includes('[SKIP]')) {
+      console.error('[le-ig] resposta sem <msg>, tentando de novo:', raw.slice(0, 200));
+      raw = await callClaude([...messages,
+        { role: 'assistant', content: raw },
+        { role: 'user', content: '(sistema: sua resposta veio SEM a tag <msg> e NÃO foi enviada à cliente. Reenvie agora SOMENTE <msg>sua mensagem</msg>, sem análise.)' },
+      ]).catch(() => '');
+      text = raw ? extractMsg(raw) : null;
+    }
+
     let shouldTransfer = false;
     let transferReason = '';
+    let zapButton = null;
+
+    // Fallback quando a Lê falha (formato/vazamento): venda não espera —
+    // em vez de "deixei anotado", manda a cliente pro WhatsApp com a mensagem dela pré-preenchida
+    const zapFallbackButton = () => {
+      if (!waNumber) return null;
+      const ultima = stripLabel(lastContent).slice(0, 140);
+      return {
+        text: 'Pra você não ficar esperando: é só tocar no botão abaixo e mandar sua mensagem no nosso WhatsApp, as meninas resolvem tudo com você por lá, tá bom? 😉',
+        url: `https://wa.me/${waNumber}?text=${encodeURIComponent(`Oi! Vim do Instagram.${ultima ? ` ${ultima}` : ''}`)}`,
+      };
+    };
 
     if (text === null) {
-      // Sem <msg>: nunca manda o texto cru (é assim que o raciocínio vazava)
       if (raw.includes('[SKIP]')) return;
-      console.error('[le-ig] resposta sem <msg>, bloqueada:', raw.slice(0, 200));
-      text = ''; shouldTransfer = true; transferReason = 'resposta fora do formato';
+      // Reação/emoji não merece transferência por falha nossa: fica em silêncio
+      if (isReactionOnly(lastContent)) { console.error('[le-ig] sem <msg> em reação, ignorada'); return; }
+      console.error('[le-ig] resposta sem <msg> após retry, bloqueada:', raw.slice(0, 200));
+      text = ''; shouldTransfer = true;
+      zapButton = zapFallbackButton();
+      transferReason = zapButton ? 'resposta fora do formato → WhatsApp' : 'resposta fora do formato';
     }
 
     if (text.includes('[SKIP]')) return;
@@ -389,20 +421,16 @@ async function generateAndSend(convStale, msg) {
     if (text.includes('[TRANSFERIR]')) { shouldTransfer = true; transferReason = transferReason || 'IA pediu transferência'; }
     text = text.replace(/\[TRANSFERIR\]/g, '').trim();
 
-    // Trava: vazamento de análise → não envia, transfere
+    // Trava: vazamento de análise → não envia; venda vai pro WhatsApp
     if (text && LEAK_RE.test(text)) {
       console.error('[le-ig] texto parecia análise interna, bloqueado:', text.slice(0, 200));
-      text = ''; shouldTransfer = true; transferReason = 'bloqueio de vazamento';
-    }
-
-    // Trava: promessa sem transferência → transfere de verdade
-    if (text && PROMISE_RE.test(text) && !shouldTransfer) {
-      shouldTransfer = true; transferReason = 'promessa de confirmar com a equipe';
+      text = ''; shouldTransfer = true;
+      zapButton = zapButton || zapFallbackButton();
+      transferReason = zapButton ? 'bloqueio de vazamento → WhatsApp' : 'bloqueio de vazamento';
     }
 
     // [ZAP: peça tamanho X | cidade] → mensagem com BOTÃO "Abrir WhatsApp".
     // "Vim do Instagram" é o marcador que o server.js usa pra etiquetar a origem.
-    let zapButton = null;
     const zapMatch = text.match(/\[ZAP:?\s*([^\]]*)\]/i);
     if (zapMatch) {
       text = text.replace(zapMatch[0], '').trim();
@@ -417,6 +445,11 @@ async function generateAndSend(convStale, msg) {
         };
       }
       shouldTransfer = true; transferReason = transferReason || 'venda enviada pro WhatsApp';
+    }
+
+    // Trava: promessa sem transferência nem WhatsApp → transfere de verdade
+    if (text && PROMISE_RE.test(text) && !shouldTransfer && !zapButton) {
+      shouldTransfer = true; transferReason = 'promessa de confirmar com a equipe';
     }
 
     // Transferência NUNCA em silêncio
