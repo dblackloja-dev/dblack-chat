@@ -13,6 +13,7 @@ export default function PromoManager() {
   const [promoPrice, setPromoPrice] = useState('');
   const [promoPriceCard, setPromoPriceCard] = useState('');
   const [manualName, setManualName] = useState('');
+  const [apelido, setApelido] = useState('');
   const [expandedItem, setExpandedItem] = useState(null); // id do item expandido pra ver fotos
   const [photos, setPhotos] = useState({}); // { promoItemId: [photo, ...] }
   const [stockData, setStockData] = useState({}); // { promoItemId: [stock, ...] }
@@ -71,18 +72,30 @@ export default function PromoManager() {
       return;
     }
     try {
+      // Apelido substitui o nome comprido do ERP na conversa com a cliente.
+      // O preco do ERP e o preco de CARTAO; o campo "A vista" a equipe digita.
       const item = await api.addPromoItem({
         ref: product.ref,
         category: cat,
-        display_name: product.name,
+        display_name: apelido.trim() || product.name,
         promo_price: promoPrice ? parseFloat(promoPrice) : null,
-        promo_price_card: promoPriceCard ? parseFloat(promoPriceCard) : null,
+        promo_price_card: promoPriceCard ? parseFloat(promoPriceCard) : (product.price || null),
       });
       setItems(prev => [...prev, item]);
       setSearchQuery('');
       setSearchResults([]);
       setPromoPrice('');
       setPromoPriceCard('');
+      setApelido('');
+    } catch (e) { alert(e.message); }
+  };
+
+  const renameItem = async (item) => {
+    const novo = prompt('Apelido da peca (o que a cliente ve):', item.display_name);
+    if (!novo || !novo.trim() || novo.trim() === item.display_name) return;
+    try {
+      await api.updatePromoItem(item.id, { display_name: novo.trim() });
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, display_name: novo.trim() } : i));
     } catch (e) { alert(e.message); }
   };
 
@@ -199,6 +212,12 @@ export default function PromoManager() {
             onChange={e => setCategory(e.target.value)}
           />
           <input
+            style={{ ...inputStyle, flex: '1 1 160px', minWidth: 0 }}
+            placeholder="Apelido (nome que a cliente ve)"
+            value={apelido}
+            onChange={e => setApelido(e.target.value)}
+          />
+          <input
             style={{ ...inputStyle, flex: '1 1 110px', minWidth: 0 }}
             placeholder="A vista R$ (Pix)"
             type="number"
@@ -209,7 +228,8 @@ export default function PromoManager() {
           />
           <input
             style={{ ...inputStyle, flex: '1 1 110px', minWidth: 0 }}
-            placeholder="Cartao R$ (12x)"
+            placeholder="Cartao R$ (vem do ERP)"
+            title="Se deixar vazio, usa o preco do ERP como preco de cartao"
             type="number"
             step="0.01"
             min="0"
@@ -245,7 +265,7 @@ export default function PromoManager() {
                 <div style={{ flex: 1 }}>
                   <div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{p.name}</div>
                   <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 2 }}>
-                    Ref: {p.ref} | R$ {p.price.toFixed(2)} | Tam: {p.sizes || '-'} | Cores: {p.colors || '-'} | Estoque: {p.stock}
+                    Ref: {p.ref} | Cartao (ERP): R$ {p.price.toFixed(2)} | Tam: {p.sizes || '-'} | Cores: {p.colors || '-'} | Estoque: {p.stock}
                   </div>
                 </div>
                 <button
@@ -294,7 +314,11 @@ export default function PromoManager() {
                         opacity: item.active ? 1 : 0.5,
                       }}>
                         <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-                          <div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{item.display_name}</div>
+                          <div style={{ color: '#fff', fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{item.display_name}</span>
+                            <button onClick={() => renameItem(item)} title="Mudar o apelido (nome que a cliente ve)"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, opacity: 0.5, padding: 0 }}>✏️</button>
+                          </div>
                           <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
                             {item.ref ? `Ref: ${item.ref}` : 'Sem ref (manual)'}
                             {item.promo_price ? ` | A vista R$ ${parseFloat(item.promo_price).toFixed(2)}` : ' | SEM PRECO A VISTA'}
