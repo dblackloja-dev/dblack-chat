@@ -285,6 +285,9 @@ clienteBlack.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 // relatório diário das 19h. Chamada pelo webhook e pelo poller (idempotente).
 const asaas = require('./asaas');
 
+// Trava/debounce da Lê Vendedora — uma resposta por rajada de mensagens (ver gatilho no webhook)
+const aiInFlight = new Map(); // conversationId → { dirty, last: { content, mediaType } }
+
 async function confirmPendingPayment(chargeId) {
   const pending = await queryOne("SELECT * FROM pending_payments WHERE asaas_charge_id = $1 AND status = 'PENDING'", [chargeId]);
   if (!pending) return false;
@@ -690,8 +693,39 @@ wa.on('message', (msg) => {
           const aiContent = msg.content;
           const aiMediaType = msg.mediaType;
 
+          // Trava + debounce por conversa (padrão da Lê do IG): rajada de mensagens
+          // ("Oi" / "Oi" / "Bom dia") gera UMA resposta só; se chegar mensagem nova
+          // durante a geração, roda mais uma rodada com a última (máx 3).
+          const aiLock = aiInFlight.get(aiConvId);
+          if (aiLock) {
+            aiLock.dirty = true;
+            aiLock.last = { content: aiContent, mediaType: aiMediaType };
+            return;
+          }
+          aiInFlight.set(aiConvId, { dirty: false, last: { content: aiContent, mediaType: aiMediaType } });
+
           // Processa IA em background (não bloqueia a fila)
           setImmediate(async () => {
+            try {
+              let aiRounds = 0;
+              do {
+                await new Promise(r => setTimeout(r, 6000)); // agrupa a rajada
+                const aiState = aiInFlight.get(aiConvId);
+                aiState.dirty = false;
+                // A conversa pode ter sido aceita por uma atendente durante a espera
+                const aiFresh = await queryOne("SELECT status FROM conversations WHERE id = $1", [aiConvId]);
+                if (!aiFresh || aiFresh.status !== 'aguardando') break;
+                await respondWithAI(aiConvId, aiState.last.content, aiPushName, aiState.last.mediaType, aiPhone);
+                aiRounds++;
+              } while (aiInFlight.get(aiConvId)?.dirty && aiRounds < 3);
+            } catch (e) {
+              console.error('❌ Erro IA ao responder:', e.message);
+            } finally {
+              aiInFlight.delete(aiConvId);
+            }
+          });
+
+          async function respondWithAI(aiConvId, aiContent, aiPushName, aiMediaType, aiPhone) {
             try {
               const aiResponse = await aiAgent.generateResponse(aiConvId, aiContent, aiPushName, aiMediaType, aiPhone);
               if (aiResponse.text) {
@@ -733,7 +767,7 @@ wa.on('message', (msg) => {
             } catch (e) {
               console.error('❌ Erro IA ao responder:', e.message);
             }
-          });
+          }
         }
       }
 
