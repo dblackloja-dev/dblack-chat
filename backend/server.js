@@ -334,7 +334,7 @@ async function confirmPendingPayment(chargeId) {
       } else {
         proximoPasso = `Para organizarmos o envio, preencha o formulário com seu endereço:\n\nhttps://dblack-entregas.vercel.app/formulario\n\nAssim que preencher, sua encomenda entra na fila de envio! 🚚`;
       }
-      const confirmMsg = `🎉 Pagamento via ${metodo} confirmado — R$ ${total.toFixed(2)}\n\n${resumo}\n\n${proximoPasso}`;
+      const confirmMsg = `🎉 Pagamento via ${metodo} confirmado — R$ ${total.toFixed(2).replace('.', ',')}\n\n${resumo}\n\n${proximoPasso}`;
       await wa.sendMessage(pending.customer_phone, confirmMsg, { isBot: true });
       const confirmMsgId = genId();
       await queryRun(
