@@ -279,8 +279,142 @@ vip.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 const clienteBlack = require('./cliente-black');
 clienteBlack.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 
-// ─── Webhook do Asaas — confirma pagamento, registra no ERP, envia cupom ───
+// ─── Confirmação de pagamento da Lê (webhook Asaas + poller de fallback) ───
+// Regra do dono (23/09): a venda da Lê NÃO registra no ERP nem baixa estoque lá —
+// baixa só o estoque da vitrine do chat; a baixa no ERP é manual, guiada pelo
+// relatório diário das 19h. Chamada pelo webhook e pelo poller (idempotente).
 const asaas = require('./asaas');
+
+async function confirmPendingPayment(chargeId) {
+  const pending = await queryOne("SELECT * FROM pending_payments WHERE asaas_charge_id = $1 AND status = 'PENDING'", [chargeId]);
+  if (!pending) return false;
+  await queryRun("UPDATE pending_payments SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1", [pending.id]);
+
+  const cartItems = typeof pending.cart_data === 'string' ? JSON.parse(pending.cart_data) : pending.cart_data;
+
+  // Baixa o estoque da VITRINE (grade cor+tamanho; senão, foto por cor).
+  // Itens novos vêm com promo_item_id; os antigos só com ref.
+  for (const item of cartItems) {
+    const key = item.promo_item_id || item.ref;
+    if (!key) continue;
+    const whereItem = item.promo_item_id
+      ? "promo_item_id = $2"
+      : "promo_item_id IN (SELECT id FROM promo_items WHERE LOWER(ref) = LOWER($2))";
+    // "Único" no carrinho corresponde a size vazio (ou "único") na grade
+    const sizes = (!item.size || item.size === 'Único') ? ['', 'único'] : [String(item.size).toLowerCase()];
+    const gridResult = await queryRun(
+      `UPDATE promo_stock SET stock_sold = stock_sold + $1
+        WHERE ${whereItem} AND LOWER(color) = LOWER($3) AND LOWER(size) = ANY($4) AND stock_limit > 0`,
+      [item.quantity || 1, key, item.color || '', sizes]);
+    if (gridResult.rowCount === 0) {
+      await queryRun(
+        `UPDATE promo_photos SET stock_sold = stock_sold + $1
+          WHERE ${whereItem} AND LOWER(color) = LOWER($3) AND stock_limit > 0`,
+        [item.quantity || 1, key, item.color || '']);
+    }
+  }
+
+  const total = parseFloat(pending.amount);
+  console.log(`✅ Venda da Lê confirmada — R$ ${total.toFixed(2)} (${pending.customer_name || pending.customer_phone})`);
+
+  // Confirmação + resumo + próximo passo pra cliente
+  if (wa.connected && pending.customer_phone) {
+    try {
+      const resumo = cartItems
+        .map(i => [i.name, i.color, i.size && i.size !== 'Único' ? `tam ${i.size}` : '', `x${i.quantity || 1}`].filter(Boolean).join(' '))
+        .join('\n');
+      const metodo = pending.payment_method === 'pix' ? 'Pix' : 'cartão';
+      const tipoEntrega = pending.tipo_entrega || 'retirada';
+      let proximoPasso;
+      if (tipoEntrega === 'retirada') {
+        proximoPasso = 'Sua compra já vai ser separada! É só retirar na loja apresentando o seu nome. 🥰';
+      } else {
+        proximoPasso = `Para organizarmos o envio, preencha o formulário com seu endereço:\n\nhttps://dblack-entregas.vercel.app/formulario\n\nAssim que preencher, sua encomenda entra na fila de envio! 🚚`;
+      }
+      const confirmMsg = `🎉 Pagamento via ${metodo} confirmado — R$ ${total.toFixed(2)}\n\n${resumo}\n\n${proximoPasso}`;
+      await wa.sendMessage(pending.customer_phone, confirmMsg, { isBot: true });
+      const confirmMsgId = genId();
+      await queryRun(
+        "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+        [confirmMsgId, pending.conversation_id, 'Lê (IA)', confirmMsg]);
+      const displayText = `🎉 Pagamento confirmado — R$ ${total.toFixed(2)}`;
+      await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
+        [displayText, pending.conversation_id]);
+      if (broadcast) {
+        broadcast('new_message', {
+          conversation: { id: pending.conversation_id, last_message: displayText, last_message_from_me: true },
+          message: { id: confirmMsgId, conversation_id: pending.conversation_id, from_me: true, sender: 'Lê (IA)', content: confirmMsg, timestamp: new Date().toISOString() },
+        });
+      }
+    } catch (e) {
+      console.error('⚠️ Erro ao enviar confirmação:', e.message);
+    }
+  }
+  return true;
+}
+
+// Poller de fallback: se o webhook do Asaas não chegar, confirma pela consulta direta
+setInterval(async () => {
+  try {
+    const rows = await queryAll("SELECT asaas_charge_id FROM pending_payments WHERE status = 'PENDING' AND created_at > NOW() - interval '48 hours'");
+    for (const r of rows) {
+      const st = await asaas.getChargeStatus(r.asaas_charge_id).catch(() => null);
+      if (st && ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(st.status)) {
+        console.log(`⏱️ Poller: cobrança ${r.asaas_charge_id} paga (webhook não chegou)`);
+        await confirmPendingPayment(r.asaas_charge_id);
+      }
+    }
+  } catch (e) { console.error('⚠️ Poller de pagamentos:', e.message); }
+}, 90 * 1000);
+
+// ─── Relatório diário das vendas da Lê (19h05 BRT) ───
+// Tudo que foi PAGO no dia, agrupado por peça/cor/tamanho, no WhatsApp do número
+// em chat_settings 'daily_report_phone' (padrão: Denilson) — pra baixa MANUAL no ERP.
+setInterval(async () => {
+  try {
+    const sp = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    if (sp.getHours() !== 19 || sp.getMinutes() < 5 || sp.getMinutes() >= 15) return;
+    const hoje = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const last = await queryOne("SELECT value FROM chat_settings WHERE key = 'daily_report_last'");
+    if (last?.value === hoje) return;
+    await queryRun("INSERT INTO chat_settings (key, value) VALUES ('daily_report_last', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [hoje]);
+
+    const vendas = await queryAll(
+      `SELECT customer_name, payment_method, amount, cart_data, tipo_entrega
+         FROM pending_payments
+        WHERE status = 'CONFIRMED'
+          AND (confirmed_at AT TIME ZONE 'America/Sao_Paulo')::date = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
+        ORDER BY confirmed_at`);
+
+    const phoneRow = await queryOne("SELECT value FROM chat_settings WHERE key = 'daily_report_phone'");
+    const reportPhone = (phoneRow?.value || '553195545210').replace(/\D/g, '');
+
+    if (vendas.length === 0) {
+      await wa.sendMessage(reportPhone, `📊 Vendas da Lê — ${hoje}\n\nNenhuma venda paga hoje.`, { isBot: true });
+      return;
+    }
+
+    // Agrupa por peça + cor + tamanho pra facilitar a baixa no ERP
+    const grupos = new Map();
+    let totalDia = 0;
+    for (const v of vendas) {
+      totalDia += parseFloat(v.amount);
+      const items = typeof v.cart_data === 'string' ? JSON.parse(v.cart_data) : v.cart_data;
+      for (const i of items) {
+        const key = [i.ref, i.name, i.color, i.size].join('|');
+        const g = grupos.get(key) || { ref: i.ref || '', name: i.name, color: i.color || '', size: i.size || '', qty: 0 };
+        g.qty += i.quantity || 1;
+        grupos.set(key, g);
+      }
+    }
+    const linhas = [...grupos.values()]
+      .map(g => `• ${g.qty}x ${g.name}${g.color ? ` ${g.color}` : ''}${g.size && g.size !== 'Único' ? ` tam ${g.size}` : ''}${g.ref ? ` (ref ${g.ref})` : ''}`)
+      .join('\n');
+    const msg = `📊 Vendas da Lê — ${hoje}\n\n${vendas.length} pedido(s) pago(s) — total R$ ${totalDia.toFixed(2)}\n\nPARA BAIXAR NO ERP:\n${linhas}`;
+    await wa.sendMessage(reportPhone, msg, { isBot: true });
+    console.log(`📊 Relatório diário da Lê enviado (${vendas.length} pedidos)`);
+  } catch (e) { console.error('⚠️ Relatório diário da Lê:', e.message); }
+}, 60 * 1000);
 
 app.post('/api/webhook/asaas', async (req, res) => {
   // Valida token de autenticação do Asaas
@@ -306,135 +440,9 @@ app.post('/api/webhook/asaas', async (req, res) => {
       return;
     }
 
-    console.log(`💰 Asaas: pagamento ${payment.id} confirmado!`);
-
-    // Busca pagamento pendente
-    const pending = await queryOne("SELECT * FROM pending_payments WHERE asaas_charge_id = $1 AND status = 'PENDING'", [payment.id]);
-    if (!pending) { console.log('⚠️ Pagamento não encontrado ou já processado:', payment.id); return; }
-
-    // Marca como confirmado
-    await queryRun("UPDATE pending_payments SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1", [pending.id]);
-
-    const cartItems = typeof pending.cart_data === 'string' ? JSON.parse(pending.cart_data) : pending.cart_data;
-
-    // Incrementa stock_sold nas combinações cor+tamanho vendidas (grid e photo)
-    for (const item of cartItems) {
-      if (item.ref) {
-        // Tenta grid (cor+tamanho)
-        const gridResult = await queryRun(
-          `UPDATE promo_stock SET stock_sold = stock_sold + $1
-           WHERE promo_item_id IN (SELECT id FROM promo_items WHERE LOWER(ref) = LOWER($2))
-             AND LOWER(color) = LOWER($3) AND LOWER(size) = LOWER($4) AND stock_limit > 0`,
-          [item.quantity || 1, item.ref, item.color || '', item.size || '']
-        );
-        // Se não atualizou grid, tenta photo (só cor)
-        if (gridResult.rowCount === 0 && item.color) {
-          await queryRun(
-            `UPDATE promo_photos SET stock_sold = stock_sold + $1
-             WHERE promo_item_id IN (SELECT id FROM promo_items WHERE LOWER(ref) = LOWER($2))
-               AND LOWER(color) = LOWER($3) AND stock_limit > 0`,
-            [item.quantity || 1, item.ref, item.color || '']
-          );
-        }
-      }
-    }
-
-    // Busca cliente no ERP
-    let customerId = null;
-    if (pending.customer_phone) {
-      const customer = await erp.findCustomerByPhone(pending.customer_phone);
-      if (customer) customerId = customer.id;
-    }
-
-    // Cria venda no ERP
-    const taxaEntrega = parseFloat(pending.taxa_entrega) || 0;
-    const sale = await erp.createSale({
-      store_id: 'loja4',
-      customer_id: customerId,
-      customer_name: pending.customer_name || 'Cliente WhatsApp',
-      customer_phone: pending.customer_phone || '',
-      seller_name: 'Lê (IA)',
-      seller_id: '',
-      items: cartItems,
-      payment_method: pending.payment_method,
-      discount: 0,
-      discount_type: 'fixed',
-      discount_label: '',
-    });
-    // Adiciona info de entrega no objeto sale pra o cupom
-    sale.taxa_entrega = taxaEntrega;
-    sale.tipo_entrega = pending.tipo_entrega || 'retirada';
-    if (taxaEntrega > 0) sale.total = sale.total + taxaEntrega;
-
-    console.log(`✅ Venda ${sale.cupom} criada no ERP — R$ ${sale.total.toFixed(2)}`);
-
-    // Envia cupom e confirmação via WhatsApp
-    if (wa.connected && pending.customer_phone) {
-      try {
-        // Mensagem de confirmação
-        const confirmMsg = pending.payment_method === 'pix'
-          ? `Pagamento via PIX confirmado! R$ ${sale.total.toFixed(2)}`
-          : `Pagamento via cartão confirmado! R$ ${sale.total.toFixed(2)}`;
-        await wa.sendMessage(pending.customer_phone, confirmMsg, { isBot: true });
-
-        const confirmMsgId = genId();
-        await queryRun(
-          "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
-          [confirmMsgId, pending.conversation_id, 'Lê (IA)', confirmMsg]
-        );
-
-        // Envia cupom
-        const receiptBuffer = generateReceiptImage(sale, 'Lê (IA)', pending.customer_name || 'Cliente');
-        const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\nObrigado pela compra! 🖤`;
-        const cupomResult = await wa.sendImage(pending.customer_phone, receiptBuffer, caption, { isBot: true });
-
-        const msgId = cupomResult?._waId || genId();
-        const mediaId = 'img_' + msgId;
-        await queryRun("INSERT INTO media_files (id, mime_type, data) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING",
-          [mediaId, 'image/png', receiptBuffer.toString('base64')]);
-        await queryRun(
-          "INSERT INTO messages (id, conversation_id, from_me, sender, content, media_type, media_url, ack, timestamp) VALUES ($1,$2,true,$3,$4,'image',$5,1,NOW())",
-          [msgId, pending.conversation_id, 'Lê (IA)', `/media/${mediaId}|${caption}`, `/media/${mediaId}`]
-        );
-
-        const displayText = `🧾 Pagamento confirmado — R$ ${sale.total.toFixed(2)}`;
-        await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
-          [displayText, pending.conversation_id]);
-
-        if (broadcast) {
-          broadcast('new_message', {
-            conversation: { id: pending.conversation_id, last_message: displayText, last_message_from_me: true },
-            message: { id: msgId, conversation_id: pending.conversation_id, from_me: true, sender: 'Lê (IA)', content: `/media/${mediaId}|${caption}`, media_type: 'image', media_url: `/media/${mediaId}`, timestamp: new Date().toISOString() },
-          });
-        }
-
-        // Envia link do formulário (entrega ou retirada)
-        const tipoEntrega = pending.tipo_entrega || 'retirada';
-        let formMsg;
-        if (tipoEntrega === 'entrega') {
-          formMsg = `📋 Para finalizarmos a entrega, preencha o formulário com seu endereço:\n\nhttps://dblack-entregas.vercel.app/formulario\n\nAssim que preenchermos, enviaremos sua encomenda! 🚚`;
-        } else {
-          // Formulário /retirada desativado 02/09 — o código agora é gerado na venda
-          formMsg = `🏪 Sua compra já está sendo preparada para retirada!\n\nEm instantes enviaremos o código de retirada por aqui. É só apresentar no caixa da loja. 🖤`;
-        }
-        await wa.sendMessage(pending.customer_phone, formMsg, { isBot: true });
-        const formMsgId = genId();
-        await queryRun(
-          "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
-          [formMsgId, pending.conversation_id, 'Lê (IA)', formMsg]
-        );
-        await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
-          [formMsg, pending.conversation_id]);
-        if (broadcast) {
-          broadcast('new_message', {
-            conversation: { id: pending.conversation_id, last_message: formMsg, last_message_from_me: true },
-            message: { id: formMsgId, conversation_id: pending.conversation_id, from_me: true, sender: 'Lê (IA)', content: formMsg, timestamp: new Date().toISOString() },
-          });
-        }
-      } catch (e) {
-        console.error('⚠️ Erro ao enviar confirmação/cupom:', e.message);
-      }
-    }
+    console.log("💰 Asaas: pagamento " + payment.id + " confirmado!");
+    const ok = await confirmPendingPayment(payment.id);
+    if (!ok) console.log("⚠️ Pagamento não encontrado ou já processado:", payment.id);
   } catch (e) { console.error('❌ Erro webhook Asaas:', e.message); }
 });
 
@@ -1627,21 +1635,33 @@ app.get('/api/promo-items', auth, async (req, res) => {
 app.post('/api/promo-items', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    const { ref, category, display_name, promo_price } = req.body;
-    if (!ref || !category || !display_name) return res.status(400).json({ error: 'ref, category e display_name são obrigatórios' });
+    const { ref, category, display_name, promo_price, promo_price_card } = req.body;
+    // ref é opcional: cadastro manual (sem ERP) usa só nome + preços
+    if (!category || !display_name) return res.status(400).json({ error: 'category e display_name são obrigatórios' });
     const id = genId();
     const price = promo_price ? parseFloat(promo_price) : null;
-    await queryRun("INSERT INTO promo_items (id, ref, category, display_name, promo_price) VALUES ($1,$2,$3,$4,$5)", [id, ref, category, display_name, price]);
-    res.json({ id, ref, category, display_name, promo_price: price, active: true });
+    const priceCard = promo_price_card ? parseFloat(promo_price_card) : null;
+    await queryRun("INSERT INTO promo_items (id, ref, category, display_name, promo_price, promo_price_card) VALUES ($1,$2,$3,$4,$5,$6)",
+      [id, ref || '', category, display_name, price, priceCard]);
+    res.json({ id, ref: ref || '', category, display_name, promo_price: price, promo_price_card: priceCard, active: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/api/promo-items/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
-    const { category, display_name, active, promo_price } = req.body;
-    await queryRun("UPDATE promo_items SET category = COALESCE($1, category), display_name = COALESCE($2, display_name), active = COALESCE($3, active), promo_price = COALESCE($4, promo_price) WHERE id = $5",
-      [category, display_name, active, promo_price !== undefined ? (promo_price ? parseFloat(promo_price) : null) : undefined, req.params.id]);
+    const { category, display_name, active, promo_price, promo_price_card } = req.body;
+    const sets = [];
+    const params = [];
+    const add = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+    if (category !== undefined) add('category', category);
+    if (display_name !== undefined) add('display_name', display_name);
+    if (active !== undefined) add('active', active);
+    if (promo_price !== undefined) add('promo_price', promo_price ? parseFloat(promo_price) : null);
+    if (promo_price_card !== undefined) add('promo_price_card', promo_price_card ? parseFloat(promo_price_card) : null);
+    if (sets.length === 0) return res.json({ success: true });
+    params.push(req.params.id);
+    await queryRun(`UPDATE promo_items SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

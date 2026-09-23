@@ -333,6 +333,36 @@ class WhatsAppMeta extends EventEmitter {
     });
   }
 
+  // Menu de lista nativo (até 10 opções). rows: [{ id, title, description? }]
+  async sendList(phone, title, description, buttonText, rows, { isBot = false } = {}) {
+    if (!this.canSend()) throw new Error('Limite de mensagens atingido.');
+    if (isBot) {
+      await this.sendPresence(phone);
+      await this.humanDelay();
+    }
+    this.trackSend();
+    return this._sendPayload({
+      to: this._digits(phone),
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        ...(title ? { header: { type: 'text', text: String(title).slice(0, 60) } } : {}),
+        body: { text: String(description || title).slice(0, 1024) },
+        action: {
+          button: String(buttonText || 'Escolher').slice(0, 20),
+          sections: [{
+            title: String(title || 'Opções').slice(0, 24),
+            rows: rows.slice(0, 10).map(r => ({
+              id: String(r.id).slice(0, 200),
+              title: String(r.title).slice(0, 24),
+              ...(r.description ? { description: String(r.description).slice(0, 72) } : {}),
+            })),
+          }],
+        },
+      },
+    });
+  }
+
   // Template aprovado — necessário pra iniciar conversa fora da janela de 24h
   async sendTemplate(phone, templateName, languageCode = 'pt_BR', components = []) {
     this.trackSend();

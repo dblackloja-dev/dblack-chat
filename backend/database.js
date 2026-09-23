@@ -206,6 +206,12 @@ async function initDB() {
     )
   `);
 
+  // Preços da vitrine da Lê: promo_price = à vista (Pix), promo_price_card = cartão em até 12x.
+  // ref é opcional (cadastro manual sem ERP — a Lê vende só do que está aqui).
+  await queryRun("ALTER TABLE promo_items ADD COLUMN IF NOT EXISTS promo_price NUMERIC(10,2)");
+  await queryRun("ALTER TABLE promo_items ADD COLUMN IF NOT EXISTS promo_price_card NUMERIC(10,2)");
+  await queryRun("ALTER TABLE promo_items ALTER COLUMN ref DROP NOT NULL");
+
   // Fotos dos produtos da promoção (múltiplas por ref, uma por cor)
   await queryRun(`
     CREATE TABLE IF NOT EXISTS promo_photos (
@@ -217,6 +223,10 @@ async function initDB() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+
+  // Estoque por cor nas fotos (colunas adicionadas manualmente em produção — garante aqui)
+  await queryRun("ALTER TABLE promo_photos ADD COLUMN IF NOT EXISTS stock_limit INTEGER DEFAULT 0");
+  await queryRun("ALTER TABLE promo_photos ADD COLUMN IF NOT EXISTS stock_sold INTEGER DEFAULT 0");
 
   // Pagamentos pendentes via Asaas (PIX / Cartão)
   await queryRun(`

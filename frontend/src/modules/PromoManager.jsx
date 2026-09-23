@@ -11,6 +11,8 @@ export default function PromoManager() {
   const [searching, setSearching] = useState(false);
   const [category, setCategory] = useState('');
   const [promoPrice, setPromoPrice] = useState('');
+  const [promoPriceCard, setPromoPriceCard] = useState('');
+  const [manualName, setManualName] = useState('');
   const [expandedItem, setExpandedItem] = useState(null); // id do item expandido pra ver fotos
   const [photos, setPhotos] = useState({}); // { promoItemId: [photo, ...] }
   const [stockData, setStockData] = useState({}); // { promoItemId: [stock, ...] }
@@ -74,11 +76,31 @@ export default function PromoManager() {
         category: cat,
         display_name: product.name,
         promo_price: promoPrice ? parseFloat(promoPrice) : null,
+        promo_price_card: promoPriceCard ? parseFloat(promoPriceCard) : null,
       });
       setItems(prev => [...prev, item]);
       setSearchQuery('');
       setSearchResults([]);
       setPromoPrice('');
+      setPromoPriceCard('');
+    } catch (e) { alert(e.message); }
+  };
+
+  // Cadastro manual (sem ERP): so nome + categoria + precos; fotos e estoque depois
+  const addManualItem = async () => {
+    if (!manualName.trim()) { alert('Escreva o nome da peca'); return; }
+    try {
+      const item = await api.addPromoItem({
+        ref: '',
+        category: category || 'Geral',
+        display_name: manualName.trim(),
+        promo_price: promoPrice ? parseFloat(promoPrice) : null,
+        promo_price_card: promoPriceCard ? parseFloat(promoPriceCard) : null,
+      });
+      setItems(prev => [...prev, item]);
+      setManualName('');
+      setPromoPrice('');
+      setPromoPriceCard('');
     } catch (e) { alert(e.message); }
   };
 
@@ -155,36 +177,59 @@ export default function PromoManager() {
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
   return (
-    <div style={{ padding: 24, overflowY: 'auto', height: '100%' }}>
-      <h2 style={{ fontSize: 22, fontWeight: 600, color: '#fff', marginBottom: 4 }}>Semana de Oportunidade</h2>
+    <div style={{ padding: 'clamp(12px, 3vw, 24px)', overflowY: 'auto', height: '100%' }}>
+      <h2 style={{ fontSize: 22, fontWeight: 600, color: '#fff', marginBottom: 4 }}>Vitrine da Lê</h2>
       <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 24 }}>
-        Adicione produtos e fotos de cada cor para a Le apresentar aos clientes. {items.filter(i => i.active).length} produto(s) ativo(s).
+        A Le vende SOMENTE o que esta aqui: cadastre a peca com preco a vista e cartao, fotos de cada cor e o estoque. {items.filter(i => i.active).length} peca(s) ativa(s).
       </p>
 
       {/* Busca no ERP */}
       <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 20, marginBottom: 24, border: '1px solid rgba(255,255,255,0.08)' }}>
-        <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
           <input
-            style={{ ...inputStyle, flex: 1 }}
+            style={{ ...inputStyle, flex: '1 1 220px', minWidth: 0 }}
             placeholder="Buscar produto no ERP (nome, SKU, referencia...)"
             value={searchQuery}
             onChange={e => doSearch(e.target.value)}
           />
           <input
-            style={{ ...inputStyle, width: 180 }}
+            style={{ ...inputStyle, flex: '1 1 140px', minWidth: 0 }}
             placeholder="Categoria (ex: Calcas)"
             value={category}
             onChange={e => setCategory(e.target.value)}
           />
           <input
-            style={{ ...inputStyle, width: 140 }}
-            placeholder="Preco promo (R$)"
+            style={{ ...inputStyle, flex: '1 1 110px', minWidth: 0 }}
+            placeholder="A vista R$ (Pix)"
             type="number"
             step="0.01"
             min="0"
             value={promoPrice}
             onChange={e => setPromoPrice(e.target.value)}
           />
+          <input
+            style={{ ...inputStyle, flex: '1 1 110px', minWidth: 0 }}
+            placeholder="Cartao R$ (12x)"
+            type="number"
+            step="0.01"
+            min="0"
+            value={promoPriceCard}
+            onChange={e => setPromoPriceCard(e.target.value)}
+          />
+        </div>
+
+        {/* Cadastro manual, sem ERP */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+          <input
+            style={{ ...inputStyle, flex: '1 1 220px', minWidth: 0 }}
+            placeholder="Ou cadastre direto: nome da peca (ex: Vestido tule azul)"
+            value={manualName}
+            onChange={e => setManualName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addManualItem()}
+          />
+          <button onClick={addManualItem} style={{ ...btnStyle, background: '#1eba8a', color: '#0d1b18', whiteSpace: 'nowrap' }}>
+            Cadastrar sem ERP
+          </button>
         </div>
 
         {searching && <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>Buscando...</p>}
@@ -241,25 +286,27 @@ export default function PromoManager() {
                   {catItems.map(item => (
                     <div key={item.id}>
                       <div style={{
-                        display: 'flex', alignItems: 'center', gap: 12,
+                        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
                         padding: '12px 16px', borderRadius: expandedItem === item.id ? '8px 8px 0 0' : 8,
                         background: item.active ? 'rgba(30,186,138,0.08)' : 'rgba(255,255,255,0.02)',
                         border: `1px solid ${item.active ? 'rgba(30,186,138,0.2)' : 'rgba(255,255,255,0.05)'}`,
                         borderBottom: expandedItem === item.id ? 'none' : undefined,
                         opacity: item.active ? 1 : 0.5,
                       }}>
-                        <div style={{ flex: 1 }}>
+                        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
                           <div style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{item.display_name}</div>
                           <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
-                            Ref: {item.ref}
-                            {item.promo_price ? ` | R$ ${parseFloat(item.promo_price).toFixed(2)}` : ' | Sem preco promo'}
+                            {item.ref ? `Ref: ${item.ref}` : 'Sem ref (manual)'}
+                            {item.promo_price ? ` | A vista R$ ${parseFloat(item.promo_price).toFixed(2)}` : ' | SEM PRECO A VISTA'}
+                            {item.promo_price_card ? ` | Cartao R$ ${parseFloat(item.promo_price_card).toFixed(2)}` : ' | SEM PRECO CARTAO'}
                             {photos[item.id] && ` | ${photos[item.id].length} foto(s)`}
                           </div>
                         </div>
 
                         <input
                           style={{ width: 90, padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 13, textAlign: 'center' }}
-                          placeholder="R$ promo"
+                          placeholder="A vista"
+                          title="Preco a vista (Pix)"
                           type="number"
                           step="0.01"
                           defaultValue={item.promo_price || ''}
@@ -269,6 +316,24 @@ export default function PromoManager() {
                               try {
                                 await api.updatePromoItem(item.id, { promo_price: val });
                                 setItems(prev => prev.map(i => i.id === item.id ? { ...i, promo_price: val } : i));
+                              } catch (err) { alert(err.message); }
+                            }
+                          }}
+                        />
+
+                        <input
+                          style={{ width: 90, padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 13, textAlign: 'center' }}
+                          placeholder="Cartao"
+                          title="Preco no cartao (12x)"
+                          type="number"
+                          step="0.01"
+                          defaultValue={item.promo_price_card || ''}
+                          onBlur={async (e) => {
+                            const val = e.target.value ? parseFloat(e.target.value) : null;
+                            if (val !== (item.promo_price_card ? parseFloat(item.promo_price_card) : null)) {
+                              try {
+                                await api.updatePromoItem(item.id, { promo_price_card: val });
+                                setItems(prev => prev.map(i => i.id === item.id ? { ...i, promo_price_card: val } : i));
                               } catch (err) { alert(err.message); }
                             }
                           }}
@@ -442,7 +507,7 @@ export default function PromoManager() {
 
                             {/* Tabela de estoque */}
                             {(stockData[item.id] || []).length > 0 && (
-                              <div style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                              <div style={{ borderRadius: 6, overflowX: 'auto', border: '1px solid rgba(255,255,255,0.1)' }}>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px 60px 40px', padding: '6px 10px', background: 'rgba(255,255,255,0.06)', fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>
                                   <span>Cor</span><span>Tamanho</span><span>Limite</span><span>Vendido</span><span></span>
                                 </div>
