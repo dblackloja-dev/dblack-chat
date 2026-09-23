@@ -93,9 +93,28 @@ export default function PromoManager() {
   // Tamanhos direto no card da cor (grava na grade cor+tamanho com a cor da foto)
   const [cardSize, setCardSize] = useState({}); // photoId -> tam digitado
   const [cardQty, setCardQty] = useState({});   // photoId -> qtd digitada
+
+  // Chips de tamanho (igual ao ERP): toca pra marcar/desmarcar o tamanho da cor
+  const SIZE_CHIPS = ['PP', 'P', 'M', 'G', 'GG', '36', '38', '40', '42', '44', '46'];
+  const toggleSizeChip = async (item, photo, size, colorRows) => {
+    const existing = colorRows.find(s => (s.size || '').trim().toLowerCase() === size.toLowerCase());
+    try {
+      if (existing) {
+        await api.deletePromoStock(existing.id);
+        setStockData(prev => ({ ...prev, [item.id]: (prev[item.id] || []).filter(x => x.id !== existing.id) }));
+      } else {
+        const qty = parseInt(cardQty[photo.id]) || 1;
+        const s = await api.addPromoStock(item.id, { color: photo.color || '', size, stock_limit: qty });
+        setStockData(prev => {
+          const rest = (prev[item.id] || []).filter(x => !(x.color === s.color && x.size === s.size));
+          return { ...prev, [item.id]: [...rest, s] };
+        });
+      }
+    } catch (e) { alert(e.message); }
+  };
   const addSizeForColor = async (item, photo) => {
     const size = (cardSize[photo.id] || '').trim();
-    const qty = parseInt(cardQty[photo.id]) || 0;
+    const qty = parseInt(cardQty[photo.id]) || 1;
     if (!size) { alert('Escreva o tamanho (ex: M, 40, Unico)'); return; }
     try {
       const s = await api.addPromoStock(item.id, { color: photo.color || '', size, stock_limit: qty });
@@ -560,16 +579,33 @@ export default function PromoManager() {
                                               })}
                                             </div>
                                           )}
-                                          {/* Adicionar tamanho NESTA cor */}
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                                          {/* Chips de tamanho (igual ao ERP): toca pra marcar os tamanhos que tem */}
+                                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 6 }}>
+                                            {SIZE_CHIPS.map(sz => {
+                                              const marcado = colorRows.some(s => (s.size || '').trim().toLowerCase() === sz.toLowerCase());
+                                              return (
+                                                <button key={sz} onClick={() => toggleSizeChip(item, photo, sz, colorRows)}
+                                                  style={{
+                                                    padding: '3px 7px', borderRadius: 5, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                                    border: marcado ? '1px solid #1eba8a' : '1px solid rgba(255,255,255,0.15)',
+                                                    background: marcado ? '#1eba8a' : 'rgba(255,255,255,0.06)',
+                                                    color: marcado ? '#0d1b18' : 'rgba(255,255,255,0.6)',
+                                                  }}>{sz}</button>
+                                              );
+                                            })}
+                                          </div>
+                                          {/* Qtd padrão dos chips + tamanho fora do padrão */}
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
                                             <input
-                                              placeholder="Tam"
+                                              placeholder="Outro"
+                                              title="Tamanho fora do padrao (ex: 48, XGG)"
                                               value={cardSize[photo.id] || ''}
                                               onChange={e => setCardSize(prev => ({ ...prev, [photo.id]: e.target.value }))}
                                               style={{ width: 44, padding: '3px 5px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12 }}
                                             />
                                             <input
                                               placeholder="Qtd" type="number" min="0"
+                                              title="Quantidade usada pelos chips e pelo tamanho manual (padrao 1)"
                                               value={cardQty[photo.id] || ''}
                                               onChange={e => setCardQty(prev => ({ ...prev, [photo.id]: e.target.value }))}
                                               style={{ width: 40, padding: '3px 5px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: 12, textAlign: 'center' }}
