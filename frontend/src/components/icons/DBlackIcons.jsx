@@ -294,7 +294,7 @@ export const SIDEBAR_ICONS = [
   { key: 'conversas',  label: 'Conversas',  Icon: IconConversas  },
   { key: 'lives',      label: 'Lives',      Icon: IconLives      },
   { key: 'contatos',   label: 'Contatos',   Icon: IconContatos   },
-  { key: 'promo',      label: 'Promo',      Icon: IconPromo      },
+  { key: 'promo',      label: 'Vitrine',    Icon: IconPromo      },
   { key: 'respostas',  label: 'Respostas',  Icon: IconRespostas  },
   { key: 'agentes',    label: 'Ag. IA',     Icon: IconAgentesIA  },
   { key: 'relatorios', label: 'Relatórios', Icon: IconRelatorios },
