@@ -393,6 +393,25 @@ async function confirmPendingPayment(chargeId) {
       } catch (e) {
         console.error('⚠️ Erro ao gerar/enviar cupom:', e.message);
       }
+
+      // Agradecimento de despedida depois do comprovante (pedido do dono 29/09)
+      try {
+        const primeiroNome = (pending.customer_name || '').trim().split(/\s+/)[0] || '';
+        const despedida = `${primeiroNome ? `${primeiroNome}, obrigada` : 'Obrigada'} demais pela sua compra! Foi um prazer atender você. Qualquer coisa que precisar, é só me chamar por aqui — estou à disposição 💕`;
+        await wa.sendMessage(pending.customer_phone, despedida, { isBot: true });
+        const despedidaMsgId = genId();
+        await queryRun(
+          "INSERT INTO messages (id, conversation_id, from_me, sender, content, ack, timestamp) VALUES ($1,$2,true,$3,$4,1,NOW())",
+          [despedidaMsgId, pending.conversation_id, 'Lê (IA)', despedida]);
+        if (broadcast) {
+          broadcast('new_message', {
+            conversation: { id: pending.conversation_id, last_message: despedida, last_message_from_me: true },
+            message: { id: despedidaMsgId, conversation_id: pending.conversation_id, from_me: true, sender: 'Lê (IA)', content: despedida, timestamp: new Date().toISOString() },
+          });
+        }
+      } catch (e) {
+        console.error('⚠️ Erro no agradecimento final:', e.message);
+      }
       const displayText = `🎉 Pagamento confirmado — R$ ${total.toFixed(2)}`;
       await queryRun("UPDATE conversations SET last_message = $1, last_message_at = NOW(), last_message_from_me = true WHERE id = $2",
         [displayText, pending.conversation_id]);
