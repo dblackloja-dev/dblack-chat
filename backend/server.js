@@ -29,6 +29,7 @@ const igDm = require('./instagram/dm');
 const igContent = require('./instagram/content');
 const leIg = require('./instagram/le-ig');
 const liveReservations = require('./live/reservations');
+const checkoutSync = require('./checkout-sync');
 
 // Valida que JWT_SECRET foi definido no .env (nunca usar fallback hardcoded)
 if (!process.env.JWT_SECRET) {
@@ -316,6 +317,12 @@ async function confirmPendingPayment(chargeId) {
         [item.quantity || 1, key, item.color || '']);
     }
   }
+
+  // Peças espelhadas do checkout (ck_*): devolve a baixa pro estoque de lá,
+  // que é a fonte de verdade compartilhada com a lojinha e o atendimento humano
+  checkoutSync.reportSale(pending.id, cartItems)
+    .then(ok => { if (ok) checkoutSync.syncNow(); })
+    .catch(e => console.error('⚠️ Baixa no checkout falhou de vez:', e.message));
 
   const total = parseFloat(pending.amount);
   console.log(`✅ Venda da Lê confirmada — R$ ${total.toFixed(2)} (${pending.customer_name || pending.customer_phone})`);
@@ -1753,9 +1760,20 @@ app.post('/api/promo-items', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Peças espelhadas do checkout (id ck_*): o cadastro é no admin da lojinha;
+// editar aqui seria desfeito pelo sync em 2 minutos — melhor barrar com aviso
+function blockMirrored(id, res) {
+  if (checkoutSync.isMirroredId(id)) {
+    res.status(400).json({ error: 'Peça do Checkout — edite no admin da lojinha (o sync atualiza aqui sozinho)' });
+    return true;
+  }
+  return false;
+}
+
 app.put('/api/promo-items/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    if (blockMirrored(req.params.id, res)) return;
     const { category, display_name, active, promo_price, promo_price_card, obs } = req.body;
     const sets = [];
     const params = [];
@@ -1776,6 +1794,7 @@ app.put('/api/promo-items/:id', auth, async (req, res) => {
 app.delete('/api/promo-items/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    if (blockMirrored(req.params.id, res)) return;
     await queryRun("DELETE FROM promo_items WHERE id = $1", [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1792,6 +1811,7 @@ app.get('/api/promo-items/:id/photos', auth, async (req, res) => {
 app.post('/api/promo-items/:id/photos', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    if (blockMirrored(req.params.id, res)) return;
     const { color, image } = req.body; // image = base64 string
     if (!image) return res.status(400).json({ error: 'image (base64) é obrigatório' });
     const id = genId();
@@ -1805,6 +1825,7 @@ app.post('/api/promo-items/:id/photos', auth, async (req, res) => {
 app.put('/api/promo-photos/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    if (blockMirrored(req.params.id, res)) return;
     const { stock_limit } = req.body;
     if (stock_limit !== undefined) {
       await queryRun("UPDATE promo_photos SET stock_limit = $1 WHERE id = $2", [parseInt(stock_limit) || 0, req.params.id]);
@@ -1816,6 +1837,7 @@ app.put('/api/promo-photos/:id', auth, async (req, res) => {
 app.delete('/api/promo-photos/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    if (blockMirrored(req.params.id, res)) return;
     await queryRun("DELETE FROM promo_photos WHERE id = $1", [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1832,6 +1854,7 @@ app.get('/api/promo-items/:id/stock', auth, async (req, res) => {
 app.post('/api/promo-items/:id/stock', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    if (blockMirrored(req.params.id, res)) return;
     const { color, size, stock_limit } = req.body;
     if (!color && !size) return res.status(400).json({ error: 'cor ou tamanho obrigatório' });
     const id = genId();
@@ -1847,6 +1870,7 @@ app.post('/api/promo-items/:id/stock', auth, async (req, res) => {
 app.put('/api/promo-stock/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    if (blockMirrored(req.params.id, res)) return;
     const { stock_limit } = req.body;
     await queryRun("UPDATE promo_stock SET stock_limit = $1 WHERE id = $2", [parseInt(stock_limit) || 0, req.params.id]);
     res.json({ success: true });
@@ -1856,6 +1880,7 @@ app.put('/api/promo-stock/:id', auth, async (req, res) => {
 app.delete('/api/promo-stock/:id', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    if (blockMirrored(req.params.id, res)) return;
     await queryRun("DELETE FROM promo_stock WHERE id = $1", [req.params.id]);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2566,6 +2591,7 @@ async function start() {
   igDm.init({ broadcast });
   await igContent.initTables();
   igContent.start();
+  checkoutSync.start();
   leIg.init({ broadcast });
   // Verifica conexão da Evolution API
   await wa.connect();
