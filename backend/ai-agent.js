@@ -8,6 +8,7 @@
 const { queryAll, queryOne, queryRun } = require('./database');
 const asaas = require('./asaas');
 const erp = require('./erp'); // só leitura: reconhecer Cliente Black pelo CPF
+const igContent = require('./instagram/content'); // mesmo caderninho da Lê do IG (stories/feed indexados)
 require('dotenv').config();
 
 // Dependências injetadas pelo server.js
@@ -159,7 +160,9 @@ QUANDO TRANSFERIR (texto curto + [TRANSFERIR] no final):
 - Se perguntarem se é robô: confirme que é assistente virtual e ofereça passar para a equipe
 - Ao transferir, avise de forma leve que uma das meninas continua por ali mesmo
 
-FOTOS RECEBIDAS: analise a imagem; se for print do Instagram com uma peça, procure a peça correspondente na vitrine (ver_vitrine). Se não achar, transfira.
+FOTOS RECEBIDAS: analise a imagem; se for print do Instagram ou foto de uma peça, use ver_instagram para IDENTIFICAR qual peça é (as artes trazem nome, preço e tamanhos) e ver_vitrine para conferir se ela está à venda com você. Está na vitrine: siga a venda normal. NÃO está: diga o que você sabe da peça pela arte (nome e preço anunciado, sem inventar nada além) e transfira com [TRANSFERIR] já informando qual peça a cliente quer — assim a equipe não precisa perguntar de novo.
+
+CLIENTE CITA O INSTAGRAM ("vi no story", "a blusa do post", "aquela do provador de hoje"): use ver_instagram para saber o que está publicado e descobrir de qual peça ela fala. A regra é a mesma das fotos: identificou e está na vitrine, venda; identificou e não está, informe o que a arte diz e transfira dizendo qual peça é. NUNCA invente preço ou tamanho que não esteja na arte ou na vitrine.
 
 ÁUDIOS: peça com carinho para escrever, que você responde.
 
@@ -170,6 +173,11 @@ const TOOLS = [
   {
     name: 'ver_vitrine',
     description: 'Lista TODAS as peças à venda com preços (à vista e cartão), cores e tamanhos disponíveis. É a única fonte de produtos. Use no começo da conversa de venda e sempre que precisar conferir o que existe.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'ver_instagram',
+    description: 'Mostra o que está publicado no Instagram da loja: stories das últimas 48 horas e posts recentes do feed, com a descrição de cada arte (peça, preço e tamanhos anunciados). Use SEMPRE que a cliente mandar print/foto de story ou citar algo que viu no Instagram, para identificar de qual peça ela fala. É só consulta: a venda continua saindo da vitrine.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -363,6 +371,19 @@ async function executeTool(toolName, toolInput, context) {
       const vitrine = await getVitrine();
       if (vitrine.length === 0) return { resultado: 'A vitrine está vazia no momento. Transfira para a equipe com [TRANSFERIR].' };
       return { pecas: vitrine, total: vitrine.length, instrucao: 'Apresente por texto curto com os DOIS preços. Use enviar_fotos_produto quando a cliente se interessar por uma peça.' };
+    }
+
+    case 'ver_instagram': {
+      try {
+        const contexto = await igContent.getPageContext();
+        return {
+          instagram: contexto,
+          instrucao: 'Use estas descrições para identificar a peça do print ou da citação da cliente. Preço/tamanho anunciado na arte pode ser informado; a VENDA continua saindo só da vitrine (ver_vitrine). Peça identificada que não está na vitrine: informe o que a arte diz e transfira com [TRANSFERIR] dizendo qual peça é.',
+        };
+      } catch (e) {
+        console.error('ver_instagram:', e.message);
+        return { resultado: 'Não consegui consultar o Instagram agora. Se não identificar a peça pela vitrine, transfira com [TRANSFERIR].' };
+      }
     }
 
     case 'mostrar_vitrine': {
