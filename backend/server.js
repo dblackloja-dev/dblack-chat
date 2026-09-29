@@ -293,6 +293,8 @@ async function confirmPendingPayment(chargeId) {
   const pending = await queryOne("SELECT * FROM pending_payments WHERE asaas_charge_id = $1 AND status = 'PENDING'", [chargeId]);
   if (!pending) return false;
   await queryRun("UPDATE pending_payments SET status = 'CONFIRMED', confirmed_at = NOW() WHERE id = $1", [pending.id]);
+  // Venda fechada — nunca mais mandar "Ainda por aqui?" nesta conversa
+  aiAgent.cancelFollowup(pending.conversation_id, { forGood: true });
 
   const cartItems = typeof pending.cart_data === 'string' ? JSON.parse(pending.cart_data) : pending.cart_data;
 

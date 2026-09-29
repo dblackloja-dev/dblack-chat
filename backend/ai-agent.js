@@ -323,17 +323,31 @@ const TOOLS = [
 // ─── Follow-up de 2 minutos: cliente não clicou em nada → oferece atendimento humano ───
 const followupTimers = new Map(); // conversationId → timeout
 const followupSent = new Set();   // conversas que já receberam o aviso (1x por conversa)
+// Cancela o lembrete pendente; forGood=true (venda fechada) impede reagendar na conversa
+function cancelFollowup(conversationId, { forGood = false } = {}) {
+  clearTimeout(followupTimers.get(conversationId));
+  followupTimers.delete(conversationId);
+  if (forGood) {
+    followupSent.add(conversationId);
+    if (followupSent.size > 500) followupSent.clear();
+  }
+}
 function scheduleFollowup(conversationId, customerPhone) {
   if (followupSent.has(conversationId)) return;
   clearTimeout(followupTimers.get(conversationId));
+  const scheduledAt = new Date();
   followupTimers.set(conversationId, setTimeout(async () => {
     followupTimers.delete(conversationId);
     try {
       if (followupSent.has(conversationId)) return;
       const conv = await queryOne("SELECT status, ai_muted FROM conversations WHERE id = $1", [conversationId]);
       if (!conv || conv.status !== 'aguardando' || conv.ai_muted) return;
-      const last = await queryOne("SELECT from_me FROM messages WHERE conversation_id = $1 ORDER BY timestamp DESC LIMIT 1", [conversationId]);
-      if (!last || !last.from_me) return; // cliente respondeu nesse meio tempo
+      // Cliente mandou QUALQUER mensagem depois do agendamento = respondeu, não lembra.
+      // (Checar só a última mensagem falhava: depois da venda a última é sempre da Lê — cupom)
+      const replied = await queryOne(
+        "SELECT id FROM messages WHERE conversation_id = $1 AND from_me = false AND timestamp > $2 LIMIT 1",
+        [conversationId, scheduledAt]);
+      if (replied) return;
       followupSent.add(conversationId);
       if (followupSent.size > 500) followupSent.clear();
       const texto = 'Vi que você não escolheu nenhuma opção 😉 Se preferir, uma das meninas da nossa equipe continua o atendimento por aqui mesmo — é só tocar no botão.';
@@ -816,6 +830,7 @@ async function getConversationHistory(conversationId) {
 // ─── Geração de resposta com Tool Use ───
 async function generateResponse(conversationId, customerMessage, customerName, mediaType, customerPhone) {
   try {
+    cancelFollowup(conversationId); // cliente falou — o lembrete de abandono não vale mais
     const history = await getConversationHistory(conversationId);
 
     let userContent = customerMessage;
@@ -993,4 +1008,4 @@ async function isAgentEnabled() {
   } catch { return false; }
 }
 
-module.exports = { generateResponse, isAgentEnabled, recordMetric, init, getVitrine, getItemVariations };
+module.exports = { generateResponse, isAgentEnabled, recordMetric, init, getVitrine, getItemVariations, cancelFollowup };
