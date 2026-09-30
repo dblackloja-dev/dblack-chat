@@ -915,9 +915,15 @@ async function generateResponse(conversationId, customerMessage, customerName, m
           model: 'claude-sonnet-4-6',
           max_tokens: 800,
           temperature: 0.3,
-          system: SYSTEM_PROMPT + `\n\nAGORA: ${agoraSP()}. ${lojaAberta()
-            ? 'A loja está ABERTA: ao transferir, pode dizer que uma das meninas continua por aqui.'
-            : 'A loja física está FECHADA agora, mas a COMPRA com você funciona a qualquer hora (o Pix confirma sozinho). Só ao TRANSFERIR para a equipe: NUNCA prometa "rapidinho", "já" ou "agora" — diga que as meninas respondem por aqui assim que a loja abrir.'}`,
+          // Prompt caching: o bloco estático (tools + persona) se repete em toda chamada
+          // e em cada volta do loop de tools — cacheado paga 10% do preço. A parte
+          // dinâmica (hora atual) fica num bloco separado, fora do cache.
+          system: [
+            { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: `AGORA: ${agoraSP()}. ${lojaAberta()
+              ? 'A loja está ABERTA: ao transferir, pode dizer que uma das meninas continua por aqui.'
+              : 'A loja física está FECHADA agora, mas a COMPRA com você funciona a qualquer hora (o Pix confirma sozinho). Só ao TRANSFERIR para a equipe: NUNCA prometa "rapidinho", "já" ou "agora" — diga que as meninas respondem por aqui assim que a loja abrir.'}` },
+          ],
           messages: currentMessages,
           tools: TOOLS,
         }),

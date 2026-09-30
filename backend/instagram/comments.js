@@ -31,7 +31,7 @@ const extractMsg = (raw) => {
 // Convite enviado como private reply (abre a conversa no Direct → fluxo completo da Lê)
 const DM_INVITE = 'Oi! Vi seu comentário no post 😉 Me conta aqui o tamanho e a sua cidade que eu te ajudo a garantir a sua!';
 
-function buildSystem(postContext) {
+function buildSystem() {
   return `Você é a Lê, vendedora online da D'Black Store (@d_blackloja), respondendo COMENTÁRIOS PÚBLICOS nos posts do feed do Instagram.
 
 FORMATO (OBRIGATÓRIO): pense dentro de <analise>...</analise> e escreva a resposta pública SOMENTE dentro de <msg>...</msg>. Se não valer a pena responder, escreva <msg>[SKIP]</msg>.
@@ -48,9 +48,7 @@ REGRAS DO COMENTÁRIO PÚBLICO:
 - NUNCA invente preço, promoção, prazo ou estoque; NUNCA peça dados pessoais em público; NUNCA prometa reserva
 - Você não conversa em público: perguntas que pedem conversa (mais de uma troca) vão pro Direct com [DM]
 
-O marcador [DM] faz o sistema mandar uma mensagem no Direct da pessoa convidando ela a continuar por lá — use sempre que a resposta completa não couber no comentário público.
-
-${postContext}`;
+O marcador [DM] faz o sistema mandar uma mensagem no Direct da pessoa convidando ela a continuar por lá — use sempre que a resposta completa não couber no comentário público.`;
 }
 
 async function maybeReplyComment(value) {
@@ -78,7 +76,11 @@ async function maybeReplyComment(value) {
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: content.jsonSafe({
         model: MODEL, max_tokens: 400, temperature: 0.3,
-        system: buildSystem(postContext),
+        // Persona fixa num bloco cacheado; o contexto do post (variável) fica fora
+        system: [
+          { type: 'text', text: buildSystem(), cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: postContext },
+        ],
         messages: [{ role: 'user', content: `Comentário de @${value.from?.username || 'cliente'} no post: "${value.text}"` }],
       }),
       signal: AbortSignal.timeout(45000),

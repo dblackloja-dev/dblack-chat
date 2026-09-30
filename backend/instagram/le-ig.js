@@ -366,19 +366,25 @@ async function generateAndSend(convStale, msg) {
 
     const pageContext = await content.getPageContext();
     const waNumber = (await setting('wa_number', '')).replace(/\D/g, '');
-    let system = buildSystemPrompt(pageContext, waNumber, aberta);
+    const system = buildSystemPrompt(pageContext, waNumber, aberta);
     let storyContext = '';
+    // Parte que muda por conversa fica FORA do bloco cacheado (o prompt base + contexto
+    // da página se repete em toda chamada — prompt caching paga 10% do preço nele)
+    let systemExtra = '';
 
     if (msg?.ig_story_id) {
       await content.ensureStory(msg.ig_story_id);
       const seq = await content.getSequence(msg.ig_story_id);
       if (seq) {
         storyContext = seq.sequence;
-        system += `\n\nATENÇÃO: a última mensagem da cliente é RESPOSTA a um story específico. Abaixo, a sequência de stories daquele horário — o PREÇO das peças do look costuma estar nos stories vizinhos desta lista:\n${seq.sequence}`;
+        systemExtra += `\n\nATENÇÃO: a última mensagem da cliente é RESPOSTA a um story específico. Abaixo, a sequência de stories daquele horário — o PREÇO das peças do look costuma estar nos stories vizinhos desta lista:\n${seq.sequence}`;
       } else {
-        system += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual e pelo horário. Se não tiver certeza do preço, mande para o WhatsApp com [ZAP: ...].`;
+        systemExtra += `\n\nATENÇÃO: a última mensagem da cliente é resposta a um story — a imagem anexada É o story respondido. Identifique a peça pela imagem e procure o item correspondente no CONTEXTO DA PÁGINA pelo visual e pelo horário. Se não tiver certeza do preço, mande para o WhatsApp com [ZAP: ...].`;
       }
     }
+
+    const systemBlocks = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+    if (systemExtra) systemBlocks.push({ type: 'text', text: systemExtra });
 
     const messages = await buildMessages(conv);
 
@@ -386,7 +392,7 @@ async function generateAndSend(convStale, msg) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: content.jsonSafe({ model: MODEL, max_tokens: 1200, temperature: 0.3, system, messages: msgs }),
+        body: content.jsonSafe({ model: MODEL, max_tokens: 1200, temperature: 0.3, system: systemBlocks, messages: msgs }),
         signal: AbortSignal.timeout(60000),
       });
       const json = await res.json().catch(() => ({}));
