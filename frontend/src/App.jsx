@@ -1393,9 +1393,9 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
               </button>
             )}
             {canDelete && (
-              <button onClick={() => { if (confirm('Apagar esta mensagem para todos?')) onDelete?.(msg.id); setShowMenu(false); }}
+              <button onClick={() => { if (confirm('Apagar esta mensagem SÓ DO PAINEL?\n\n⚠️ ATENÇÃO: o cliente CONTINUA vendo a mensagem no WhatsApp dele — a API oficial do WhatsApp não permite apagar pra todos.')) onDelete?.(msg.id); setShowMenu(false); }}
                 style={{ width: 24, height: 24, borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                title="Apagar mensagem">🗑</button>
+                title="Apagar do painel (o cliente continua vendo)">🗑</button>
             )}
           </div>
         )}
