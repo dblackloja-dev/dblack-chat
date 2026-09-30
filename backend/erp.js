@@ -81,7 +81,10 @@ function phoneVariants(phone) {
   return all;
 }
 
-// Busca cliente por telefone (compara whatsapp E phone, normalizados)
+// Busca cliente por telefone (compara whatsapp E phone, normalizados).
+// Com duplicados no mesmo telefone, prefere o cadastro COM CPF (inscrito no
+// Cliente Black) — senão o painel pegava o registro antigo sem CPF e o
+// desconto do programa não aparecia.
 async function findCustomerByPhone(phone) {
   const variants = phoneVariants(phone);
   if (!variants.length) return null;
@@ -89,7 +92,8 @@ async function findCustomerByPhone(phone) {
     `SELECT * FROM customers
      WHERE regexp_replace(COALESCE(whatsapp,''), '[^0-9]', '', 'g') = ANY($1)
         OR regexp_replace(COALESCE(phone,''), '[^0-9]', '', 'g') = ANY($1)
-     ORDER BY created_at LIMIT 1`,
+     ORDER BY (LENGTH(regexp_replace(COALESCE(cpf,''), '[^0-9]', '', 'g')) = 11) DESC, created_at
+     LIMIT 1`,
     [variants]
   );
 }
