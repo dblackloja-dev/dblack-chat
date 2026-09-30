@@ -1333,7 +1333,6 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
   const [dragX, setDragX] = useState(0);
   const touchRef = useRef(null);
   const isDeleted = msg.content === '🚫 Mensagem apagada';
-  const canDelete = isAdmin || isMe;
   const canReply = !!onReply && !isDeleted;
   const canForward = !!onForward && !isDeleted && msg.media_type === 'image' && (msg.media_url || msg.content?.startsWith('/media/'));
   const quotedThumb = quoted?.media_type === 'image' && (quoted.media_url || quoted.content?.startsWith('/media/'))
@@ -1392,11 +1391,8 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M14 9V5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11z"/></svg>
               </button>
             )}
-            {canDelete && (
-              <button onClick={() => { if (confirm('Apagar esta mensagem SÓ DO PAINEL?\n\n⚠️ ATENÇÃO: o cliente CONTINUA vendo a mensagem no WhatsApp dele — a API oficial do WhatsApp não permite apagar pra todos.')) onDelete?.(msg.id); setShowMenu(false); }}
-                style={{ width: 24, height: 24, borderRadius: '50%', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                title="Apagar do painel (o cliente continua vendo)">🗑</button>
-            )}
+            {/* Apagar removido a pedido do dono (30/09): a API oficial do Meta não apaga
+                no celular do cliente, então o botão só criava falsa sensação de apagado */}
           </div>
         )}
         {!isMe && <div style={{ fontSize: 12.8, fontWeight: 700, color: '#1fa855', marginBottom: 2 }}>{msg.sender}</div>}
