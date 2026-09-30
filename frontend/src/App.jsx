@@ -1414,7 +1414,7 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
               </div>
             </div>
             {quotedThumb && (
-              <img src={quotedThumb} alt="" style={{ width: 42, height: 42, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
+              <img src={quotedThumb} alt="" loading="lazy" decoding="async" style={{ width: 42, height: 42, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
                 onError={e => { e.target.style.display = 'none'; }} />
             )}
           </div>
@@ -1426,7 +1426,7 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
         ) : msg.media_type === 'image' ? (
           <div>
             {(msg.media_url || msg.content?.startsWith('/media/') || msg.content?.startsWith('http')) && (
-              <img src={mediaUrl(msg.media_url || msg.content.split('|')[0])} alt=""
+              <img src={mediaUrl(msg.media_url || msg.content.split('|')[0])} alt="" loading="lazy" decoding="async"
                 style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4, cursor: 'pointer' }}
                 onClick={() => onImageClick?.(mediaUrl(msg.media_url || msg.content.split('|')[0]))}
                 onError={e => { e.target.style.display = 'none'; }} />
@@ -1435,8 +1435,9 @@ function MessageBubble({ msg, quoted, onQuoteClick, highlight, onImageClick, onD
           </div>
         ) : msg.media_type === 'video' && (msg.media_url || msg.content?.startsWith('/media/')) ? (
           <div>
-            <video src={mediaUrl(msg.media_url || msg.content.split('|')[0])} controls
-              style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 6, marginBottom: 4 }}
+            {/* preload="none": vídeo de story do IG tem 10-25MB — sem isso, abrir a conversa baixava TODOS de uma vez e travava o painel */}
+            <video src={mediaUrl(msg.media_url || msg.content.split('|')[0])} controls preload="none"
+              style={{ maxWidth: '100%', maxHeight: 300, minHeight: 120, minWidth: 180, borderRadius: 6, marginBottom: 4, background: '#000' }}
               onError={e => { e.target.style.display = 'none'; }} />
             <div style={{ fontSize: 13, color: '#111b21' }}>{msg.content?.includes('|') ? msg.content.split('|')[1] : (msg.content?.startsWith('http') || msg.content?.startsWith('/') ? '' : msg.content)}</div>
           </div>

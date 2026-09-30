@@ -109,6 +109,33 @@ app.get('/privacidade', (req, res) => {
 const mediaCache = new Map();
 const MEDIA_CACHE_MAX = 100; // máx 100 itens
 const MEDIA_CACHE_TTL = 600000; // 10 min
+const MEDIA_CACHE_ITEM_MAX = 2 * 1024 * 1024; // só cacheia até 2MB — vídeo de story tem 10-25MB e estourava a RAM
+
+// Responde com suporte a Range (206): o <video> baixa só o pedaço que precisa em vez do arquivo
+// inteiro — sem isso, abrir uma conversa do IG cheia de stories disparava dezenas de downloads de 10-25MB
+function sendMedia(req, res, buffer, mime) {
+  res.set('Content-Type', mime);
+  res.set('Cache-Control', 'public, max-age=604800, immutable');
+  res.set('Accept-Ranges', 'bytes');
+  const range = req.headers.range;
+  if (range) {
+    const m = /bytes=(\d*)-(\d*)/.exec(range);
+    if (m) {
+      const start = m[1] ? parseInt(m[1], 10) : 0;
+      const end = m[2] ? Math.min(parseInt(m[2], 10), buffer.length - 1) : buffer.length - 1;
+      if (start >= buffer.length || start > end) {
+        res.set('Content-Range', `bytes */${buffer.length}`);
+        return res.status(416).end();
+      }
+      res.status(206);
+      res.set('Content-Range', `bytes ${start}-${end}/${buffer.length}`);
+      res.set('Content-Length', end - start + 1);
+      return res.end(buffer.subarray(start, end + 1));
+    }
+  }
+  res.set('Content-Length', buffer.length);
+  res.end(buffer);
+}
 
 app.get('/media/:id', async (req, res) => {
   try {
@@ -117,27 +144,23 @@ app.get('/media/:id', async (req, res) => {
     // Verifica cache em memória
     const cached = mediaCache.get(id);
     if (cached && Date.now() < cached.expires) {
-      res.set('Content-Type', cached.mime);
-      res.set('Content-Length', cached.buffer.length);
-      res.set('Cache-Control', 'public, max-age=604800, immutable'); // 7 dias (mídia não muda)
-      return res.send(cached.buffer);
+      return sendMedia(req, res, cached.buffer, cached.mime);
     }
 
     const file = await queryOne("SELECT mime_type, data FROM media_files WHERE id = $1", [id]);
     if (!file) return res.status(404).send('Not found');
     const buffer = Buffer.from(file.data, 'base64');
 
-    // Salva no cache (limpa se muito grande)
-    if (mediaCache.size >= MEDIA_CACHE_MAX) {
-      const oldest = mediaCache.keys().next().value;
-      mediaCache.delete(oldest);
+    // Salva no cache (só mídia pequena; limpa se muito grande)
+    if (buffer.length <= MEDIA_CACHE_ITEM_MAX) {
+      if (mediaCache.size >= MEDIA_CACHE_MAX) {
+        const oldest = mediaCache.keys().next().value;
+        mediaCache.delete(oldest);
+      }
+      mediaCache.set(id, { buffer, mime: file.mime_type, expires: Date.now() + MEDIA_CACHE_TTL });
     }
-    mediaCache.set(id, { buffer, mime: file.mime_type, expires: Date.now() + MEDIA_CACHE_TTL });
 
-    res.set('Content-Type', file.mime_type);
-    res.set('Content-Length', buffer.length);
-    res.set('Cache-Control', 'public, max-age=604800, immutable');
-    res.send(buffer);
+    sendMedia(req, res, buffer, file.mime_type);
   } catch (e) { res.status(500).send('Error'); }
 });
 
