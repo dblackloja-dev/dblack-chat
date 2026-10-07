@@ -29,6 +29,27 @@ async function fetchPhotoBase64(photoId) {
   return buf.toString('base64');
 }
 
+// Manda um cupom pra fila da Elgin i8 da loja (agente de impressão do checkout).
+// Idempotente por sourceId; falha de impressão nunca pode derrubar a venda — só loga.
+async function sendPrintJob(sourceId, payload) {
+  if (!enabled()) return false;
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    try {
+      const res = await fetch(`${CHECKOUT_URL}/api/integration/print-job`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-integration-token': CHECKOUT_TOKEN },
+        body: JSON.stringify({ source_id: String(sourceId), payload }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) { console.log(`🖨️ Cupom ${payload.code} na fila de impressão da loja`); return true; }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      if (tentativa === 3) { console.error(`🖨️ Cupom ${payload.code} NÃO foi pra impressão:`, e.message); return false; }
+      await new Promise(r => setTimeout(r, 2000 * tentativa));
+    }
+  }
+}
+
 let running = false;
 async function syncNow() {
   if (!enabled() || running) return;
@@ -160,4 +181,4 @@ function start() {
   console.log('🛒 Sync checkout→vitrine ligado (a cada 2 min)');
 }
 
-module.exports = { start, syncNow, reportSale, isMirroredId, enabled };
+module.exports = { start, syncNow, reportSale, isMirroredId, enabled, sendPrintJob };

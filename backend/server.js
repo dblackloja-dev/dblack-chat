@@ -352,6 +352,44 @@ async function confirmPendingPayment(chargeId) {
   const total = parseFloat(pending.amount);
   console.log(`✅ Venda da Lê confirmada — R$ ${total.toFixed(2)} (${pending.customer_name || pending.customer_phone})`);
 
+  // Cupom na Elgin i8 da loja, igual pedido do checkout (fire-and-forget)
+  try {
+    const taxaImpr = parseFloat(pending.taxa_entrega) || 0;
+    const tipoImpr = pending.tipo_entrega || 'retirada';
+    const cidadeImpr = cartItems.find(i => i.cidade)?.cidade || '';
+    checkoutSync.sendPrintJob(`le_${pending.id}`, {
+      code: 'LE-' + String(pending.id).slice(-6).toUpperCase(),
+      paid_at: new Date().toISOString(),
+      items: cartItems.map(i => ({
+        qty: i.quantity || 1,
+        name: i.name || 'Peça',
+        color: i.color || '',
+        size: i.size && i.size !== 'Único' ? i.size : '',
+        price: parseFloat(i.price ?? i.price_pix ?? 0),
+      })),
+      delivery_fee: taxaImpr,
+      total,
+      payment_method: pending.payment_method,
+      delivery_type: tipoImpr === 'retirada' ? 'retirada' : 'entrega',
+      pickup_store: cartItems.find(i => i.loja)?.loja || '',
+      address: tipoImpr === 'retirada' ? null : {
+        street: tipoImpr === 'correios' ? 'CORREIOS — endereco vem pelo formulario' : 'MOTOBOY — endereco vem pelo formulario',
+        city: cidadeImpr,
+      },
+      customer_name: pending.customer_name || 'Cliente WhatsApp',
+      customer_phone: pending.customer_phone || '',
+    }).catch(() => {});
+  } catch (e) { console.error('🖨️ Falha ao montar cupom de impressão da Lê:', e.message); }
+
+  // Cupom de campanha Cliente Black: marca o resgate no ERP (1 uso) só com pagamento confirmado
+  if (pending.coupon_code) {
+    erp.erpQuery(
+      `UPDATE coupons SET redeemed_at = NOW(), redeemed_sale_id = $2 WHERE upper(code) = upper($1) AND redeemed_at IS NULL RETURNING code`,
+      [pending.coupon_code, 'le:' + pending.id])
+      .then(rows => console.log(`🎟️ Cupom ${pending.coupon_code} (venda da Lê ${pending.id}): ${rows.length > 0 ? 'resgatado' : 'JÁ USADO (verificar)'}`))
+      .catch(e => console.error(`🎟️ Falha ao resgatar cupom ${pending.coupon_code}:`, e.message));
+  }
+
   // Confirmação + resumo + próximo passo pra cliente
   if (wa.connected && pending.customer_phone) {
     try {
@@ -391,7 +429,7 @@ async function confirmPendingPayment(chargeId) {
           cupom: 'LE-' + String(pending.id).slice(-6).toUpperCase(),
           items,
           subtotal: subtotal + descontoBlack,
-          discount: descontoBlack,
+          discount: descontoBlack + (parseFloat(pending.coupon_value) || 0),
           taxa_entrega: taxaEntrega,
           tipo_entrega: pending.tipo_entrega || 'retirada',
           total,
@@ -2140,10 +2178,16 @@ app.post('/api/erp/discount-auth/:id/cancel', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Valida cupom de campanha Cliente Black enquanto a atendente digita
+app.post('/api/erp/coupon-check', auth, async (req, res) => {
+  try { res.json(await erp.checkCampaignCoupon(req.body || {})); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Finalizar venda e enviar cupom via WhatsApp
 app.post('/api/erp/sales', auth, async (req, res) => {
   try {
-    const { store_id, customer_id, customer_phone, customer_name, items, payment_method, discount, discount_type, discount_label, discount_auth_by } = req.body;
+    const { store_id, customer_id, customer_phone, customer_name, items, payment_method, discount, discount_type, discount_label, discount_auth_by, coupon_code } = req.body;
     if (!items?.length) return res.status(400).json({ error: 'Carrinho vazio' });
 
     // Usa o nome que veio do frontend (pushName do WhatsApp) ou busca no ERP
@@ -2167,6 +2211,7 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       discount_type: discount_type || 'fixed',
       discount_label: discount_label || '',
       discount_auth_by: discount_auth_by || '',
+      coupon_code: coupon_code || '',
     });
 
     // Registra no dblack-entregas conforme o tipo escolhido pelo vendedor.
@@ -2223,6 +2268,30 @@ app.post('/api/erp/sales', auth, async (req, res) => {
         if (!r.ok) console.error(`[Embalagem] dblack-entregas respondeu ${r.status} para venda ${sale.cupom}`);
       }).catch(err => console.error('[Embalagem] Falha ao registrar venda', sale.cupom, '-', err.message));
     }
+
+    // Cupom na Elgin i8 da loja, igual pedido do checkout (fire-and-forget)
+    try {
+      checkoutSync.sendPrintJob(`chat_${sale.id}`, {
+        code: sale.cupom,
+        paid_at: new Date().toISOString(),
+        items: items.map(i => ({
+          qty: i.quantity || 1,
+          name: i.name || i.product_name || i.description || 'Peça',
+          color: i.color || '',
+          size: i.size && i.size !== 'Único' ? i.size : '',
+          price: parseFloat(i.price) || 0,
+        })),
+        delivery_fee: 0,
+        total: sale.total,
+        payment_method: payment_method === 'pix' ? 'pix' : (payment_method || 'pix'),
+        delivery_type: tipoEntrega,
+        pickup_store: lojaRetirada || '',
+        pickup_code: codigoRetirada || '',
+        address: tipoEntrega === 'retirada' ? null : { street: 'Venda do chat — endereco na embalagem', city: '' },
+        customer_name: customerDisplayName,
+        customer_phone: customer_phone || '',
+      }).catch(() => {});
+    } catch (e) { console.error('🖨️ Falha ao montar cupom de impressão da venda:', e.message); }
 
     // Gera cupom como imagem e texto
     const receiptBuffer = generateReceiptImage(sale, req.user.name, customerDisplayName);
@@ -2440,6 +2509,36 @@ app.post('/api/vip/broadcast/:id/retry', auth, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
     const result = await vip.retryBroadcast(req.params.id, req.body || {});
     res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Broadcast de CUPOM de campanha Cliente Black (cupons gerados no ERP) ───
+// dryRun por padrão: mostra alvos e a mensagem de exemplo. Só envia com send:true.
+// Idempotente (sent_at no ERP) — rodar de novo só pega quem ainda não recebeu.
+app.post('/api/cb/coupons/broadcast', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { campaign, send = false, limit = 0, message = '', template = '' } = req.body || {};
+    if (!send) return res.json(await clienteBlack.couponBroadcast({ campaign, send: false, limit, message }));
+    const dry = await clienteBlack.couponBroadcast({ campaign, send: false, limit, message });
+    // dispara em background (1,2s por envio — centenas de alvos levam minutos)
+    clienteBlack.couponBroadcast({ campaign, send: true, limit, message, template })
+      .then((r) => console.log('🎟️ Broadcast cupom finalizado:', JSON.stringify(r)))
+      .catch((e) => console.error('🎟️ Broadcast cupom falhou:', e.message));
+    res.json({ started: true, targets: dry.targets, note: 'Acompanhe pelo relatório de cupons no ERP (sent_at) e pelos logs.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 2ª passada: template aprovado pra quem ficou fora da janela de 24h na 1ª passada
+app.post('/api/cb/coupons/template-sweep', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas admin' });
+    const { campaign, template, send = false, limit = 0 } = req.body || {};
+    if (!send) return res.json(await clienteBlack.couponTemplateSweep({ campaign, template, send: false, limit }));
+    clienteBlack.couponTemplateSweep({ campaign, template, send: true, limit })
+      .then((r) => console.log('🎟️ Template sweep finalizado:', JSON.stringify(r)))
+      .catch((e) => console.error('🎟️ Template sweep falhou:', e.message));
+    res.json({ started: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
