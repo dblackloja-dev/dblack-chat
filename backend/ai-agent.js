@@ -145,6 +145,7 @@ FLUXO DE VENDA:
 10. Peça o CPF ("para gerar o pagamento preciso do seu CPF")
 11. Assim que ela mandar o CPF, use consultar_cliente_black: se ela for do programa, comemore em UMA frase as vantagens (nível, desconto à vista, cashback e saldo). No Pix, o desconto do nível dela é aplicado AUTOMATICAMENTE pelo sistema no fechamento — você NUNCA calcula desconto por conta própria; se finalizar_venda mostrar desconto_cliente_black, conte pra ela o valor economizado. Se não for do programa, não comente nada
 12. finalizar_venda — o QR Code do Pix com copia-e-cola (ou o link do cartão) é enviado automaticamente
+13. CUPOM DE CAMPANHA: se a cliente mencionar um código de cupom (formato tipo BLK20-X7K4), passe o código EXATO no campo cupom do finalizar_venda. O cupom só vale no Pix, substitui o desconto de nível e o sistema valida tudo sozinho — você NUNCA calcula o desconto. Se finalizar_venda devolver erro de cupom, explique o motivo exato à cliente (ex: já usado, vencido, valor mínimo). Se mostrar desconto_cupom, comemore contando quanto ela economizou
 13. Avise que assim que o pagamento confirmar ela recebe a confirmação por aqui
 
 REGRA DE OURO — PREÇOS: cada peça tem DOIS preços: à vista no Pix e no cartão em até 12x sem juros. Sempre apresente os dois: "R$79,90 à vista no Pix ou R$88,90 em até 12x sem juros no cartão". NUNCA invente preço, tamanho ou estoque: use SEMPRE o que as ferramentas retornarem. Se a ferramenta diz que tem, TEM; se diz que não tem, NÃO TEM.
@@ -314,6 +315,7 @@ const TOOLS = [
         tipo_entrega: { type: 'string', enum: ['entrega', 'retirada'], description: '"retirada" = grátis na loja (exige loja_retirada) | "entrega" = em casa (exige cidade; o sistema decide motoboy R$7 ou Correios R$25)' },
         loja_retirada: { type: 'string', enum: ['São Domingos das Dores', 'Divino', 'São João do Manhuaçu'], description: 'Loja escolhida pela cliente (obrigatório na retirada)' },
         cidade: { type: 'string', description: 'Cidade da cliente (obrigatório na entrega)' },
+        cupom: { type: 'string', description: 'Código de cupom de campanha que a cliente informou (ex: BLK20-X7K4). Só vale no Pix. Passe EXATAMENTE como a cliente escreveu.' },
       },
       required: ['forma_pagamento', 'cpf', 'tipo_entrega'],
     },
@@ -683,7 +685,7 @@ async function executeTool(toolName, toolInput, context) {
     }
 
     case 'finalizar_venda': {
-      const { forma_pagamento, cpf, tipo_entrega, cidade, loja_retirada } = toolInput;
+      const { forma_pagamento, cpf, tipo_entrega, cidade, loja_retirada, cupom } = toolInput;
       const cart = getCart(conversationId);
       if (cart.items.length === 0) return { erro: 'Carrinho vazio. Adicione itens antes de finalizar.' };
 
@@ -730,6 +732,16 @@ async function executeTool(toolName, toolInput, context) {
           }
         } catch (e) { console.error('⚠️ Cliente Black no fechamento:', e.message); }
 
+        // Cupom de campanha (ex: BLK20): valida no ERP; substitui o desconto de nível, só Pix
+        let couponOk = null;
+        if (String(cupom || '').trim()) {
+          const subPix = Math.round(cart.items.reduce((s, i) => s + i.price_pix * i.quantity, 0) * 100) / 100;
+          const chk = await erp.checkCampaignCoupon({ code: cupom, customer_phone: customerPhone, subtotal: subPix, payment_method: forma_pagamento === 'pix' ? 'pix' : 'credito' });
+          if (!chk.valid) return { erro: `Cupom não aplicado: ${chk.error} Explique o motivo exato à cliente e pergunte se quer seguir sem o cupom.` };
+          couponOk = chk;
+          loyalty = null; // cupom substitui o desconto de nível
+        }
+
         const priceOf = (i) => {
           if (forma_pagamento !== 'pix') return i.price_card;
           if (loyalty) {
@@ -742,7 +754,8 @@ async function executeTool(toolName, toolInput, context) {
         const descontoBlack = loyalty
           ? Math.round(cart.items.reduce((s, i) => s + (i.price_pix - priceOf(i)) * i.quantity, 0) * 100) / 100
           : 0;
-        const total = subtotal + taxaEntrega;
+        const couponValue = couponOk ? Math.round(subtotal * couponOk.pct) / 100 : 0;
+        const total = Math.max(0, subtotal - couponValue) + taxaEntrega;
         const descricao = cart.items.map(i => `${i.name} x${i.quantity}`).join(', ') + (taxaEntrega > 0 ? ` + ${tipoFinal === 'correios' ? 'Correios' : 'Entrega'}` : '');
 
         const asaasCustomer = await asaas.findOrCreateCustomer(customerName || 'Cliente WhatsApp', customerPhone, cpf);
@@ -758,9 +771,9 @@ async function executeTool(toolName, toolInput, context) {
         const paymentId = deps.genId();
         const cartData = cart.items.map(i => ({ ...i, price: priceOf(i), cidade: cidade || '', loja: loja_retirada || '' }));
         await queryRun(
-          `INSERT INTO pending_payments (id, conversation_id, customer_phone, customer_name, asaas_charge_id, asaas_customer_id, payment_method, amount, cart_data, tipo_entrega, taxa_entrega)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-          [paymentId, conversationId, customerPhone || '', customerName || 'Cliente WhatsApp', charge.chargeId, asaasCustomer.id, forma_pagamento, total, JSON.stringify(cartData), tipoFinal || 'retirada', taxaEntrega]);
+          `INSERT INTO pending_payments (id, conversation_id, customer_phone, customer_name, asaas_charge_id, asaas_customer_id, payment_method, amount, cart_data, tipo_entrega, taxa_entrega, coupon_code, coupon_value)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [paymentId, conversationId, customerPhone || '', customerName || 'Cliente WhatsApp', charge.chargeId, asaasCustomer.id, forma_pagamento, total, JSON.stringify(cartData), tipoFinal || 'retirada', taxaEntrega, couponOk ? couponOk.code : null, couponValue]);
 
         // Envia QR Code do PIX ou link de pagamento via WhatsApp
         if (deps.wa?.connected && customerPhone) {
@@ -795,6 +808,7 @@ async function executeTool(toolName, toolInput, context) {
           sucesso: true,
           aguardando_pagamento: true,
           subtotal: fmt(subtotal),
+          ...(couponValue > 0 ? { desconto_cupom: `${fmt(couponValue)} (cupom ${couponOk.code}, ${couponOk.pct}% à vista — substitui o desconto de nível)` } : {}),
           ...(descontoBlack > 0 ? { desconto_cliente_black: `${fmt(descontoBlack)} (nível ${loyalty.tier}, ${loyalty.discount_pct}% à vista aplicado automaticamente)` } : {}),
           entrega: tipoFinal === 'retirada'
             ? `Retirada grátis na loja de ${loja_retirada}`

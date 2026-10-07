@@ -247,6 +247,9 @@ async function initDB() {
       confirmed_at TIMESTAMPTZ
     )
   `);
+  // Cupom de campanha Cliente Black usado na venda da Lê (resgate no ERP ao confirmar)
+  await queryRun(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS coupon_code TEXT`);
+  await queryRun(`ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS coupon_value NUMERIC(10,2) NOT NULL DEFAULT 0`);
 
   // Estoque promocional por cor + tamanho
   await queryRun(`

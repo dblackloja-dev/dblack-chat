@@ -13,7 +13,8 @@ const TAG_COLOR = '#FFD740';
 
 const fmtBRL = (n) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
 const onlyDigits = (s) => String(s || '').replace(/\D/g, '');
-const firstName = (s) => String(s || '').trim().split(' ')[0] || '';
+// split por qualquer whitespace: nome com quebra de linha quebrava o template da Meta (#132018)
+const firstName = (s) => String(s || '').trim().split(/\s+/)[0] || '';
 const brDate = (iso) => String(iso || '').slice(0, 10).split('-').reverse().join('/');
 
 function normalize(text) {
@@ -69,6 +70,9 @@ const DEFAULTS = {
   cb_birth_ok: 'Anotado, {nome}! 🎁 Seu cadastro Cliente Black está completo.',
   cb_birth_skip: 'Tudo bem! Se mudar de ideia é só mandar *cliente black* de novo. 😉',
   cb_template: '', // nome de template UTILITY aprovado p/ fallback fora da janela de 24h (vazio = sem fallback)
+  // Broadcast de cupom de campanha: {nome} {codigo} {pct} {minimo} {periodo} vêm do cupom no ERP
+  cb_coupon_message: '🖤 {nome}, chegou um presente EXCLUSIVO pra quem é Cliente Black!\n\nVocê ganhou *{pct}% OFF à vista (PIX ou dinheiro)* em compras acima de {minimo} — vale só {periodo}.\n\n🎟️ Seu cupom (é só seu, 1 uso): *{codigo}*\n\nVale nas lojas físicas e online. Na loja é só falar o código no caixa. Corre! 🏃🖤',
+  cb_coupon_template: '', // template MARKETING aprovado ({{1}}=nome, {{2}}=código) p/ quem está fora da janela de 24h
 };
 async function getSetting(key) {
   const row = await queryOne('SELECT value FROM chat_settings WHERE key = $1', [key]).catch(() => null);
@@ -404,6 +408,131 @@ async function processEvents() {
   }
 }
 
+// ─── Broadcast do cupom de campanha (lê a tabela coupons do ERP) ───
+// Idempotente: só alvos com sent_at IS NULL; marca sent_at após cada envio OK.
+// dry-run por padrão — só envia com send:true explícito.
+function renderCouponMsg(tpl, r) {
+  const dm = (s) => String(s || '').slice(5, 10).split('-').reverse().join('/'); // DD/MM
+  const periodo = r.valid_from === r.valid_to ? `HOJE (${dm(r.valid_from)})` : `${dm(r.valid_from)} e ${dm(r.valid_to)}`;
+  const nm = firstName(r.name);
+  return String(tpl)
+    .replaceAll('{nome}', /[a-zà-ú]/i.test(nm) ? nm : 'cliente')
+    .replaceAll('{codigo}', r.code)
+    .replaceAll('{pct}', String(Number(r.pct) || 0))
+    .replaceAll('{minimo}', fmtBRL(r.min_subtotal))
+    .replaceAll('{periodo}', periodo);
+}
+
+let couponBusy = false;
+async function couponBroadcast({ campaign, send = false, limit = 0, message = '', template = '' } = {}) {
+  if (!campaign) throw new Error('campaign é obrigatório');
+  if (couponBusy) throw new Error('Já existe um broadcast de cupom em andamento');
+  const rows = await erpQuery(`
+    SELECT cp.code, cp.pct, cp.min_subtotal, cp.valid_from, cp.valid_to, c.name, c.whatsapp
+    FROM coupons cp JOIN customers c ON c.id = cp.customer_id
+    WHERE cp.campaign = $1 AND cp.sent_at IS NULL AND cp.redeemed_at IS NULL
+      AND COALESCE(c.whatsapp,'') <> '' AND COALESCE(c.whatsapp_opt_out,0) = 0 AND c.tags NOT LIKE '%Interno%'
+    ORDER BY c.name ${Number(limit) > 0 ? 'LIMIT ' + Number(limit) : ''}`, [campaign]);
+  const msgTpl = message || (await getSetting('cb_coupon_message'));
+  const sample = rows[0] || { name: 'Cliente', code: 'BLK20-TESTE', pct: 20, min_subtotal: 83.7, valid_from: '2026-10-02', valid_to: '2026-10-03' };
+
+  if (!send) {
+    return {
+      dryRun: true, targets: rows.length,
+      sampleMessage: renderCouponMsg(msgTpl, sample),
+      preview: rows.slice(0, 10).map((r) => ({ name: r.name, phone: normPhone(r.whatsapp), code: r.code })),
+    };
+  }
+
+  couponBusy = true;
+  const out = { sent: 0, viaTemplate: 0, failed: 0, errors: [] };
+  try {
+    for (const r of rows) {
+      const digits = normPhone(r.whatsapp);
+      if (digits.length < 10) { out.failed++; out.errors.push({ name: r.name, code: r.code, error: 'telefone inválido' }); continue; }
+      const phone = '55' + digits;
+      const text = renderCouponMsg(msgTpl, r);
+      try {
+        try {
+          await deps.wa.sendMessage(phone, text, { isBot: true });
+        } catch (err) {
+          // fora da janela de 24h → template MARKETING aprovado ({{1}}=nome, {{2}}=código)
+          const m = String(err?.message || err);
+          const tpl = template || (await getSetting('cb_coupon_template'));
+          if (tpl && /131047|re-?engagement|24 ?h/i.test(m) && typeof deps.wa.sendTemplate === 'function') {
+            await deps.wa.sendTemplate(phone, tpl, 'pt_BR', [
+              { type: 'body', parameters: [{ type: 'text', text: firstName(r.name) || 'cliente' }, { type: 'text', text: r.code }] },
+            ]);
+            out.viaTemplate++;
+          } else throw err;
+        }
+        await erpQuery(`UPDATE coupons SET sent_at = NOW() WHERE code = $1`, [r.code]);
+        out.sent++;
+        const conv = await queryOne(
+          `SELECT * FROM conversations WHERE regexp_replace(phone,'[^0-9]','','g') IN ($1,$2) ORDER BY created_at DESC LIMIT 1`,
+          [phone, digits]).catch(() => null);
+        if (conv) await saveBotMessage(conv.id, text);
+      } catch (err) {
+        out.failed++;
+        out.errors.push({ name: r.name, code: r.code, error: String(err?.message || err).slice(0, 200) });
+      }
+      await new Promise((rs) => setTimeout(rs, 1200)); // ritmo do vip.js — nunca rajada
+    }
+  } finally {
+    couponBusy = false;
+  }
+  console.log(`🎟️ Broadcast cupom ${campaign}: ${out.sent} enviados (${out.viaTemplate} via template), ${out.failed} falhas`);
+  return out;
+}
+
+// ─── Segunda passada: quem está FORA da janela de 24h recebe pelo TEMPLATE ───
+// A Meta aceita a mensagem normal e recusa DEPOIS (webhook "Re-engagement"), então a
+// 1ª passada marca sent_at mas não entrega pra quem está fora da janela. Aqui:
+// alvo = cupom já "enviado" sem 2ª passada; tem msg recebida nas últimas 24h → pula
+// (1ª passada entregou); senão → manda o template. Idempotente via template_sent_at.
+async function couponTemplateSweep({ campaign, template, send = false, limit = 0 } = {}) {
+  if (!campaign) throw new Error('campaign é obrigatório');
+  if (!template) throw new Error('template é obrigatório');
+  await erpQuery(`ALTER TABLE coupons ADD COLUMN IF NOT EXISTS template_sent_at TIMESTAMP`).catch(() => {});
+  const rows = await erpQuery(`
+    SELECT cp.code, c.name, c.whatsapp
+    FROM coupons cp JOIN customers c ON c.id = cp.customer_id
+    WHERE cp.campaign = $1 AND cp.sent_at IS NOT NULL AND cp.template_sent_at IS NULL AND cp.redeemed_at IS NULL
+      AND COALESCE(c.whatsapp,'') <> '' AND COALESCE(c.whatsapp_opt_out,0) = 0 AND c.tags NOT LIKE '%Interno%'
+    ORDER BY c.name ${Number(limit) > 0 ? 'LIMIT ' + Number(limit) : ''}`, [campaign]);
+
+  const out = { targets: rows.length, inWindowSkipped: 0, sent: 0, failed: 0, errors: [], dryRun: !send };
+  for (const r of rows) {
+    const digits = normPhone(r.whatsapp);
+    if (digits.length < 10) { out.failed++; continue; }
+    const phone = '55' + digits;
+    // mensagem recebida nas últimas 24h = janela aberta = a 1ª passada entregou
+    const inWindow = await queryOne(
+      `SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE regexp_replace(c.phone,'[^0-9]','','g') IN ($1,$2) AND m.from_me = false
+         AND m.timestamp > NOW() - interval '24 hours' LIMIT 1`, [phone, digits]).catch(() => null);
+    if (inWindow) {
+      out.inWindowSkipped++;
+      if (send) await erpQuery(`UPDATE coupons SET template_sent_at = NOW() WHERE code = $1`, [r.code]);
+      continue;
+    }
+    if (!send) { out.sent++; continue; } // dry-run: só conta quem receberia
+    try {
+      await deps.wa.sendTemplate(phone, template, 'pt_BR', [
+        { type: 'body', parameters: [{ type: 'text', text: /[a-zà-ú]/i.test(firstName(r.name)) ? firstName(r.name) : 'cliente' }, { type: 'text', text: r.code }] },
+      ]);
+      await erpQuery(`UPDATE coupons SET template_sent_at = NOW() WHERE code = $1`, [r.code]);
+      out.sent++;
+    } catch (err) {
+      out.failed++;
+      out.errors.push({ name: r.name, code: r.code, error: String(err?.message || err).slice(0, 200) });
+    }
+    await new Promise((rs) => setTimeout(rs, 1200));
+  }
+  if (send) console.log(`🎟️ Template sweep ${campaign}: ${out.sent} templates, ${out.inWindowSkipped} já na janela, ${out.failed} falhas`);
+  return out;
+}
+
 async function ensureTables() {
   await queryRun(`CREATE TABLE IF NOT EXISTS cb_signup_state (
     phone TEXT PRIMARY KEY, state TEXT NOT NULL, tries INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW()
@@ -418,4 +547,4 @@ function init(d) {
   console.log('🖤 Cliente Black: fluxo de adesão + worker de mensagens ativos');
 }
 
-module.exports = { init, handleIncoming, processEvents, isValidCPF, renderEvent, parseBirthDate, startSignup };
+module.exports = { init, handleIncoming, processEvents, isValidCPF, renderEvent, parseBirthDate, startSignup, couponBroadcast, couponTemplateSweep };

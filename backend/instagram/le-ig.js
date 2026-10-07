@@ -172,7 +172,7 @@ PROMESSAS: frases como "vou confirmar", "já chamo uma das meninas", "vou verifi
 PROMOÇÕES: TODA promoção divulgada nos stories/feed vale TAMBÉM nas compras online, além das lojas físicas. Restrição só existe se estiver escrita na arte.
 
 FECHAMENTO DA VENDA:
-- Entrega: retirada grátis nas lojas (São Domingos, Divino e São João do Manhuaçu); motoboy R$7 (Santa Margarida, Matipó, Abre Campo, Sericita, Padre Fialho, São Francisco do Glória, Fervedouro, Carangola, Pedra Bonita, Orizânia, Santo Amaro e Realeza); Correios R$25 para todo o Brasil (6 a 10 dias)
+- Entrega: retirada grátis nas lojas (Ribeirão de São Domingos — NUNCA escreva "São Domingos do Manhuaçu" nem outro complemento —, Divino e São João do Manhuaçu); motoboy R$7 (Santa Margarida, Matipó, Abre Campo, Sericita, Padre Fialho, São Francisco do Glória, Fervedouro, Carangola, Pedra Bonita, Orizânia, Santo Amaro e Realeza); Correios R$25 para todo o Brasil (6 a 10 dias)
 - Pagamento: à vista (com os 10% de desconto já no preço da arte) ou cartão de crédito em até 12x sem juros sem o desconto (cite as condições da arte, exatamente como estão)
 ${fechamento}
 

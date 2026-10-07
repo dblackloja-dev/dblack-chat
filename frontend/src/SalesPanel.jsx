@@ -4,12 +4,11 @@ import api from './api';
 // Cores (mesmas do App.jsx)
 const C = { bg:"#0A0A0C", s1:"#111114", s2:"#18181C", s3:"#1F1F24", brd:"rgba(255,215,64,0.08)", brdH:"rgba(255,215,64,0.2)", gold:"#FFD740", goldD:"#FF8F00", txt:"#EEEEF0", dim:"rgba(255,255,255,0.75)", grn:"#00E676", red:"#FF5252", blu:"#40C4FF", wa:"#25D366" };
 
+// Débito e Crediário retirados a pedido do dono (02/10) — chat vende só PIX, Dinheiro e Crédito
 const payMethods = [
   { id: 'pix', label: 'PIX' },
   { id: 'dinheiro', label: 'Dinheiro' },
   { id: 'credito', label: 'Crédito' },
-  { id: 'debito', label: 'Débito' },
-  { id: 'crediario', label: 'Crediário' },
 ];
 
 const lojasRetirada = ['Divino', 'São João', 'São Domingos'];
@@ -58,6 +57,9 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   const [discountScope, setDiscountScope] = useState('sale'); // 'sale' ou 'item'
   const [itemDiscounts, setItemDiscounts] = useState({}); // { product_id: valor }
   const [showDiscountPanel, setShowDiscountPanel] = useState(false);
+  // Cupom de campanha Cliente Black (ex: BLK20-X7K4) — validado no servidor
+  const [coupon, setCoupon] = useState('');
+  const [couponChk, setCouponChk] = useState(null); // {valid, pct, value} ou {valid:false, error}
   const [customer, setCustomer] = useState(null);
   // Ajuste do desconto BLACK (igual ao PDV): só nível BLACK, valor em R$, teto 30%
   const [tierOverride, setTierOverride] = useState(null);
@@ -187,7 +189,22 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   // assim como promoção ativa na config do programa.
   const loyal = customer?.loyalty;
   const cashPayment = payment === 'pix' || payment === 'dinheiro';
-  const tierActive = !!(loyal?.enrolled && cashPayment && !loyal.promo_active && discountVal === 0 && (loyal.discount_pct || 0) > 0);
+
+  // Cupom de campanha: valida no servidor enquanto digita; substitui o desconto de nível
+  useEffect(() => {
+    const code = coupon.trim();
+    if (!code || subPagavel <= 0) { setCouponChk(null); return; }
+    const t = setTimeout(() => {
+      api.checkCoupon({ code, customer_id: customer?.id || null, customer_phone: customerPhone, subtotal: subPagavel, payment_method: payment, manual_discount: discountVal })
+        .then(setCouponChk).catch(() => setCouponChk(null));
+    }, 350);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coupon, subPagavel, payment, customer?.id, customerPhone, discountVal]);
+  const couponOn = !!(couponChk?.valid && coupon.trim());
+  const couponVal = couponOn ? Math.round(subPagavel * couponChk.pct) / 100 : 0;
+
+  const tierActive = !!(loyal?.enrolled && cashPayment && !loyal.promo_active && discountVal === 0 && !couponOn && (loyal.discount_pct || 0) > 0);
   const tierAutoVal = tierActive ? Math.round(subPagavel * loyal.discount_pct) / 100 : 0;
   // Só o nível BLACK permite ajustar o desconto (peça anunciada com preço arredondado);
   // GOLD/DIAMOND ficam travados nos 12/14%. Teto de 30% contra erro de digitação.
@@ -204,7 +221,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     setTierOverride(v); setTierEditing(false);
   };
 
-  const total = Math.max(0, subPagavel - discountVal - tierVal);
+  const total = Math.max(0, subPagavel - discountVal - tierVal - couponVal);
 
   // Bloqueio por limite (só desconto MANUAL conta — o de nível é do programa e tem regra própria)
   const discountPct = subPagavel > 0 ? (discountVal / subPagavel) * 100 : 0;
@@ -280,6 +297,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         discount_type: 'fixed',
         discount_label: tierVal > 0 ? `Cliente Black ${loyal.tier} ${tierPctShown}% à vista${tierOverrideOn ? ' (ajustado)' : ''}` : discountLabel,
         discount_auth_by: (discountVal > 0 && discountAuthValid) ? discountAuth.by : '',
+        coupon_code: couponOn ? coupon.trim() : '',
         tipo_entrega: tipoEntrega,
         loja_retirada: tipoEntrega === 'retirada' ? lojaRetirada : null,
       });
@@ -287,6 +305,8 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       setCart([]);
       setDiscount('');
       setItemDiscounts({});
+      setCoupon('');
+      setCouponChk(null);
       setDiscountScope('sale');
       setShowDiscountPanel(false);
       setTierOverride(null);
@@ -439,12 +459,13 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
 
   const discountSection = (
     <div style={{ marginBottom: 8 }}>
-      <button onClick={() => setShowDiscountPanel(!showDiscountPanel)}
-        style={{ ...btnOutline, width: '100%', textAlign: 'center', padding: isMobile ? '11px 6px' : '6px', fontSize: isMobile ? 13 : 11, color: discountVal > 0 ? C.red : C.dim, borderColor: discountVal > 0 ? 'rgba(255,82,82,.3)' : C.brd }}>
-        {discountVal > 0 ? `🏷️ Desconto: -R$ ${discountVal.toFixed(2)}` : '🏷️ Adicionar desconto'}
+      <button disabled={couponOn} onClick={() => { if (!couponOn) setShowDiscountPanel(!showDiscountPanel); }}
+        title={couponOn ? 'Cupom aplicado — não acumula com desconto manual' : undefined}
+        style={{ ...btnOutline, width: '100%', textAlign: 'center', padding: isMobile ? '11px 6px' : '6px', fontSize: isMobile ? 13 : 11, color: discountVal > 0 ? C.red : C.dim, borderColor: discountVal > 0 ? 'rgba(255,82,82,.3)' : C.brd, opacity: couponOn ? 0.5 : 1, cursor: couponOn ? 'not-allowed' : 'pointer' }}>
+        {couponOn ? '🏷️ Desconto bloqueado (cupom aplicado)' : discountVal > 0 ? `🏷️ Desconto: -R$ ${discountVal.toFixed(2)}` : '🏷️ Adicionar desconto'}
       </button>
 
-      {showDiscountPanel && (
+      {showDiscountPanel && !couponOn && (
         <div style={{ marginTop: 6, background: C.s3, borderRadius: 8, padding: 10, border: `1px solid ${C.brd}` }}>
           {/* Escopo: venda toda ou por produto */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
@@ -494,6 +515,28 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     </div>
   );
 
+  // Cupom de campanha (ex: BLK20-X7K4) — o código chegou no WhatsApp do cliente
+  const couponSection = (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: isMobile ? 12 : 10, color: C.dim, fontWeight: 700, letterSpacing: .5 }}>🎟️</span>
+        <input style={{ ...inputStyle, marginBottom: 0, flex: 1, padding: isMobile ? '10px 12px' : '6px 8px', fontSize: isMobile ? 16 : 12, letterSpacing: 1, textTransform: 'uppercase',
+          borderColor: couponOn ? 'rgba(0,230,118,.5)' : (coupon.trim() && couponChk && !couponChk.valid) ? 'rgba(255,183,77,.5)' : undefined }}
+          placeholder="Cupom (ex: BLK20-X7K4)" value={coupon} onChange={e => setCoupon(e.target.value.toUpperCase())} />
+        {coupon.trim() && (
+          <button onClick={() => { setCoupon(''); setCouponChk(null); }}
+            style={{ padding: isMobile ? '8px 10px' : '4px 8px', borderRadius: 6, border: `1px solid ${C.brd}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontSize: isMobile ? 12 : 10, fontFamily: 'inherit' }}>✕</button>
+        )}
+      </div>
+      {couponOn && (
+        <div style={{ marginTop: 4, fontSize: isMobile ? 12 : 11, color: C.grn, fontWeight: 700 }}>✓ Cupom {couponChk.code}: −{couponChk.pct}% (−R$ {couponVal.toFixed(2)}) — substitui o desconto de nível</div>
+      )}
+      {coupon.trim() && couponChk && !couponChk.valid && (
+        <div style={{ marginTop: 4, fontSize: isMobile ? 11 : 10, color: '#ffb74d' }}>{couponChk.error || 'Cupom inválido'}</div>
+      )}
+    </div>
+  );
+
   const paymentSection = (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 6 : 4, marginBottom: 10 }}>
       {payMethods.map(pm => (
@@ -517,6 +560,12 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       {discountVal > 0 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.red, marginBottom: 4 }}>
           <span style={{ fontSize: 10 }}>{discountLabel || 'Desconto'}:</span><span>- R$ {discountVal.toFixed(2)}</span>
+        </div>
+      )}
+      {couponVal > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+          <span style={{ fontSize: 10, color: C.grn, fontWeight: 700 }}>🎟️ Cupom {couponChk.code} ({couponChk.pct}%):</span>
+          <span style={{ color: C.grn, fontWeight: 700 }}>- R$ {couponVal.toFixed(2)}</span>
         </div>
       )}
       {promo43Val > 0 && (
@@ -631,6 +680,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
                   <div style={{ padding: '0 8px 12px' }}>
                     {deliverySection}
                     {discountSection}
+                    {couponSection}
                     {paymentSection}
                   </div>
                 )}
@@ -654,6 +704,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
             <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.brd}`, background: C.s2, flexShrink: 0 }}>
               {deliverySection}
               {discountSection}
+              {couponSection}
               {paymentSection}
               {totalsSection}
             </div>

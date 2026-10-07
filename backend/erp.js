@@ -159,13 +159,50 @@ function generateCupom() {
   return `CNF-${h}${m}${s}`;
 }
 
+// Cupom de campanha Cliente Black (tabela coupons do ERP) — mesma régua do PDV:
+// só à vista, acima do mínimo, 1 uso, dono do cupom tem que ser o cliente da venda.
+async function checkCampaignCoupon({ code, customer_id, customer_phone, subtotal, payment_method, manual_discount }) {
+  if (Number(manual_discount) > 0) return { valid: false, error: 'Cupom não acumula com desconto manual — remova o desconto para aplicar.' };
+  const cp = await erpQueryOne('SELECT * FROM coupons WHERE upper(code) = upper($1)', [String(code || '').trim()]);
+  if (!cp) return { valid: false, error: 'Cupom não encontrado — confira o código.' };
+  if (cp.redeemed_at) return { valid: false, error: 'Cupom já utilizado.' };
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  if (today < cp.valid_from) return { valid: false, error: `Cupom válido a partir de ${cp.valid_from.split('-').reverse().join('/')}.` };
+  if (today > cp.valid_to) return { valid: false, error: `Cupom venceu em ${cp.valid_to.split('-').reverse().join('/')}.` };
+  if (!['pix', 'dinheiro'].includes(String(payment_method || '').toLowerCase()))
+    return { valid: false, error: 'Cupom só vale à vista (PIX/Dinheiro).' };
+  const sub = Math.round((Number(subtotal) || 0) * 100) / 100;
+  if (sub <= Number(cp.min_subtotal))
+    return { valid: false, error: `Cupom vale para compras acima de R$ ${Number(cp.min_subtotal).toFixed(2).replace('.', ',')}.` };
+  let custId = customer_id || null;
+  if (!custId && customer_phone) {
+    const c = await findCustomerByPhone(customer_phone);
+    custId = c?.id || null;
+  }
+  if (!custId || custId !== cp.customer_id)
+    return { valid: false, error: 'Cupom pertence a outro cliente — confira o WhatsApp da conversa.' };
+  const pct = Number(cp.pct) || 0;
+  return { valid: true, code: cp.code, pct, value: Math.round(sub * pct) / 100 };
+}
+
 // Cria venda no ERP
-async function createSale({ store_id, customer_id, customer_name, customer_phone, seller_name, seller_id, items, payment_method, discount, discount_type, discount_label, discount_auth_by }) {
+async function createSale({ store_id, customer_id, customer_name, customer_phone, seller_name, seller_id, items, payment_method, discount, discount_type, discount_label, discount_auth_by, coupon_code }) {
   const saleId = require('crypto').randomUUID();
   const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   // Desconto já vem calculado do frontend (mesma lógica do ERP)
-  const discountValue = parseFloat(discount) || 0;
-  const discountLabelFinal = discount_label || (discountValue > 0 ? `R$ ${discountValue.toFixed(2)}` : '');
+  let discountValue = parseFloat(discount) || 0;
+  let discountLabelFinal = discount_label || (discountValue > 0 ? `R$ ${discountValue.toFixed(2)}` : '');
+
+  // Cupom de campanha: revalida aqui (fonte da verdade) — o trigger do ERP marca o resgate.
+  // Não acumula com desconto manual (manual_discount bloqueia a validação).
+  let couponPct = 0, couponValue = 0, couponFinal = '';
+  if (String(coupon_code || '').trim()) {
+    const chk = await checkCampaignCoupon({ code: coupon_code, customer_id, customer_phone, subtotal, payment_method, manual_discount: discountValue });
+    if (!chk.valid) { const e = new Error(chk.error); e.status = 409; throw e; }
+    couponPct = chk.pct; couponValue = chk.value; couponFinal = chk.code;
+    discountValue = Math.round((discountValue + couponValue) * 100) / 100;
+    discountLabelFinal = [discountLabelFinal, `Cupom ${couponFinal} ${couponPct}%`].filter(Boolean).join(' + ');
+  }
   const total = Math.max(0, subtotal - discountValue);
 
   // Abre o caixa automaticamente se estiver fechado
@@ -180,11 +217,11 @@ async function createSale({ store_id, customer_id, customer_name, customer_phone
 
   const cupom = generateCupom();
 
-  // Cria a venda (usando colunas reais do ERP)
+  // Cria a venda (usando colunas reais do ERP) — coupon_code aciona o resgate no trigger
   await erpRun(
-    `INSERT INTO sales (id, store_id, date, customer, customer_id, customer_whatsapp, seller, seller_id, items, subtotal, discount, discount_label, discount_auth_by, total, payment, payments, status, cupom, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'Concluída', $17, NOW())`,
-    [saleId, store_id, today, customer_name || 'Cliente WhatsApp', customer_id || '', customer_phone || '', seller_name, seller_id || '', JSON.stringify(items), subtotal, discountValue, discountLabelFinal, discount_auth_by || '', total, payLabels[payment_method] || payment_method, payments, cupom]
+    `INSERT INTO sales (id, store_id, date, customer, customer_id, customer_whatsapp, seller, seller_id, items, subtotal, discount, discount_label, discount_auth_by, total, payment, payments, status, cupom, coupon_code, coupon_discount_pct, coupon_discount_value, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'Concluída', $17, $18, $19, $20, NOW())`,
+    [saleId, store_id, today, customer_name || 'Cliente WhatsApp', customer_id || '', customer_phone || '', seller_name, seller_id || '', JSON.stringify(items), subtotal, discountValue, discountLabelFinal, discount_auth_by || '', total, payLabels[payment_method] || payment_method, payments, cupom, couponFinal, couponPct, couponValue]
   );
 
   // Deduz estoque
@@ -244,4 +281,4 @@ async function getProductVariants(ref, storeId = 'loja4') {
   );
 }
 
-module.exports = { searchProducts, getProductStock, getStores, findCustomerByPhone, loyaltySummary, createSale, ensureCashOpen, findUser, listUsers, erpQuery, erpQueryOne, getProductsByRefs, getProductVariants };
+module.exports = { searchProducts, getProductStock, getStores, findCustomerByPhone, loyaltySummary, createSale, checkCampaignCoupon, ensureCashOpen, findUser, listUsers, erpQuery, erpQueryOne, getProductsByRefs, getProductVariants };
