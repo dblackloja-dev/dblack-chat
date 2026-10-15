@@ -610,6 +610,50 @@ app.get('/api/webhook/meta', (req, res) => {
   res.sendStatus(403);
 });
 
+// ─── Black (assistente pessoal do dono) ───
+// Mensagens vindas dos números do dono NÃO entram no painel/fluxo de clientes:
+// o payload da Meta é repassado inteiro pro serviço da Black, que responde
+// direto pela mesma Cloud API. BLACK_NUMBERS vazio desativa o desvio.
+const BLACK_WEBHOOK_URL = process.env.BLACK_WEBHOOK_URL || '';
+const BLACK_WEBHOOK_TOKEN = process.env.BLACK_WEBHOOK_TOKEN || '';
+// Número canônico: só dígitos e sem o nono dígito (wa_id da Meta costuma vir sem o 9)
+const blackCanon = (n) => {
+  n = String(n || '').replace(/\D/g, '');
+  return n.startsWith('55') && n.length === 13 && n[4] === '9' ? n.slice(0, 4) + n.slice(5) : n;
+};
+const BLACK_NUMBERS = (process.env.BLACK_NUMBERS || '').split(',').map(blackCanon).filter(Boolean);
+
+function metaWaMessages(body) {
+  const msgs = [];
+  for (const entry of body?.entry || [])
+    for (const change of entry.changes || [])
+      msgs.push(...(change.value?.messages || []));
+  return msgs;
+}
+
+// Só desvia se TODAS as mensagens do payload forem do dono (na prática a Meta manda 1 por chamada)
+function isBlackPayload(body) {
+  if (!BLACK_WEBHOOK_URL || !BLACK_NUMBERS.length || body?.object === 'instagram') return false;
+  const msgs = metaWaMessages(body);
+  return msgs.length > 0 && msgs.every(m => BLACK_NUMBERS.includes(blackCanon(m.from)));
+}
+
+async function forwardToBlack(body) {
+  for (let i = 0; i < 3; i++) {
+    try {
+      const r = await fetch(BLACK_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-webhook-token': BLACK_WEBHOOK_TOKEN },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (r.ok) return;
+      console.error(`[black] repasse falhou (${r.status}): ${(await r.text()).slice(0, 200)}`);
+    } catch (e) { console.error(`[black] repasse erro (tentativa ${i + 1}/3):`, e.message); }
+    await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+  }
+}
+
 app.post('/api/webhook/meta', async (req, res) => {
   // Eventos do Instagram (live commerce) chegam no mesmo endpoint, com object === 'instagram'
   if (req.body?.object === 'instagram') {
@@ -618,6 +662,10 @@ app.post('/api/webhook/meta', async (req, res) => {
     return;
   }
   res.sendStatus(200); // responde rápido — Meta reenvia se demorar
+  if (isBlackPayload(req.body)) {
+    forwardToBlack(req.body).catch(err => console.error('[black]', err));
+    return; // mensagem do dono: não cria conversa nem aparece pras atendentes
+  }
   try {
     await wa.processWebhook(req.body);
   } catch (e) { console.error('Webhook Meta erro:', e.message); }
