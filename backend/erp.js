@@ -37,7 +37,7 @@ async function searchProducts(term) {
   const like = `%${term}%`;
   return erpQuery(
     `SELECT p.id, p.sku, p.name, p.brand, p.category, p.size, p.color,
-            p.price, p.cost, p.ean, p.ref,
+            p.price, p.price_avista, p.cost, p.ean, p.ref,
             COALESCE(SUM(s.quantity), 0) AS total_stock
      FROM products p
      LEFT JOIN stock s ON s.product_id = p.id
@@ -197,7 +197,15 @@ async function createSale({ store_id, customer_id, customer_name, customer_phone
   // Não acumula com desconto manual (manual_discount bloqueia a validação).
   let couponPct = 0, couponValue = 0, couponFinal = '';
   if (String(coupon_code || '').trim()) {
-    const chk = await checkCampaignCoupon({ code: coupon_code, customer_id, customer_phone, subtotal, payment_method, manual_discount: discountValue });
+    // Ofertas (products.price_avista > 0) têm preço fixo — ficam FORA da base do cupom
+    let couponBase = subtotal;
+    const ids = items.map(i => i.product_id).filter(Boolean);
+    if (ids.length) {
+      const offers = await erpQuery('SELECT id FROM products WHERE id = ANY($1) AND price_avista > 0', [ids]);
+      const offSet = new Set(offers.map(r => r.id));
+      couponBase = items.reduce((s, i) => s + (offSet.has(i.product_id) ? 0 : i.price * i.quantity), 0);
+    }
+    const chk = await checkCampaignCoupon({ code: coupon_code, customer_id, customer_phone, subtotal: couponBase, payment_method, manual_discount: discountValue });
     if (!chk.valid) { const e = new Error(chk.error); e.status = 409; throw e; }
     couponPct = chk.pct; couponValue = chk.value; couponFinal = chk.code;
     discountValue = Math.round((discountValue + couponValue) * 100) / 100;

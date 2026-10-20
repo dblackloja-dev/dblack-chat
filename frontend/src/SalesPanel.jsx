@@ -122,6 +122,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         name: product.name,
         sku: product.sku,
         price: parseFloat(product.price),
+        price_avista: parseFloat(product.price_avista) || 0,
         quantity: 1,
         total_stock: parseInt(product.total_stock),
       }];
@@ -138,7 +139,11 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   };
 
   // Cálculos (mesma lógica do ERP)
-  const subtotal = cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+  // Ofertas (2 preços): pix/dinheiro cobra price_avista; cartão cobra price.
+  // Preço FIXO — oferta fica fora de QUALQUER desconto (manual, nível, cupom, Leve4).
+  const payAvista = payment === 'pix' || payment === 'dinheiro';
+  const cartEff = cart.map(i => (i.price_avista > 0 ? { ...i, offer: true, price: payAvista ? i.price_avista : i.price } : i));
+  const subtotal = cartEff.reduce((sum, i) => sum + (i.price * i.quantity), 0);
 
   // Leve 4 Pague 3: o brinde NÃO é desconto — sai da conta da venda (vira item de R$0
   // no registro, baixando estoque) e qualquer desconto % incide só sobre o valor pago.
@@ -147,7 +152,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   let promo43Val = 0, promo43Free = 0, promo43Hint = 0;
   if (promo43On && cart.length > 0) {
     const byPrice = {};
-    cart.forEach(i => { const k = (Math.round(i.price * 100) / 100).toFixed(2); byPrice[k] = (byPrice[k] || 0) + i.quantity; });
+    cartEff.forEach(i => { if (i.offer) return; const k = (Math.round(i.price * 100) / 100).toFixed(2); byPrice[k] = (byPrice[k] || 0) + i.quantity; });
     Object.entries(byPrice).forEach(([price, qty]) => {
       const free = Math.floor(qty / 4);
       if (free > 0) { promo43Free += free; promo43Val += free * (+price); }
@@ -156,20 +161,23 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     promo43Val = Math.round(Math.min(promo43Val, subtotal) * 100) / 100;
   }
   const subPagavel = Math.max(0, Math.round((subtotal - promo43Val) * 100) / 100);
+  // Base de desconto: tudo MENOS as ofertas (elas têm preço fixo)
+  const offerSub = cartEff.reduce((s, i) => s + (i.offer ? i.price * i.quantity : 0), 0);
+  const subDesc = Math.max(0, Math.round((subPagavel - offerSub) * 100) / 100);
 
   let discountVal = 0;
   let discountLabel = '';
 
   if (discountScope === 'sale' && parseFloat(discount || 0) > 0) {
     if (discountType === 'percent') {
-      discountVal = subPagavel * parseFloat(discount) / 100;
+      discountVal = subDesc * parseFloat(discount) / 100;
       discountLabel = `${discount}% na venda toda`;
     } else {
       discountVal = parseFloat(discount);
       discountLabel = `R$ ${parseFloat(discount).toFixed(2)} na venda toda`;
     }
   } else if (discountScope === 'item') {
-    const activeItems = cart.filter(i => (itemDiscounts[i.product_id] || 0) > 0);
+    const activeItems = cartEff.filter(i => (itemDiscounts[i.product_id] || 0) > 0 && !i.offer);
     activeItems.forEach(i => {
       const val = itemDiscounts[i.product_id] || 0;
       if (discountType === 'percent') {
@@ -182,7 +190,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
       discountLabel = `desconto em ${activeItems.length === 1 ? activeItems[0].name : activeItems.length + ' produtos'}`;
     }
   }
-  discountVal = Math.min(discountVal, subPagavel);
+  discountVal = Math.min(discountVal, subDesc);
 
   // Cliente Black: desconto de nível automático à vista (PIX/Dinheiro), mesma
   // regra do PDV — desconto manual conta como promo e ZERA o desconto de nível,
@@ -193,26 +201,26 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   // Cupom de campanha: valida no servidor enquanto digita; substitui o desconto de nível
   useEffect(() => {
     const code = coupon.trim();
-    if (!code || subPagavel <= 0) { setCouponChk(null); return; }
+    if (!code || subDesc <= 0) { setCouponChk(null); return; }
     const t = setTimeout(() => {
-      api.checkCoupon({ code, customer_id: customer?.id || null, customer_phone: customerPhone, subtotal: subPagavel, payment_method: payment, manual_discount: discountVal })
+      api.checkCoupon({ code, customer_id: customer?.id || null, customer_phone: customerPhone, subtotal: subDesc, payment_method: payment, manual_discount: discountVal })
         .then(setCouponChk).catch(() => setCouponChk(null));
     }, 350);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coupon, subPagavel, payment, customer?.id, customerPhone, discountVal]);
+  }, [coupon, subDesc, payment, customer?.id, customerPhone, discountVal]);
   const couponOn = !!(couponChk?.valid && coupon.trim());
-  const couponVal = couponOn ? Math.round(subPagavel * couponChk.pct) / 100 : 0;
+  const couponVal = couponOn ? Math.round(subDesc * couponChk.pct) / 100 : 0;
 
   const tierActive = !!(loyal?.enrolled && cashPayment && !loyal.promo_active && discountVal === 0 && !couponOn && (loyal.discount_pct || 0) > 0);
-  const tierAutoVal = tierActive ? Math.round(subPagavel * loyal.discount_pct) / 100 : 0;
+  const tierAutoVal = tierActive ? Math.round(subDesc * loyal.discount_pct) / 100 : 0;
   // Só o nível BLACK permite ajustar o desconto (peça anunciada com preço arredondado);
   // GOLD/DIAMOND ficam travados nos 12/14%. Teto de 30% contra erro de digitação.
   const tierEditable = tierActive && loyal.tier === 'BLACK';
-  const tierMaxEdit = Math.round(subPagavel * 30) / 100;
+  const tierMaxEdit = Math.round(subDesc * 30) / 100;
   const tierOverrideOn = tierEditable && tierOverride > 0;
-  const tierVal = tierOverrideOn ? Math.min(tierOverride, tierMaxEdit, subPagavel) : tierAutoVal;
-  const tierPctShown = subPagavel > 0 && tierVal > 0 ? Math.round(tierVal / subPagavel * 1000) / 10 : 0;
+  const tierVal = tierOverrideOn ? Math.min(tierOverride, tierMaxEdit, subDesc) : tierAutoVal;
+  const tierPctShown = subDesc > 0 && tierVal > 0 ? Math.round(tierVal / subDesc * 1000) / 10 : 0;
 
   const applyTierEdit = () => {
     const v = Math.round((parseFloat(String(tierEditVal).replace(',', '.')) || 0) * 100) / 100;
@@ -224,7 +232,7 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   const total = Math.max(0, subPagavel - discountVal - tierVal - couponVal);
 
   // Bloqueio por limite (só desconto MANUAL conta — o de nível é do programa e tem regra própria)
-  const discountPct = subPagavel > 0 ? (discountVal / subPagavel) * 100 : 0;
+  const discountPct = subDesc > 0 ? (discountVal / subDesc) * 100 : 0;
   const discountAuthValid = discountAuth && discountVal <= discountAuth.value + 0.001;
   const discountBlocked = discountLimit > 0 && discountPct > discountLimit + 0.001 && !discountAuthValid;
 
@@ -268,11 +276,11 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
     setFinishing(true);
     try {
       // Leve 4 Pague 3: brinde vira item de R$0 (baixa estoque, fora da conta e do desconto)
-      let saleItems = cart.map(i => ({ product_id: i.product_id, name: i.name, sku: i.sku, price: i.price, quantity: i.quantity }));
+      let saleItems = cartEff.map(i => ({ product_id: i.product_id, name: i.name, sku: i.sku, price: i.price, quantity: i.quantity }));
       if (promo43Free > 0) {
         const freeLeft = {};
         const byPrice = {};
-        cart.forEach(i => { const k = (Math.round(i.price * 100) / 100).toFixed(2); byPrice[k] = (byPrice[k] || 0) + i.quantity; });
+        cartEff.forEach(i => { if (i.offer) return; const k = (Math.round(i.price * 100) / 100).toFixed(2); byPrice[k] = (byPrice[k] || 0) + i.quantity; });
         Object.entries(byPrice).forEach(([p, q]) => { const f = Math.floor(q / 4); if (f > 0) freeLeft[p] = f; });
         const out = [];
         for (const it of saleItems) {
@@ -394,7 +402,9 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
             </div>
             {/* Preço e estoque */}
             <div style={{ textAlign: 'right', flexShrink: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 14, color: C.grn }}>R$ {parseFloat(p.price).toFixed(2)}</div>
+              {parseFloat(p.price_avista) > 0
+                ? <div style={{ fontWeight: 800, fontSize: 13, color: C.grn }}>🔥 R$ {parseFloat(p.price_avista).toFixed(2)}<div style={{ fontSize: 9, color: C.dim, fontWeight: 600 }}>à vista / R$ {parseFloat(p.price).toFixed(2)} cartão</div></div>
+                : <div style={{ fontWeight: 800, fontSize: 14, color: C.grn }}>R$ {parseFloat(p.price).toFixed(2)}</div>}
               <div style={{ fontSize: 10, color: parseInt(p.total_stock) > 0 ? C.dim : C.red }}>
                 Est: {p.total_stock}
               </div>
@@ -413,12 +423,13 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         <div style={{ padding: 30, textAlign: 'center', color: C.dim, fontSize: 12 }}>Carrinho vazio — {isMobile ? 'busque um produto na aba Produtos' : 'clique em um produto para adicionar'}</div>
       )}
 
-      {cart.map(item => (
+      {cartEff.map(item => (
         <div key={item.product_id} style={{ padding: '10px', borderRadius: 8, border: `1px solid ${C.brd}`, marginBottom: 6, background: C.s2 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
               <div style={{ fontSize: 10, color: C.dim }}>R$ {item.price.toFixed(2)} cada</div>
+              {item.offer && <div style={{ fontSize: 9, color: '#FF8A65', fontWeight: 700 }}>🔥 OFERTA — preço fixo {payAvista ? 'à vista' : 'cartão'} (sem desconto)</div>}
             </div>
             <button style={{ ...btnMini, padding: isMobile ? '9px 14px' : '6px 12px' }} onClick={() => removeFromCart(item.product_id)}>🗑</button>
           </div>
@@ -491,13 +502,15 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
 
           {discountScope === 'item' && cart.length > 0 && (
             <div style={{ background: C.s2, borderRadius: 8, padding: '6px 8px' }}>
-              {cart.map(i => (
+              {cartEff.map(i => (
                 <div key={i.product_id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <span style={{ flex: 1, fontSize: isMobile ? 12 : 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.name}</span>
-                  <input style={{ ...inputStyle, marginBottom: 0, width: isMobile ? 84 : 60, padding: isMobile ? '8px' : '4px 6px', fontSize: isMobile ? 16 : 11, textAlign: 'right' }}
+                  <span style={{ flex: 1, fontSize: isMobile ? 12 : 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{i.offer ? '🔥 ' : ''}{i.name}</span>
+                  {i.offer
+                    ? <span style={{ fontSize: 9, color: '#FF8A65', fontWeight: 700 }}>preço fixo</span>
+                    : <><input style={{ ...inputStyle, marginBottom: 0, width: isMobile ? 84 : 60, padding: isMobile ? '8px' : '4px 6px', fontSize: isMobile ? 16 : 11, textAlign: 'right' }}
                     type="number" inputMode="decimal" placeholder="0" value={itemDiscounts[i.product_id] || ''}
                     onChange={e => setItemDiscounts(prev => ({ ...prev, [i.product_id]: parseFloat(e.target.value) || 0 }))} />
-                  <span style={{ fontSize: 10, color: C.dim }}>{discountType === 'percent' ? '%' : 'R$'}</span>
+                  <span style={{ fontSize: 10, color: C.dim }}>{discountType === 'percent' ? '%' : 'R$'}</span></>}
                 </div>
               ))}
             </div>
