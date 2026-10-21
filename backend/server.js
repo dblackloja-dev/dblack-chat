@@ -2773,6 +2773,30 @@ app.get('/api/live/r/:token', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Venda nova paga no CHECKOUT → WhatsApp do dono (mesmo número do relatório diário da Lê,
+// chat_settings 'daily_report_phone'). Autentica com o mesmo token do webhook Asaas,
+// igual ao /api/live/r/:token/paid. Fora da janela 24h a Meta pode recusar depois (best-effort).
+app.post('/api/integration/checkout-sale', async (req, res) => {
+  try {
+    const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
+    if (webhookToken) {
+      const received = req.headers['asaas-access-token'] || req.query.token;
+      if (received !== webhookToken) return res.status(403).json({ error: 'Não autorizado' });
+    }
+    const { code, customer, total, payment, delivery, items, coupon } = req.body || {};
+    const phoneRow = await queryOne("SELECT value FROM chat_settings WHERE key = 'daily_report_phone'");
+    const phone = (phoneRow?.value || '553195545210').replace(/\D/g, '');
+    const lista = (Array.isArray(items) ? items : []).map(i => `• ${i.qty || 1}x ${i.name}`).join('\n');
+    const valor = (Number(total) || 0).toFixed(2).replace('.', ',');
+    const msg = `🛒 *VENDA NOVA NO CHECKOUT* — ${code}\n\n👤 ${customer || 'Cliente'}\n💳 ${payment || ''} — *R$ ${valor}*\n${delivery || ''}${coupon ? `\n🎟️ Cupom ${coupon}` : ''}\n\n${lista}`;
+    await wa.sendMessage(phone, msg, { isBot: true });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('📣 checkout-sale:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Marca reserva como paga — chamado pelo webhook do gateway (mesmo token do webhook Asaas)
 app.post('/api/live/r/:token/paid', async (req, res) => {
   try {
