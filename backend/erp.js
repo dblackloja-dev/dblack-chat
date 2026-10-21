@@ -226,7 +226,8 @@ async function createSale({ store_id, customer_id, customer_name, customer_phone
     if (chk.gift) {
       // brinde: item R$0 na venda (sem product_id real → não baixa estoque; o limite
       // global de resgates é controlado pelo cupom no ERP via trigger/coupon_redemptions)
-      items.push({ product_id: 'brinde-' + chk.code.toLowerCase(), name: `${chk.gift} 🎁 BRINDE ${chk.code}`, price: 0, quantity: 1 });
+      // sem emoji no nome: o cupom-imagem do WhatsApp (canvas) não tem fonte de emoji e viraria □
+      items.push({ product_id: 'brinde-' + chk.code.toLowerCase(), name: `${chk.gift} DE BRINDE (${chk.code})`, price: 0, quantity: 1 });
       discountLabelFinal = [discountLabelFinal, `Brinde ${chk.gift} (cupom ${chk.code})`].filter(Boolean).join(' + ');
     } else {
       couponPct = chk.pct; couponValue = chk.value;
