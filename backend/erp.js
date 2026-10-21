@@ -160,29 +160,44 @@ function generateCupom() {
 }
 
 // Cupom de campanha Cliente Black (tabela coupons do ERP) — mesma régua do PDV:
-// só à vista, acima do mínimo, 1 uso, dono do cupom tem que ser o cliente da venda.
+// desconto: só à vista, 1 uso, dono do cupom tem que ser o cliente da venda.
+// BRINDE (gift_label, ex.: VIP5=lenço): não é desconto — vale em qualquer pagamento,
+// acumula com desconto manual/nível e vira item R$0 na venda.
+// Compartilhado (max_uses>0): um código p/ todos, 1 resgate por cliente, limite global.
 async function checkCampaignCoupon({ code, customer_id, customer_phone, subtotal, payment_method, manual_discount }) {
-  if (Number(manual_discount) > 0) return { valid: false, error: 'Cupom não acumula com desconto manual — remova o desconto para aplicar.' };
   const cp = await erpQueryOne('SELECT * FROM coupons WHERE upper(code) = upper($1)', [String(code || '').trim()]);
   if (!cp) return { valid: false, error: 'Cupom não encontrado — confira o código.' };
-  if (cp.redeemed_at) return { valid: false, error: 'Cupom já utilizado.' };
+  const gift = String(cp.gift_label || '').trim();
+  const shared = Number(cp.max_uses) > 0;
+  if (!gift) {
+    if (Number(manual_discount) > 0) return { valid: false, error: 'Cupom não acumula com desconto manual — remova o desconto para aplicar.' };
+    if (!['pix', 'dinheiro'].includes(String(payment_method || '').toLowerCase()))
+      return { valid: false, error: 'Cupom só vale à vista (PIX/Dinheiro).' };
+  }
+  if (!shared && cp.redeemed_at) return { valid: false, error: 'Cupom já utilizado.' };
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
   if (today < cp.valid_from) return { valid: false, error: `Cupom válido a partir de ${cp.valid_from.split('-').reverse().join('/')}.` };
   if (today > cp.valid_to) return { valid: false, error: `Cupom venceu em ${cp.valid_to.split('-').reverse().join('/')}.` };
-  if (!['pix', 'dinheiro'].includes(String(payment_method || '').toLowerCase()))
-    return { valid: false, error: 'Cupom só vale à vista (PIX/Dinheiro).' };
   const sub = Math.round((Number(subtotal) || 0) * 100) / 100;
-  if (sub <= Number(cp.min_subtotal))
-    return { valid: false, error: `Cupom vale para compras acima de R$ ${Number(cp.min_subtotal).toFixed(2).replace('.', ',')}.` };
-  let custId = customer_id || null;
-  if (!custId && customer_phone) {
-    const c = await findCustomerByPhone(customer_phone);
-    custId = c?.id || null;
-  }
-  if (!custId || custId !== cp.customer_id)
+  if (sub < Number(cp.min_subtotal))
+    return { valid: false, error: `Cupom vale para compras a partir de R$ ${Number(cp.min_subtotal).toFixed(2).replace('.', ',')}.` };
+  let cust = customer_id ? await erpQueryOne('SELECT * FROM customers WHERE id = $1', [customer_id]) : null;
+  if (!cust && customer_phone) cust = await findCustomerByPhone(customer_phone);
+  if (shared) {
+    // exige cliente inscrito (CPF) e controla 1 por cliente + limite global
+    const cpf = String(cust?.cpf || '').replace(/\D/g, '');
+    if (!cust || cpf.length !== 11 || String(cust.tags || '').includes('Interno'))
+      return { valid: false, error: 'Cupom exclusivo Cliente Black — cadastre o CPF do cliente.' };
+    const r = await erpQueryOne(
+      `SELECT COUNT(*)::int uses, COUNT(*) FILTER (WHERE customer_id = $2)::int mine
+       FROM coupon_redemptions WHERE coupon_id = $1`, [cp.id, cust.id]);
+    if (r.mine > 0) return { valid: false, error: 'Cupom já resgatado por este cliente (1 por CPF).' };
+    if (r.uses >= Number(cp.max_uses)) return { valid: false, error: 'Cupom esgotado — todos os brindes já foram resgatados.' };
+  } else if (!cust || cust.id !== cp.customer_id) {
     return { valid: false, error: 'Cupom pertence a outro cliente — confira o WhatsApp da conversa.' };
-  const pct = Number(cp.pct) || 0;
-  return { valid: true, code: cp.code, pct, value: Math.round(sub * pct) / 100 };
+  }
+  const pct = gift ? 0 : (Number(cp.pct) || 0);
+  return { valid: true, code: cp.code, pct, value: Math.round(sub * pct) / 100, gift: gift || undefined };
 }
 
 // Cria venda no ERP
@@ -207,9 +222,17 @@ async function createSale({ store_id, customer_id, customer_name, customer_phone
     }
     const chk = await checkCampaignCoupon({ code: coupon_code, customer_id, customer_phone, subtotal: couponBase, payment_method, manual_discount: discountValue });
     if (!chk.valid) { const e = new Error(chk.error); e.status = 409; throw e; }
-    couponPct = chk.pct; couponValue = chk.value; couponFinal = chk.code;
-    discountValue = Math.round((discountValue + couponValue) * 100) / 100;
-    discountLabelFinal = [discountLabelFinal, `Cupom ${couponFinal} ${couponPct}%`].filter(Boolean).join(' + ');
+    couponFinal = chk.code;
+    if (chk.gift) {
+      // brinde: item R$0 na venda (sem product_id real → não baixa estoque; o limite
+      // global de resgates é controlado pelo cupom no ERP via trigger/coupon_redemptions)
+      items.push({ product_id: 'brinde-' + chk.code.toLowerCase(), name: `${chk.gift} 🎁 BRINDE ${chk.code}`, price: 0, quantity: 1 });
+      discountLabelFinal = [discountLabelFinal, `Brinde ${chk.gift} (cupom ${chk.code})`].filter(Boolean).join(' + ');
+    } else {
+      couponPct = chk.pct; couponValue = chk.value;
+      discountValue = Math.round((discountValue + couponValue) * 100) / 100;
+      discountLabelFinal = [discountLabelFinal, `Cupom ${couponFinal} ${couponPct}%`].filter(Boolean).join(' + ');
+    }
   }
   const total = Math.max(0, subtotal - discountValue);
 

@@ -381,13 +381,28 @@ async function confirmPendingPayment(chargeId) {
     }).catch(() => {});
   } catch (e) { console.error('🖨️ Falha ao montar cupom de impressão da Lê:', e.message); }
 
-  // Cupom de campanha Cliente Black: marca o resgate no ERP (1 uso) só com pagamento confirmado
+  // Cupom de campanha Cliente Black: marca o resgate no ERP (1 uso) só com pagamento confirmado.
+  // Compartilhado (max_uses>0, ex.: VIP5): resgate por cliente em coupon_redemptions —
+  // NUNCA marcar redeemed_at (queimaria o código p/ todo mundo).
   if (pending.coupon_code) {
-    erp.erpQuery(
-      `UPDATE coupons SET redeemed_at = NOW(), redeemed_sale_id = $2 WHERE upper(code) = upper($1) AND redeemed_at IS NULL RETURNING code`,
-      [pending.coupon_code, 'le:' + pending.id])
-      .then(rows => console.log(`🎟️ Cupom ${pending.coupon_code} (venda da Lê ${pending.id}): ${rows.length > 0 ? 'resgatado' : 'JÁ USADO (verificar)'}`))
-      .catch(e => console.error(`🎟️ Falha ao resgatar cupom ${pending.coupon_code}:`, e.message));
+    (async () => {
+      const cp = await erp.erpQueryOne(`SELECT * FROM coupons WHERE upper(code) = upper($1)`, [pending.coupon_code]);
+      if (cp && Number(cp.max_uses) > 0) {
+        const cust = pending.customer_phone ? await erp.findCustomerByPhone(pending.customer_phone) : null;
+        if (!cust) return console.error(`🎟️ Cupom ${pending.coupon_code} (Lê ${pending.id}): cliente não identificado p/ resgate compartilhado`);
+        const rows = await erp.erpQuery(
+          `INSERT INTO coupon_redemptions (id, coupon_id, customer_id, sale_id)
+           SELECT $1, $2, $3, $4
+           WHERE (SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $2) < $5
+           ON CONFLICT DO NOTHING RETURNING id`,
+          ['cr-le:' + pending.id, cp.id, cust.id, 'le:' + pending.id, Number(cp.max_uses)]);
+        return console.log(`🎟️ Cupom ${pending.coupon_code} (venda da Lê ${pending.id}): ${rows.length > 0 ? 'brinde resgatado' : 'já resgatado/esgotado (verificar)'}`);
+      }
+      const rows = await erp.erpQuery(
+        `UPDATE coupons SET redeemed_at = NOW(), redeemed_sale_id = $2 WHERE upper(code) = upper($1) AND redeemed_at IS NULL AND COALESCE(max_uses,0) = 0 RETURNING code`,
+        [pending.coupon_code, 'le:' + pending.id]);
+      console.log(`🎟️ Cupom ${pending.coupon_code} (venda da Lê ${pending.id}): ${rows.length > 0 ? 'resgatado' : 'JÁ USADO (verificar)'}`);
+    })().catch(e => console.error(`🎟️ Falha ao resgatar cupom ${pending.coupon_code}:`, e.message));
   }
 
   // Confirmação + resumo + próximo passo pra cliente

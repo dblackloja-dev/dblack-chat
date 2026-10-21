@@ -210,9 +210,13 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coupon, subDesc, payment, customer?.id, customerPhone, discountVal]);
   const couponOn = !!(couponChk?.valid && coupon.trim());
-  const couponVal = couponOn ? Math.round(subDesc * couponChk.pct) / 100 : 0;
+  // Cupom de BRINDE (ex.: VIP5 = lenço): não é desconto — o servidor injeta o item R$0
+  // na venda e ele acumula com desconto manual/nível (só cupom de DESCONTO bloqueia)
+  const couponGift = couponOn ? String(couponChk.gift || '').trim() : '';
+  const couponIsDiscount = couponOn && !couponGift;
+  const couponVal = couponIsDiscount ? Math.round(subDesc * couponChk.pct) / 100 : 0;
 
-  const tierActive = !!(loyal?.enrolled && cashPayment && !loyal.promo_active && discountVal === 0 && !couponOn && (loyal.discount_pct || 0) > 0);
+  const tierActive = !!(loyal?.enrolled && cashPayment && !loyal.promo_active && discountVal === 0 && !couponIsDiscount && (loyal.discount_pct || 0) > 0);
   const tierAutoVal = tierActive ? Math.round(subDesc * loyal.discount_pct) / 100 : 0;
   // Só o nível BLACK permite ajustar o desconto (peça anunciada com preço arredondado);
   // GOLD/DIAMOND ficam travados nos 12/14%. Teto de 30% contra erro de digitação.
@@ -470,13 +474,13 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
 
   const discountSection = (
     <div style={{ marginBottom: 8 }}>
-      <button disabled={couponOn} onClick={() => { if (!couponOn) setShowDiscountPanel(!showDiscountPanel); }}
-        title={couponOn ? 'Cupom aplicado — não acumula com desconto manual' : undefined}
-        style={{ ...btnOutline, width: '100%', textAlign: 'center', padding: isMobile ? '11px 6px' : '6px', fontSize: isMobile ? 13 : 11, color: discountVal > 0 ? C.red : C.dim, borderColor: discountVal > 0 ? 'rgba(255,82,82,.3)' : C.brd, opacity: couponOn ? 0.5 : 1, cursor: couponOn ? 'not-allowed' : 'pointer' }}>
-        {couponOn ? '🏷️ Desconto bloqueado (cupom aplicado)' : discountVal > 0 ? `🏷️ Desconto: -R$ ${discountVal.toFixed(2)}` : '🏷️ Adicionar desconto'}
+      <button disabled={couponIsDiscount} onClick={() => { if (!couponIsDiscount) setShowDiscountPanel(!showDiscountPanel); }}
+        title={couponIsDiscount ? 'Cupom aplicado — não acumula com desconto manual' : undefined}
+        style={{ ...btnOutline, width: '100%', textAlign: 'center', padding: isMobile ? '11px 6px' : '6px', fontSize: isMobile ? 13 : 11, color: discountVal > 0 ? C.red : C.dim, borderColor: discountVal > 0 ? 'rgba(255,82,82,.3)' : C.brd, opacity: couponIsDiscount ? 0.5 : 1, cursor: couponIsDiscount ? 'not-allowed' : 'pointer' }}>
+        {couponIsDiscount ? '🏷️ Desconto bloqueado (cupom aplicado)' : discountVal > 0 ? `🏷️ Desconto: -R$ ${discountVal.toFixed(2)}` : '🏷️ Adicionar desconto'}
       </button>
 
-      {showDiscountPanel && !couponOn && (
+      {showDiscountPanel && !couponIsDiscount && (
         <div style={{ marginTop: 6, background: C.s3, borderRadius: 8, padding: 10, border: `1px solid ${C.brd}` }}>
           {/* Escopo: venda toda ou por produto */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
@@ -542,7 +546,11 @@ export default function SalesPanel({ customerPhone, customerName, onClose }) {
         )}
       </div>
       {couponOn && (
-        <div style={{ marginTop: 4, fontSize: isMobile ? 12 : 11, color: C.grn, fontWeight: 700 }}>✓ Cupom {couponChk.code}: −{couponChk.pct}% (−R$ {couponVal.toFixed(2)}) — substitui o desconto de nível</div>
+        <div style={{ marginTop: 4, fontSize: isMobile ? 12 : 11, color: C.grn, fontWeight: 700 }}>
+          {couponGift
+            ? <>✓ Cupom {couponChk.code}: 🎁 {couponGift} de BRINDE — entra na venda como item R$ 0</>
+            : <>✓ Cupom {couponChk.code}: −{couponChk.pct}% (−R$ {couponVal.toFixed(2)}) — substitui o desconto de nível</>}
+        </div>
       )}
       {coupon.trim() && couponChk && !couponChk.valid && (
         <div style={{ marginTop: 4, fontSize: isMobile ? 11 : 10, color: '#ffb74d' }}>{couponChk.error || 'Cupom inválido'}</div>
