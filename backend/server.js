@@ -2822,7 +2822,7 @@ async function start() {
   await igContent.initTables();
   igContent.start();
   checkoutSync.start();
-  leIg.init({ broadcast });
+  leIg.init({ broadcast, sendWhatsApp: (phone, msg) => wa.sendMessage(phone, msg, { isBot: true }) });
   // Verifica conexão da Evolution API
   await wa.connect();
   server.listen(PORT, () => {

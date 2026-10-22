@@ -39,8 +39,10 @@ const DEBOUNCE_MS = 8000;
 const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 let notify = () => {};
-function init({ broadcast } = {}) {
+let waSend = null; // envia WhatsApp (injetado pelo server.js) — usado no alerta de transferência
+function init({ broadcast, sendWhatsApp } = {}) {
   if (broadcast) notify = broadcast;
+  if (sendWhatsApp) waSend = sendWhatsApp;
 }
 
 async function setting(key, fallback = '') {
@@ -129,6 +131,33 @@ function unansweredOffer(historyDesc) {
     if (m.from_me) return true;                                      // Lê ou equipe já falou e ela só reagiu/elogiou
   }
   return false;
+}
+
+// Alerta de transferência por WhatsApp (ativado 22/10): quando a Lê transfere e a cliente
+// fica esperando humano, avisa o número em ig_handoff_alert_number (fallback:
+// daily_report_phone, o mesmo do relatório diário). Motivo: os alertas do painel
+// (handoff_needed) ficaram dias sem ninguém olhar e venda real foi perdida.
+// Máx. 1 alerta por conversa a cada 30 min; fora da janela de 24h a Meta pode recusar (best-effort).
+const lastAlert = new Map(); // convId → timestamp do último alerta
+async function handoffAlert(conv, reason, lastContent) {
+  try {
+    if (!waSend) return;
+    // Mesmo destino do relatório diário: setting dedicado > daily_report_phone > nº do dono
+    const target = ((await setting('ig_handoff_alert_number', '')) || (await setting('daily_report_phone', '')) || '553195545210').replace(/\D/g, '');
+    if (!target) return;
+    if (Date.now() - (lastAlert.get(conv.id) || 0) < 30 * 60 * 1000) return;
+    lastAlert.set(conv.id, Date.now());
+    if (lastAlert.size > 500) {
+      const velho = Date.now() - 2 * 3600 * 1000;
+      for (const [k, v] of lastAlert) if (v < velho) lastAlert.delete(k);
+    }
+    const quem = conv.customer_push_name ? `@${String(conv.customer_push_name).replace(/^@/, '')}` : (conv.customer_name || conv.phone);
+    const ultima = stripLabel(lastContent).slice(0, 120);
+    await waSend(target, `🙋 *CLIENTE ESPERANDO NO DIRECT* — ${quem}\n\nMotivo: ${reason}${ultima ? `\nÚltima mensagem: "${ultima}"` : ''}\n\nResponder no painel → aba Instagram → 👋 Pra equipe`);
+    console.log(`📲 [le-ig] alerta de transferência enviado pra ${target} (${quem})`);
+  } catch (e) {
+    console.error('[le-ig] alerta de transferência falhou:', e.message);
+  }
 }
 
 function buildSystemPrompt(pageContext, waNumber, aberta) {
@@ -379,10 +408,9 @@ async function generateAndSend(convStale, msg) {
       await queryRun("UPDATE conversations SET ai_muted = true WHERE id = $1", [conv.id]);
       const fresh = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
       notify('conversation_updated', fresh);
-      // Alerta pra equipe: o painel deve tocar som/destacar. Se quiser, mande também
-      // um WhatsApp pra vendedora de plantão aqui (setting 'ig_handoff_alert_number').
       notify('handoff_needed', { conversation: fresh, reason, at: new Date().toISOString() });
       console.log(`🙋 [le-ig] transferida ${conv.customer_push_name || conv.phone}: ${reason}`);
+      await handoffAlert(conv, reason, lastContent);
     };
     // Mensagem com BOTÃO que abre o WhatsApp; se a API de botão falhar, link em texto
     const sendZapButton = async (zb) => {
