@@ -133,18 +133,16 @@ function unansweredOffer(historyDesc) {
   return false;
 }
 
-// Alerta de transferência por WhatsApp (ativado 22/10): quando a Lê transfere e a cliente
-// fica esperando humano, avisa o número em ig_handoff_alert_number (fallback:
-// daily_report_phone, o mesmo do relatório diário). Motivo: os alertas do painel
-// (handoff_needed) ficaram dias sem ninguém olhar e venda real foi perdida.
+// Alerta de transferência por WhatsApp — OPT-IN (dono pediu pra tirar do telefone dele,
+// 22/10): só dispara se chat_settings 'ig_handoff_alert_number' tiver um número (ex.: o da
+// vendedora de plantão). Sem o setting, fica só o alerta handoff_needed do painel.
 // Máx. 1 alerta por conversa a cada 30 min; fora da janela de 24h a Meta pode recusar (best-effort).
 const lastAlert = new Map(); // convId → timestamp do último alerta
 async function handoffAlert(conv, reason, lastContent) {
   try {
     if (!waSend) return;
-    // Mesmo destino do relatório diário: setting dedicado > daily_report_phone > nº do dono
-    const target = ((await setting('ig_handoff_alert_number', '')) || (await setting('daily_report_phone', '')) || '553195545210').replace(/\D/g, '');
-    if (!target) return;
+    const target = (await setting('ig_handoff_alert_number', '')).replace(/\D/g, '');
+    if (!target) return; // sem número configurado = alerta por WhatsApp desligado
     if (Date.now() - (lastAlert.get(conv.id) || 0) < 30 * 60 * 1000) return;
     lastAlert.set(conv.id, Date.now());
     if (lastAlert.size > 500) {
