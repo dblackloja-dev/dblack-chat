@@ -2,6 +2,21 @@
 // (stories/feed indexados pelo content.js) como fonte de verdade de preço e tamanho.
 // NÃO consulta o ERP: preço/tamanho estão na arte que a Srª D'Black posta.
 //
+// v3 (22/10/2026) — correções da auditoria das conversas de 15-22/10:
+//  A. Reassumir conversa muted agora exige 30 min sem NENHUMA mensagem nossa
+//     (antes só contava equipe; a Lê reassumia na hora e repetia "vou te passar" em loop)
+//  B. "1 abordagem por 24h" vale pra QUALQUER mensagem da Lê (antes só "vamos garantir";
+//     botão de WhatsApp e "as meninas confirmam" não contavam → spam em quem só reage 😍)
+//  C. Reação-só-emoji NUNCA abre o funil do WhatsApp (botão bloqueado por código)
+//  D. Resposta gerada enquanto chegava mensagem nova é descartada e regerada
+//     (fim do "qual seu tamanho?" depois de a cliente já ter dito o tamanho)
+//  E. Mensagem idêntica à que a própria Lê mandou nas últimas 2h não é reenviada
+//  F. Retransferência (conversa já transferida antes, sem humano aparecer) sai com o
+//     botão do WhatsApp junto — promessa vazia repetida vira caminho real pra cliente
+//  G. PROMISE_RE pega também "as meninas confirmam/passam/veem" sem [ZAP]/[TRANSFERIR]
+//  H. Prompt: cartão nunca fica sem resposta; pedido de nº do WhatsApp/Pix → [ZAP];
+//     proibido prometer prazo da equipe ("agora mesmo", "na hora") e repetir desculpas
+//
 // v2 (22/09/2026) — correções a partir da auditoria dos Directs:
 //  1. Saída em <analise>/<msg>: só o <msg> é enviado (fim do vazamento de raciocínio)
 //  2. Travas de código: texto que fala da cliente em 3ª pessoa,
@@ -62,14 +77,22 @@ const stripLabel = (c) => String(c || '').replace(LABEL_RE, '').trim();
 const EMOJI_ONLY_RE = /^[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️\s]+$/u;
 const isReactionOnly = (c) => { const t = stripLabel(c); return !!t && EMOJI_ONLY_RE.test(t); };
 const hasRealText = (c) => { const t = stripLabel(c); return !!t && !EMOJI_ONLY_RE.test(t); };
+// Elogio curto sem pergunta ("Perfeito demais 😍", "que lindo") = reação, não pedido:
+// não abre funil do WhatsApp nem fura a trava de 1 abordagem/24h
+const PRAISE_RE = /^(que\s+|muito\s+|t[aã]o\s+)*(lind|perfeit|maravilh|ame[io]|amo|ador|top|demais|incr[ií]vel|arras|chique|diva|babad|apaixonad|🥰|😍)/i;
+const isPraiseOnly = (c) => {
+  const t = stripLabel(c);
+  return !!t && t.length <= 40 && !/[?\d]/.test(t) && PRAISE_RE.test(t)
+    && !/\b(quero|comprar?|vou|pode|tem|valor|pre[çc]o|tamanho|me\s)\b/i.test(t);
+};
+const isLowIntent = (c) => isReactionOnly(c) || isPraiseOnly(c);
 
-const OFFER_RE = /vamos garantir/i;
 // Promessas que só podem sair junto com uma transferência de verdade
-const PROMISE_RE = /(vou confirmar|confirmo (rapidinho|com)|j[aá] (te )?chamo|vou chamar|chamei uma das meninas|vou verificar|vou ver com a equipe|um segundo|j[aá] te passo a informa)/i;
+const PROMISE_RE = /(vou confirmar|confirmo (rapidinho|com)|j[aá] (te )?chamo|vou chamar|chamei uma das meninas|vou verificar|vou ver com a equipe|um segundo|j[aá] te passo a informa|(as )?meninas (te )?(confirmam|passam|veem|v[eê]em|verificam|respondem)|elas (te )?(confirmam|passam|atendem))/i;
 // Sinais de que o texto é análise interna, não mensagem pra cliente
 const LEAK_RE = /(^|\n)\s*---\s*(\n|$)|\b(a cliente|ela respondeu|ela reagiu|o story que ela|demonstrando entusiasmo|<\/?analise>)/i;
 // Assuntos que exigem uma pessoa antes de qualquer venda
-const ISSUE_RE = /(meu pedido|minha compra|fiz uma compra|fiz um pedido|minha entrega|v[aã]o entregar|dia (voc[eê]s )?(v[aã]o )?entreg|vou receber|n[aã]o recebi|n[aã]o chegou|rastreio|rastreamento|troca|trocar|defeito|reembolso|devolu|n[aã]o fui respondid|ningu[eé]m (me )?respond|sem resposta|meu pacote)/i;
+const ISSUE_RE = /(meu pedido|minha compra|fiz uma compra|fiz um pedido|minha entrega|v[aã]o entregar|dia (voc[eê]s )?(v[aã]o )?entreg|vou receber|n[aã]o recebi|n[aã]o chegou|rastreio|rastreamento|troca|trocar|defeito|reembolso|devolu|n[aã]o fui respondid|ningu[eé]m (me )?(respond|atend)|sem resposta|meu pacote|pedido n[aã]o foi conclu|n[aã]o consigo (comprar|finalizar|pagar)|(cad[eê]|esperando|aguardando) (o )?pix|n[aã]o (mandaram|mandou|veio|chegou) (o )?pix|manda o pix|nada no (zap|whats)|(voc[eê]s|vcs?) n[aã]o respond)/i;
 
 const MENTION_THANKS = [
   'Que lindo, obrigada por marcar a gente! ✨',
@@ -95,13 +118,15 @@ function pendingIssue(historyDesc) {
   return humanAfter ? null : asc[issueAt];
 }
 
-// Já existe oferta da Lê nas últimas 24h que a cliente não respondeu com texto?
+// Já existe QUALQUER abordagem nossa nas últimas 24h que a cliente não respondeu com
+// texto de verdade? (v3: antes só contava "vamos garantir" — botão de WhatsApp, preço e
+// "as meninas confirmam" ficavam de fora e quem só reagia 😍 recebia oferta atrás de oferta)
 function unansweredOffer(historyDesc) {
   const dayAgo = Date.now() - 24 * 3600 * 1000;
   for (const m of historyDesc) { // mais recente primeiro
     if (new Date(m.timestamp).getTime() < dayAgo) return false;
-    if (!m.from_me && hasRealText(m.content)) return false;          // ela respondeu de verdade depois
-    if (m.from_me && m.sender === 'Lê (IA)' && OFFER_RE.test(m.content)) return true;
+    if (!m.from_me && hasRealText(m.content) && !isPraiseOnly(m.content)) return false; // ela respondeu de verdade depois
+    if (m.from_me) return true;                                      // Lê ou equipe já falou e ela só reagiu/elogiou
   }
   return false;
 }
@@ -134,7 +159,7 @@ COMO VOCÊ ESCREVE:
 - Mensagens curtas, máximo 300 caracteres, objetivas, em UMA mensagem só
 - Emojis com moderação (1 por mensagem no máximo). NUNCA use o coração preto 🖤. Use só emojis leves e positivos (✨ 😍 🥰 😉 💕 🎉 👏). NUNCA use emojis tristes ou pesados (😢 💔 😡 😔 ☠️)
 - NUNCA use listas, bullet points, negrito ou asteriscos
-- NUNCA use apelidos (flor, querida, amor, miga). Use o nome se souber
+- NUNCA use apelidos (flor, querida, amor, miga, meu bem). Use o nome se souber — o nome DELA, lido no perfil: não confunda com nome de peça ou da Srª D'Black citado na mensagem
 - NUNCA repita saudação nem informação já dita na conversa
 - Se a última mensagem da cliente JÁ estiver coberta pela sua resposta anterior, responda <msg>[SKIP]</msg>
 
@@ -146,8 +171,8 @@ MENSAGEM DE CARINHO (agradecimento, parabéns, elogio à loja, à Srª D'Black o
 
 REAÇÃO A STORY (emoji ou elogio curto):
 - Story SEM PRODUTO (campanha, sorteio, D'Black Lover, bastidores, aviso): agradeça em uma frase curta SÓ se ainda não falou dessa campanha com ela hoje; senão [SKIP]. Nunca ofereça produto.
-- Story de PRODUTO: responda o preço da arte e pergunte APENAS "Vamos garantir o seu?" / "Vamos garantir a sua?". NÃO pergunte tamanho nem cidade ainda.
-- Se você JÁ ofereceu alguma peça nas últimas 24h e ela não respondeu com texto (só reagiu de novo), responda [SKIP]. Oferta em sequência cansa a cliente.
+- Story de PRODUTO: responda o preço da arte e pergunte APENAS "Vamos garantir o seu?" / "Vamos garantir a sua?". NÃO pergunte tamanho nem cidade ainda. Se não achar o preço no contexto, elogie em uma frase e pergunte qual peça ela amou — reação de emoji NUNCA vai para o WhatsApp (proibido [ZAP] aqui).
+- Se você JÁ mandou qualquer mensagem nas últimas 24h e ela não respondeu com texto (só reagiu de novo), responda [SKIP]. Abordagem em sequência cansa a cliente.
 
 PEDIDO EXPLÍCITO ("quero", "vou levar", "um de cada", "como compro?"): ela JÁ disse que quer — NUNCA pergunte se ela quer garantir. Responda o preço e JÁ pergunte o tamanho e a cidade (a cidade só se ainda não souber pela conversa). Se ela sumir depois disso e voltar reagindo a outro story, retome o pedido em aberto antes de oferecer outra peça.
 
@@ -156,6 +181,8 @@ REGRA DE OURO — PREÇOS E TAMANHOS:
 - Copie o preço e o parcelamento EXATAMENTE como estão na arte
 - COMO FUNCIONA O PREÇO DA D'BLACK: o valor cheio (ex.: R$79,90) é o preço À VISTA, que já tem 10% de desconto. No cartão não tem desconto: o parcelamento (ex.: 12x de R$7,40) é o preço cheio dividido SEM JUROS. Por isso a parcela vezes 12 dá mais que o valor à vista — está certo, não recalcule
 - Escreva sempre deixando isso claro: "R$79,90 à vista ou 12x de R$7,40 sem juros no cartão". NUNCA diga que o cartão tem desconto nem que o valor à vista vale no cartão
+- PERGUNTA DE PREÇO NUNCA FICA SEM RESPOSTA: se o preço está no contexto, responda o NÚMERO na primeira frase — é PROIBIDO dizer "as meninas confirmam o valor" para um valor que está na arte. Só o que realmente NÃO está no contexto vai para o WhatsApp
+- Se perguntarem do cartão e a parcela não estiver na arte: explique que no cartão é em até 12x sem juros, sem o desconto do à vista, e feche com [ZAP: ...] para as meninas passarem a parcela exata — nunca só "as meninas confirmam"
 - Os stories saem em SEQUÊNCIA: o look no provador e, nos minutos seguintes, um story de cada peça com o preço — procure o preço nos stories de horário vizinho
 - Se o contexto NÃO tiver o preço ou tamanho da peça, NUNCA invente: mande para o WhatsApp com [ZAP: ...] (veja FUNIL DE VENDA) — lá as meninas confirmam e já finalizam
 - Tamanho que ela pediu fora da grade da arte (ex.: pediu PP e a arte diz 36 ao 44): diga com clareza que a grade da peça é essa e mande para o WhatsApp com [ZAP: ...] para as meninas verem se tem
@@ -178,6 +205,8 @@ ${fechamento}
 
 ${waNumber ? `FUNIL DE VENDA — COMPRA NUNCA ESPERA: se a cliente demonstrou interesse em uma peça ("quero", "valor?", "tem?", "me separa", "reserva") e você NÃO consegue fechar sozinha — preço ou tamanho fora do contexto, pedido de reserva, cor/composição/equivalência a confirmar, peça que você não identificou — NÃO transfira para o Direct e NÃO prometa resposta depois. Responda o que souber e feche com [ZAP: ...] preenchendo o que já sabe: a peça como você a identificou (ou a dúvida dela), o tamanho e a cidade SE ela já disse. O WhatsApp funciona a qualquer hora, as meninas atendem por ordem de mensagem. Exemplos: "Esse conjunto é um arraso! As meninas confirmam o valor e já finalizam com você pelo WhatsApp 😉 [ZAP: conjunto jeans listrado]" · "[ZAP: vestido tule azul tamanho 42 | Santa Margarida]"
 
+REGRAS DO [ZAP: ...]: o marcador encerra a mensagem e o seu atendimento — na mesma mensagem NUNCA peça mais nenhum dado nem prometa "gerar link" (o botão é automático, você não gera nada). Depois do botão, se a cliente só confirmar ("ta", "ok", "blz", "👍"), responda [SKIP] — o botão já está lá. Só volte a falar se ela trouxer pergunta ou informação nova (aí pode sair um [ZAP: ...] atualizado com o pedido completo).
+
 QUANDO TRANSFERIR pro Direct (texto curto + [TRANSFERIR] no final) — SOMENTE nestes casos:` : `QUANDO TRANSFERIR (texto curto + [TRANSFERIR] no final):
 ${transferirCompra}
 - Informação que não está no contexto (inclusive peça que você não achou nos stories/posts)`}
@@ -186,7 +215,17 @@ ${transferirCompra}
 - Se perguntarem se é robô: confirme que é assistente virtual da loja e ofereça passar para a equipe
 - SEMPRE avise de forma leve que uma pessoa da equipe vai continuar ali mesmo, respeitando o horário da loja (veja AGORA no topo). NUNCA transfira em silêncio
 
-NUNCA: prometa reserva de peça, dê desconto por conta própria, invente promoção, fale de assunto fora da loja.
+NUNCA INVENTE (se não está no contexto nem neste prompt, é [ZAP: ...] ou [TRANSFERIR]):
+- Tamanho que a modelo/Srª D'Black veste, equivalência de numeração (M = 40 etc.), medidas
+- Horário de loja diferente do que está neste prompt, status de grupo VIP/sorteio/campanha, motivo de qualquer problema
+- Idade, altura ou peso NÃO são tamanho: "tenho 40 anos" não significa tamanho 40 — pergunte o tamanho
+- Dado que a cliente não falou: nunca preencha tamanho ou cidade no [ZAP: ...] por dedução
+
+RESPONDA O QUE FOI PERGUNTADO: a primeira frase da sua mensagem responde EXATAMENTE a pergunta da cliente (ou diz com clareza que as meninas veem isso + [ZAP]). Só depois acrescente outra coisa. E antes de pedir tamanho ou cidade, releia a conversa: se ela já informou (mesmo dias atrás ou no meio de outra frase), use — NUNCA peça de novo.
+
+PEDIRAM O NÚMERO DO WHATSAPP, O PIX OU "COMO PAGO?": não dite número nem prometa que alguém manda — feche com [ZAP: ...]: o botão abre direto o WhatsApp da loja e lá as meninas mandam o Pix e finalizam.
+
+NUNCA: prometa reserva de peça, dê desconto por conta própria, invente promoção, fale de assunto fora da loja, prometa prazo de resposta da equipe ("agora mesmo", "na hora", "rapidinho", "já vai te atender" são PROIBIDOS — diga que as meninas respondem por ordem de mensagem). Se você já se desculpou pela demora nesta conversa, não repita a mesma desculpa nem a mesma promessa: reconheça em poucas palavras e dê um caminho concreto com [ZAP: ...]. Desculpas NUNCA levam emoji.
 
 ÁUDIOS: peça com carinho para escrever, que você responde.
 
@@ -285,14 +324,19 @@ async function generateAndSend(convStale, msg) {
     // e chegou mensagem nova: volta pra fila e a Lê reassume (decisão do dono, 23/09).
     // Exceções: reclamação/pedido pendente continua com a equipe; msg da equipe nos
     // últimos 30 min (inclusive echo "Instagram" do app) = atendimento ativo, Lê quieta.
+    let retransfer = false; // conversa que já tinha sido transferida e ninguém atendeu
     if (conv.status === 'atendendo' || conv.ai_muted) {
       const historyPeek = await customerHistory(conv.phone);
       if (pendingIssue(historyPeek)) return;
-      const equipeAtiva = await queryOne(
+      // v3: 30 min sem NENHUMA mensagem nossa (Lê incluída). Antes só a equipe contava:
+      // logo após uma transferência não existia mensagem de equipe nenhuma, a Lê
+      // reassumia na hora e repetia "vou te passar para uma das meninas" a cada "ta" da cliente.
+      const atendimentoRecente = await queryOne(
         `SELECT 1 FROM messages WHERE conversation_id = $1 AND from_me = true
-           AND sender IS DISTINCT FROM 'Lê (IA)' AND timestamp > NOW() - interval '30 minutes' LIMIT 1`,
+           AND timestamp > NOW() - interval '30 minutes' LIMIT 1`,
         [conv.id]);
-      if (equipeAtiva) return;
+      if (atendimentoRecente) return;
+      retransfer = !!conv.ai_muted;
       await queryRun("UPDATE conversations SET status = 'aguardando', agent_id = NULL, agent_name = NULL, ai_muted = false WHERE id = $1", [conv.id]);
       conv = await queryOne("SELECT * FROM conversations WHERE id = $1", [conv.id]);
       notify('conversation_updated', conv);
@@ -310,6 +354,7 @@ async function generateAndSend(convStale, msg) {
     const aberta = lojaAberta();
     const history = await customerHistory(conv.phone);
     const lastContent = msg?.content || '';
+    const waNumber = (await setting('wa_number', '')).replace(/\D/g, '');
 
     // Envio + registro no painel
     const recordSent = async (text, sentId) => {
@@ -339,14 +384,41 @@ async function generateAndSend(convStale, msg) {
       notify('handoff_needed', { conversation: fresh, reason, at: new Date().toISOString() });
       console.log(`🙋 [le-ig] transferida ${conv.customer_push_name || conv.phone}: ${reason}`);
     };
+    // Mensagem com BOTÃO que abre o WhatsApp; se a API de botão falhar, link em texto
+    const sendZapButton = async (zb) => {
+      const buttons = [{ type: 'web_url', url: zb.url, title: 'Abrir WhatsApp' }];
+      try {
+        const btnResult = await sendButtonMessage(conv.phone, zb.text, buttons);
+        await recordSent(`${zb.text}\n\n🔘 Abrir WhatsApp → ${zb.url}`, btnResult?.message_id);
+      } catch (e) {
+        console.error('[le-ig] botão do WhatsApp falhou, enviando link em texto:', e.message);
+        const fallback = `${zb.text.replace('no botão abaixo', 'no link abaixo')}\n\n${zb.url}`;
+        const igResult = await sendDirectMessage(conv.phone, fallback).catch(() => null);
+        if (igResult) await recordSent(fallback, igResult?.message_id);
+      }
+    };
+    // Botão genérico com a última mensagem da cliente pré-preenchida
+    const zapFallbackButton = () => {
+      if (!waNumber) return null;
+      const ultima = stripLabel(lastContent).slice(0, 140);
+      return {
+        text: 'Pra você não ficar esperando: é só tocar no botão abaixo e mandar sua mensagem no nosso WhatsApp, as meninas resolvem tudo com você por lá, tá bom? 😉',
+        url: `https://wa.me/${waNumber}?text=${encodeURIComponent(`Oi! Vim do Instagram.${ultima ? ` ${ultima}` : ''}`)}`,
+      };
+    };
 
-    // 1) Pedido/entrega/reclamação sem resposta humana → pessoa primeiro, venda nunca
+    // 1) Pedido/entrega/reclamação sem resposta humana → pessoa primeiro, venda nunca.
+    //    v3: pendência de PAGAMENTO (pix/finalizar compra) sai com o botão do WhatsApp
+    //    junto — era o caso da cliente que passou 2 dias pedindo o pix só ouvindo promessa
     const issue = pendingIssue(history);
     if (issue) {
+      const issueTxt = stripLabel(issue.content);
+      const pixIssue = /pix|pagar|comprar|finalizar|conclu/i.test(issueTxt);
       const nome = (conv.customer_name || '').split(' ')[0];
-      const text = `${nome ? `Oi, ${nome}! ` : ''}Vi sua mensagem sobre o seu pedido e sinto muito pela demora. ${aberta ? 'Já chamei uma das meninas para resolver isso com você por aqui mesmo' : 'Deixei anotado para as meninas, elas resolvem isso com você por aqui assim que a loja abrir'}, tá bom?`;
+      const text = `${nome ? `Oi, ${nome}! ` : ''}Vi sua mensagem sobre o seu pedido e sinto muito pela demora.${pixIssue && waNumber ? '' : ` ${aberta ? 'Já chamei uma das meninas para resolver isso com você por aqui mesmo' : 'Deixei anotado para as meninas, elas resolvem isso com você por aqui assim que a loja abrir'}, tá bom?`}`;
       await sendText(text);
-      await doTransfer(`pendência: "${stripLabel(issue.content).slice(0, 80)}"`);
+      if (pixIssue && waNumber) await sendZapButton(zapFallbackButton());
+      await doTransfer(`pendência: "${issueTxt.slice(0, 80)}"`);
       return;
     }
 
@@ -358,19 +430,23 @@ async function generateAndSend(convStale, msg) {
       return;
     }
 
-    // 3) Só reagiu de novo e já tem oferta sem resposta nas últimas 24h → não insiste
-    if (isReactionOnly(lastContent) && unansweredOffer(history)) return;
+    // 3) Só reagiu/elogiou de novo e já tem abordagem sem resposta nas últimas 24h → não insiste
+    if (isLowIntent(lastContent) && unansweredOffer(history)) return;
 
     const apiKey = await getApiKey();
     if (!apiKey) return;
 
     const pageContext = await content.getPageContext();
-    const waNumber = (await setting('wa_number', '')).replace(/\D/g, '');
     const system = buildSystemPrompt(pageContext, waNumber, aberta);
     let storyContext = '';
     // Parte que muda por conversa fica FORA do bloco cacheado (o prompt base + contexto
     // da página se repete em toda chamada — prompt caching paga 10% do preço nele)
     let systemExtra = '';
+
+    // Aviso do dia (setting ig_ai_notice): fonte oficial pra situações fora do catálogo,
+    // tipo grupo VIP suspenso/novo grupo — sem isso a Lê improvisava versões contraditórias
+    const notice = (await setting('ig_ai_notice', '')).trim();
+    if (notice) systemExtra += `\n\nAVISO OFICIAL DA LOJA (vale agora; se perguntarem sobre isso, responda SÓ com base nisto): ${notice}`;
 
     if (msg?.ig_story_id) {
       await content.ensureStory(msg.ig_story_id);
@@ -392,43 +468,35 @@ async function generateAndSend(convStale, msg) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: content.jsonSafe({ model: MODEL, max_tokens: 1200, temperature: 0.3, system: systemBlocks, messages: msgs }),
+        body: content.jsonSafe({ model: MODEL, max_tokens: 1600, temperature: 0.3, system: systemBlocks, messages: msgs }),
         signal: AbortSignal.timeout(60000),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || json.error) throw new Error(json.error?.message || `Anthropic HTTP ${res.status}`);
-      return (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      const out = (json.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      return { out, cut: json.stop_reason === 'max_tokens' };
     };
 
-    let raw = await callClaude(messages);
+    let { out: raw, cut } = await callClaude(messages);
     if (!raw) return;
 
-    let text = extractMsg(raw);
+    // v3: resposta cortada no meio NUNCA é enviada (saiu "Esse é um" pra cliente) — vai pro retry
+    let text = cut ? null : extractMsg(raw);
 
     // Sem <msg> (tag errada tipo <thinking>, typo, corte): UMA nova tentativa antes de desistir
     if (text === null && !raw.includes('[SKIP]')) {
-      console.error('[le-ig] resposta sem <msg>, tentando de novo:', raw.slice(0, 200));
-      raw = await callClaude([...messages,
+      console.error(`[le-ig] resposta ${cut ? 'cortada' : 'sem <msg>'}, tentando de novo:`, raw.slice(0, 200));
+      const retry = await callClaude([...messages,
         { role: 'assistant', content: raw },
-        { role: 'user', content: '(sistema: sua resposta veio SEM a tag <msg> e NÃO foi enviada à cliente. Reenvie agora SOMENTE <msg>sua mensagem</msg>, sem análise.)' },
-      ]).catch(() => '');
-      text = raw ? extractMsg(raw) : null;
+        { role: 'user', content: '(sistema: sua resposta veio SEM a tag <msg> completa e NÃO foi enviada à cliente. Reenvie agora SOMENTE <msg>sua mensagem</msg>, curta, sem análise.)' },
+      ]).catch(() => ({ out: '', cut: false }));
+      raw = retry.out;
+      text = raw && !retry.cut ? extractMsg(raw) : null;
     }
 
     let shouldTransfer = false;
     let transferReason = '';
     let zapButton = null;
-
-    // Fallback quando a Lê falha (formato/vazamento): venda não espera —
-    // em vez de "deixei anotado", manda a cliente pro WhatsApp com a mensagem dela pré-preenchida
-    const zapFallbackButton = () => {
-      if (!waNumber) return null;
-      const ultima = stripLabel(lastContent).slice(0, 140);
-      return {
-        text: 'Pra você não ficar esperando: é só tocar no botão abaixo e mandar sua mensagem no nosso WhatsApp, as meninas resolvem tudo com você por lá, tá bom? 😉',
-        url: `https://wa.me/${waNumber}?text=${encodeURIComponent(`Oi! Vim do Instagram.${ultima ? ` ${ultima}` : ''}`)}`,
-      };
-    };
 
     if (text === null) {
       if (raw.includes('[SKIP]')) return;
@@ -455,12 +523,16 @@ async function generateAndSend(convStale, msg) {
 
     // [ZAP: peça tamanho X | cidade] → mensagem com BOTÃO "Abrir WhatsApp".
     // "Vim do Instagram" é o marcador que o server.js usa pra etiquetar a origem.
-    const zapMatch = text.match(/\[ZAP:?\s*([^\]]*)\]/i);
+    // v3: tolera "]" faltando no fim (resposta cortada vazava "[ZAP: ..." pra cliente)
+    const zapMatch = text.match(/\[ZAP:?\s*([^\]]*?)\s*(?:\]|$)/i);
     if (zapMatch) {
       text = text.replace(zapMatch[0], '').trim();
       const partes = zapMatch[1].split('|').map(s => s.trim()).filter(Boolean);
       if (waNumber && partes.length) {
-        const cidade = partes.length > 1 ? partes.pop() : null;
+        // v3: a última barra só é cidade se parecer cidade (saíam "Cidade: tamanho GG",
+        // "Cidade: vestido midi listrado" quando o modelo errava o formato)
+        const PRODUTO_RE = /(tamanho|vestido|cal[çc]a|blusa|conjunto|saia|shorts?|camis|t-?shirt|cropped|macac[aã]o|casaco|jaqueta|body|legging|cole[çt]|pe[çc]a|R\$|\bcm\b|quadril|cintura|grade|verificar)|^(pp|p|m|g|gg|xg|xxg|\d{2})$/i;
+        const cidade = partes.length > 1 && !PRODUTO_RE.test(partes[partes.length - 1]) ? partes.pop() : null;
         const linhas = partes.map(p => `- ${p}`).join('\n');
         const prefill = `Oi! Vim do Instagram e quero finalizar meu pedido:\n${linhas}${cidade ? `\nCidade: ${cidade}` : ''}`;
         zapButton = {
@@ -471,9 +543,42 @@ async function generateAndSend(convStale, msg) {
       shouldTransfer = true; transferReason = transferReason || 'venda enviada pro WhatsApp';
     }
 
+    // v3-C: quem só mandou emoji/elogio nunca recebe botão de compra nem transferência por isso
+    if (isLowIntent(lastContent) && (zapButton || shouldTransfer)) {
+      if (!text || PROMISE_RE.test(text)) { console.log('[le-ig] funil bloqueado em reação-só-emoji, silêncio'); return; }
+      zapButton = null; shouldTransfer = false; transferReason = '';
+    }
+
     // Trava: promessa sem transferência nem WhatsApp → transfere de verdade
     if (text && PROMISE_RE.test(text) && !shouldTransfer && !zapButton) {
       shouldTransfer = true; transferReason = 'promessa de confirmar com a equipe';
+    }
+
+    // v3-F: conversa que JÁ foi transferida e ninguém atendeu — em vez de só repetir a
+    // promessa, manda junto o botão do WhatsApp pra cliente ter um caminho real agora
+    if (retransfer && shouldTransfer && !zapButton) {
+      zapButton = zapFallbackButton();
+      if (zapButton) transferReason = (transferReason || 'retransferência') + ' → WhatsApp';
+    }
+
+    // v3-D: chegou mensagem nova da cliente enquanto a resposta era gerada →
+    // descarta esta resposta (poderia pedir algo que ela acabou de informar) e regenera
+    if (inFlight.get(conv.id)?.dirty) { console.log('[le-ig] mensagem nova durante a geração, resposta descartada pra regerar'); return; }
+
+    // v3-E: nunca repete a MESMA mensagem/botão das últimas 2h
+    const h2 = Date.now() - 2 * 3600 * 1000;
+    let suppressed = false;
+    if (text) {
+      const dup = history.find(m => m.from_me && m.sender === 'Lê (IA)' && (m.content || '').trim() === text && new Date(m.timestamp).getTime() > h2);
+      if (dup) { console.log('[le-ig] mensagem idêntica às últimas 2h, suprimida'); text = ''; suppressed = true; }
+    }
+    if (zapButton) {
+      const dupBtn = history.find(m => m.from_me && (m.content || '').includes(zapButton.url) && new Date(m.timestamp).getTime() > h2);
+      if (dupBtn) { console.log('[le-ig] botão do WhatsApp idêntico às últimas 2h, suprimido'); zapButton = null; suppressed = true; }
+    }
+    if (suppressed && !text && !zapButton) {
+      if (shouldTransfer) await doTransfer(transferReason || 'duplicada suprimida');
+      return;
     }
 
     // Transferência NUNCA em silêncio
@@ -482,18 +587,7 @@ async function generateAndSend(convStale, msg) {
 
     if (text) await sendText(text);
 
-    if (zapButton) {
-      const buttons = [{ type: 'web_url', url: zapButton.url, title: 'Abrir WhatsApp' }];
-      try {
-        const btnResult = await sendButtonMessage(conv.phone, zapButton.text, buttons);
-        await recordSent(`${zapButton.text}\n\n🔘 Abrir WhatsApp → ${zapButton.url}`, btnResult?.message_id);
-      } catch (e) {
-        console.error('[le-ig] botão do WhatsApp falhou, enviando link em texto:', e.message);
-        const fallback = `${zapButton.text.replace('no botão abaixo', 'no link abaixo')}\n\n${zapButton.url}`;
-        const igResult = await sendDirectMessage(conv.phone, fallback).catch(() => null);
-        if (igResult) await recordSent(fallback, igResult?.message_id);
-      }
-    }
+    if (zapButton) await sendZapButton(zapButton);
 
     console.log(`🤖 [le-ig] Lê respondeu ${conv.customer_push_name || conv.phone}${zapButton ? ' (botão WhatsApp)' : ''}${shouldTransfer ? ' (transferindo)' : ''}`);
 
@@ -505,4 +599,4 @@ async function generateAndSend(convStale, msg) {
 
 module.exports = { init, maybeReply,
   // exportados pra teste
-  _test: { lojaAberta, isReactionOnly, hasRealText, pendingIssue, unansweredOffer, extractMsg, LEAK_RE, PROMISE_RE } };
+  _test: { lojaAberta, isReactionOnly, hasRealText, isPraiseOnly, isLowIntent, pendingIssue, unansweredOffer, extractMsg, LEAK_RE, PROMISE_RE, ISSUE_RE } };
