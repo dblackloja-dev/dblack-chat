@@ -302,6 +302,7 @@ vip.init({ wa, broadcast: (...args) => broadcast(...args), genId });
 // (lê o outbox loyalty_events do banco do ERP; níveis/cashback rodam em trigger lá)
 const clienteBlack = require('./cliente-black');
 clienteBlack.init({ wa, broadcast: (...args) => broadcast(...args), genId });
+require('./raffle-notify').init({ wa });
 
 // ─── Confirmação de pagamento da Lê (webhook Asaas + poller de fallback) ───
 // Regra do dono (23/09): a venda da Lê NÃO registra no ERP nem baixa estoque lá —
@@ -2281,7 +2282,7 @@ app.post('/api/erp/sales', auth, async (req, res) => {
     // sai no cupom da Elgin (linha de item R$0, contrato do agente antigo) e no WhatsApp
     let luckyStr = null;
     try {
-      const lucky = await erp.raffleNumber({ id: sale.id, store_id: store_id || 'loja4', customer: customerDisplayName, cupom: sale.cupom, total: sale.total });
+      const lucky = await erp.raffleNumber({ id: sale.id, store_id: store_id || 'loja4', customer: customerDisplayName, cupom: sale.cupom, total: sale.total, phone: customer_phone });
       if (lucky) luckyStr = String(lucky).padStart(4, '0');
     } catch (e) { console.error('🎟️ Sorteio:', e.message); }
 
@@ -2383,6 +2384,8 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       try {
         const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}${luckyStr ? `\n🍀 SEU NÚMERO DA SORTE: *${luckyStr}* — sorteio sábado à noite!` : ''}\nObrigado pela compra! 🖤`;
         const cupomResult = await wa.sendImage(customer_phone, receiptBuffer, caption);
+        // Cliente já recebeu o número na legenda (janela aberta) — worker não precisa mandar template
+        if (luckyStr) erp.erpQuery('UPDATE raffle_entries SET notified_at = NOW() WHERE sale_id = $1', [sale.id]).catch(() => {});
 
         // Registra no chat (salva imagem no banco para exibição no painel)
         if (conv) {

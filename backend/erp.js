@@ -325,9 +325,10 @@ async function raffleNumber(sale) {
   const min = +cfg.min > 0 ? +cfg.min : 99.9;
   if (!(+sale.total >= min)) return null;
   const ins = await erpQueryOne(
-    `INSERT INTO raffle_entries (sale_id, store_id, customer, customer_id, total)
-     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (sale_id) DO NOTHING RETURNING n`,
-    [sale.id, sale.store_id || 'loja4', sale.customer || 'Cliente WhatsApp', sale.cupom || '', +sale.total || 0]);
+    `INSERT INTO raffle_entries (sale_id, store_id, customer, customer_id, total, phone)
+     VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (sale_id) DO NOTHING RETURNING n`,
+    [sale.id, sale.store_id || 'loja4', sale.customer || 'Cliente WhatsApp', sale.cupom || '', +sale.total || 0,
+     String(sale.phone || '').replace(/\D/g, '')]);
   if (ins) return ins.n;
   return (await erpQueryOne('SELECT n FROM raffle_entries WHERE sale_id = $1', [sale.id]))?.n ?? null;
 }
