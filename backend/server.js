@@ -2277,6 +2277,14 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       coupon_code: coupon_code || '',
     });
 
+    // Sorteio Número da Sorte (regras/numeração no ERP, settings.raffle) —
+    // sai no cupom da Elgin (linha de item R$0, contrato do agente antigo) e no WhatsApp
+    let luckyStr = null;
+    try {
+      const lucky = await erp.raffleNumber({ id: sale.id, store_id: store_id || 'loja4', customer: customerDisplayName, cupom: sale.cupom, total: sale.total });
+      if (lucky) luckyStr = String(lucky).padStart(4, '0');
+    } catch (e) { console.error('🎟️ Sorteio:', e.message); }
+
     // Registra no dblack-entregas conforme o tipo escolhido pelo vendedor.
     // Retirada: cria o pedido de retirada direto (gera o código, sem formulário
     // do cliente) — precisa aguardar a resposta para enviar o código no WhatsApp.
@@ -2337,13 +2345,17 @@ app.post('/api/erp/sales', auth, async (req, res) => {
       checkoutSync.sendPrintJob(`chat_${sale.id}`, {
         code: sale.cupom,
         paid_at: new Date().toISOString(),
-        items: items.map(i => ({
-          qty: i.quantity || 1,
-          name: i.name || i.product_name || i.description || 'Peça',
-          color: i.color || '',
-          size: i.size && i.size !== 'Único' ? i.size : '',
-          price: parseFloat(i.price) || 0,
-        })),
+        items: [
+          ...items.map(i => ({
+            qty: i.quantity || 1,
+            name: i.name || i.product_name || i.description || 'Peça',
+            color: i.color || '',
+            size: i.size && i.size !== 'Único' ? i.size : '',
+            price: parseFloat(i.price) || 0,
+          })),
+          // Número da sorte como item R$0 — o agente da Elgin imprime sem mudar o contrato
+          ...(luckyStr ? [{ qty: 1, name: `*** NUMERO DA SORTE: ${luckyStr} ***`, color: 'SORTEIO SABADO A NOITE', size: '', price: 0 }] : []),
+        ],
         delivery_fee: 0,
         total: sale.total,
         payment_method: payment_method === 'pix' ? 'pix' : (payment_method || 'pix'),
@@ -2369,7 +2381,7 @@ app.post('/api/erp/sales', auth, async (req, res) => {
     // Envia cupom via WhatsApp e registra no chat
     if (customer_phone && wa.connected) {
       try {
-        const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}\nObrigado pela compra! 🖤`;
+        const caption = `🧾 Cupom D'Black Store\n💰 Total: R$ ${sale.total.toFixed(2)}${luckyStr ? `\n🍀 SEU NÚMERO DA SORTE: *${luckyStr}* — sorteio sábado à noite!` : ''}\nObrigado pela compra! 🖤`;
         const cupomResult = await wa.sendImage(customer_phone, receiptBuffer, caption);
 
         // Registra no chat (salva imagem no banco para exibição no painel)
