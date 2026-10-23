@@ -30,16 +30,19 @@ function init({ wa }) {
       if (!cfg?.active) return;
       const when = cfg.when || 'sábado à noite';
 
+      // Agrupa por venda: compra de R$ 199,80+ tem 2+ números e recebe UMA mensagem com todos
       const rows = await erpQuery(
-        `SELECT n, customer, phone FROM raffle_entries
+        `SELECT sale_id, MIN(customer) AS customer, MIN(phone) AS phone,
+                array_agg(n ORDER BY seq) AS nums
+         FROM raffle_entries
          WHERE notified_at IS NULL AND COALESCE(phone, '') <> ''
-         ORDER BY n ASC LIMIT 15`);
+         GROUP BY sale_id ORDER BY MIN(n) ASC LIMIT 15`);
       for (const r of rows) {
         const phone = normPhone(r.phone);
-        const num = String(r.n).padStart(4, '0');
+        const nums = (r.nums || []).map(n => String(n).padStart(4, '0')).join(', ');
         if (!phone) {
-          await erpQuery('UPDATE raffle_entries SET notified_at = NOW() WHERE n = $1', [r.n]);
-          console.log(`🎟️ Número ${num}: telefone inválido (${r.phone}) — sem aviso`);
+          await erpQuery('UPDATE raffle_entries SET notified_at = NOW() WHERE sale_id = $1', [r.sale_id]);
+          console.log(`🎟️ Número(s) ${nums}: telefone inválido (${r.phone}) — sem aviso`);
           continue;
         }
         const nome = (r.customer || 'Cliente').trim().split(/\s+/)[0] || 'Cliente';
@@ -47,12 +50,12 @@ function init({ wa }) {
           await wa.sendTemplate(phone, TEMPLATE, 'pt_BR', [
             { type: 'body', parameters: [
               { type: 'text', text: nome },
-              { type: 'text', text: num },
+              { type: 'text', text: nums },
               { type: 'text', text: when },
             ]},
           ]);
-          await erpQuery('UPDATE raffle_entries SET notified_at = NOW() WHERE n = $1', [r.n]);
-          console.log(`🎟️ Número da sorte ${num} enviado no WhatsApp de ${nome} (${phone})`);
+          await erpQuery('UPDATE raffle_entries SET notified_at = NOW() WHERE sale_id = $1', [r.sale_id]);
+          console.log(`🎟️ Número(s) da sorte ${nums} enviado(s) no WhatsApp de ${nome} (${phone})`);
         } catch (e) {
           const msg = e.message || '';
           if (/does not exist|not approved|132001|132000|132012/i.test(msg)) {
@@ -60,11 +63,11 @@ function init({ wa }) {
             templateBlockedAt = Date.now();
             return;
           }
-          failures[r.n] = (failures[r.n] || 0) + 1;
-          console.error(`🎟️ Falha ao enviar número ${num} p/ ${phone} (tentativa ${failures[r.n]}):`, msg);
-          if (failures[r.n] >= 3) {
-            await erpQuery('UPDATE raffle_entries SET notified_at = NOW() WHERE n = $1', [r.n]);
-            console.error(`🎟️ Número ${num}: desisti após 3 tentativas — avisar manualmente`);
+          failures[r.sale_id] = (failures[r.sale_id] || 0) + 1;
+          console.error(`🎟️ Falha ao enviar número(s) ${nums} p/ ${phone} (tentativa ${failures[r.sale_id]}):`, msg);
+          if (failures[r.sale_id] >= 3) {
+            await erpQuery('UPDATE raffle_entries SET notified_at = NOW() WHERE sale_id = $1', [r.sale_id]);
+            console.error(`🎟️ Número(s) ${nums}: desisti após 3 tentativas — avisar manualmente`);
           }
         }
       }

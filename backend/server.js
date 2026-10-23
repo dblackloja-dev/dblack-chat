@@ -2282,8 +2282,8 @@ app.post('/api/erp/sales', auth, async (req, res) => {
     // sai no cupom da Elgin (linha de item R$0, contrato do agente antigo) e no WhatsApp
     let luckyStr = null;
     try {
-      const lucky = await erp.raffleNumber({ id: sale.id, store_id: store_id || 'loja4', customer: customerDisplayName, cupom: sale.cupom, total: sale.total, phone: customer_phone });
-      if (lucky) luckyStr = String(lucky).padStart(4, '0');
+      const luckies = await erp.raffleNumber({ id: sale.id, store_id: store_id || 'loja4', customer: customerDisplayName, cupom: sale.cupom, total: sale.total, phone: customer_phone });
+      if (luckies?.length) luckyStr = luckies.map(n => String(n).padStart(4, '0')).join(', ');
     } catch (e) { console.error('🎟️ Sorteio:', e.message); }
 
     // Registra no dblack-entregas conforme o tipo escolhido pelo vendedor.
@@ -2355,7 +2355,7 @@ app.post('/api/erp/sales', auth, async (req, res) => {
             price: parseFloat(i.price) || 0,
           })),
           // Número da sorte como item R$0 — o agente da Elgin imprime sem mudar o contrato
-          ...(luckyStr ? [{ qty: 1, name: `*** NUMERO DA SORTE: ${luckyStr} ***`, color: 'SORTEIO SABADO A NOITE', size: '', price: 0 }] : []),
+          ...(luckyStr ? [{ qty: 1, name: `*** NUMERO(S) DA SORTE: ${luckyStr} ***`, color: 'SORTEIO SABADO A NOITE', size: '', price: 0 }] : []),
         ],
         delivery_fee: 0,
         total: sale.total,

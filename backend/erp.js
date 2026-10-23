@@ -323,14 +323,18 @@ async function raffleNumber(sale) {
   } catch {}
   if (!cfg?.active) return null;
   const min = +cfg.min > 0 ? +cfg.min : 99.9;
-  if (!(+sale.total >= min)) return null;
-  const ins = await erpQueryOne(
-    `INSERT INTO raffle_entries (sale_id, store_id, customer, customer_id, total, phone)
-     VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (sale_id) DO NOTHING RETURNING n`,
-    [sale.id, sale.store_id || 'loja4', sale.customer || 'Cliente WhatsApp', sale.cupom || '', +sale.total || 0,
-     String(sale.phone || '').replace(/\D/g, '')]);
-  if (ins) return ins.n;
-  return (await erpQueryOne('SELECT n FROM raffle_entries WHERE sale_id = $1', [sale.id]))?.n ?? null;
+  // 1 número a cada R$ min (ex.: 199,80 = 2 números); teto 50; idempotente por (sale_id, seq)
+  const qty = Math.min(Math.floor((+sale.total || 0) / min), 50);
+  if (qty < 1) return null;
+  for (let seq = 1; seq <= qty; seq++) {
+    await erpRun(
+      `INSERT INTO raffle_entries (sale_id, seq, store_id, customer, customer_id, total, phone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (sale_id, seq) DO NOTHING`,
+      [sale.id, seq, sale.store_id || 'loja4', sale.customer || 'Cliente WhatsApp', sale.cupom || '', +sale.total || 0,
+       String(sale.phone || '').replace(/\D/g, '')]);
+  }
+  const rows = await erpQuery('SELECT n FROM raffle_entries WHERE sale_id = $1 ORDER BY seq', [sale.id]);
+  return rows.length ? rows.map(r => r.n) : null;
 }
 
 module.exports = { searchProducts, getProductStock, getStores, findCustomerByPhone, loyaltySummary, createSale, checkCampaignCoupon, ensureCashOpen, findUser, listUsers, erpQuery, erpQueryOne, getProductsByRefs, getProductVariants, raffleNumber };
