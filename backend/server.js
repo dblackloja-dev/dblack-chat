@@ -2805,8 +2805,24 @@ app.post('/api/integration/checkout-sale', async (req, res) => {
     if (!phone) return res.json({ ok: true, skipped: 'sem checkout_sale_alert_phone configurado' });
     const lista = (Array.isArray(items) ? items : []).map(i => `• ${i.qty || 1}x ${i.name}`).join('\n');
     const valor = (Number(total) || 0).toFixed(2).replace('.', ',');
-    const msg = `🛒 *VENDA NOVA NO CHECKOUT* — ${code}\n\n👤 ${customer || 'Cliente'}\n💳 ${payment || ''} — *R$ ${valor}*\n${delivery || ''}${coupon ? `\n🎟️ Cupom ${coupon}` : ''}\n\n${lista}`;
-    await wa.sendMessage(phone, msg, { isBot: true });
+    // Template aprovado entrega SEMPRE (sem janela de 24h) — fallback pro texto livre
+    // se o template falhar (ex.: ainda não aprovado). Params de template NÃO podem ter \n.
+    const umaLinha = (s) => String(s || '').replace(/\n+/g, ' · ').slice(0, 500);
+    try {
+      await wa.sendTemplate(phone, 'venda_aprovada_checkout', 'pt_BR', [
+        { type: 'body', parameters: [
+          { type: 'text', text: String(code || '—') },
+          { type: 'text', text: umaLinha(customer || 'Cliente') },
+          { type: 'text', text: umaLinha(`${payment || ''} de R$ ${valor}${coupon ? ` (cupom ${coupon})` : ''}`) },
+          { type: 'text', text: umaLinha(delivery || '—') },
+          { type: 'text', text: umaLinha(lista) || '—' },
+        ] },
+      ]);
+    } catch (e) {
+      console.log('📣 checkout-sale: template falhou (' + e.message + '), tentando texto livre');
+      const msg = `🛒 *VENDA NOVA NO CHECKOUT* — ${code}\n\n👤 ${customer || 'Cliente'}\n💳 ${payment || ''} — *R$ ${valor}*\n${delivery || ''}${coupon ? `\n🎟️ Cupom ${coupon}` : ''}\n\n${lista}`;
+      await wa.sendMessage(phone, msg, { isBot: true });
+    }
     res.json({ ok: true });
   } catch (e) {
     console.error('📣 checkout-sale:', e.message);
