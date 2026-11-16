@@ -4,13 +4,36 @@
 require('dotenv').config();
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v23.0';
-const BASE = `https://graph.instagram.com/${GRAPH_VERSION}`;
-const TOKEN = process.env.META_IG_TOKEN;
 const IG_USER_ID = process.env.META_IG_USER_ID;
 
+// Token: banco (chat_settings.meta_ig_token, gravado pelo /api/ig/oauth/callback) com
+// fallback pro env META_IG_TOKEN. Cache de 60s pra não bater no banco a cada chamada.
+let tokenCache = { value: null, at: 0 };
+async function getToken() {
+  if (tokenCache.value && Date.now() - tokenCache.at < 60000) return tokenCache.value;
+  let tok = null;
+  try {
+    const { queryOne } = require('../database');
+    const row = await queryOne("SELECT value FROM chat_settings WHERE key = 'meta_ig_token'");
+    tok = row?.value || null;
+  } catch { /* banco indisponível → cai pro env */ }
+  tok = tok || process.env.META_IG_TOKEN;
+  tokenCache = { value: tok, at: Date.now() };
+  return tok;
+}
+function invalidateTokenCache() { tokenCache = { value: null, at: 0 }; }
+
+// Token IGAA* (login do Instagram) fala com graph.instagram.com; EAA* (login unificado/SUAT,
+// nunca expira) fala com graph.facebook.com — mesmos endpoints de mensagens/perfil/mídia.
+function baseFor(token) {
+  const host = token && token.startsWith('IGAA') ? 'graph.instagram.com' : 'graph.facebook.com';
+  return `https://${host}/${GRAPH_VERSION}`;
+}
+
 async function igGraph(method, pathPart, body) {
+  const TOKEN = await getToken();
   if (!TOKEN || !IG_USER_ID) throw new Error('META_IG_TOKEN/META_IG_USER_ID não configurados');
-  const res = await fetch(`${BASE}/${pathPart}`, {
+  const res = await fetch(`${baseFor(TOKEN)}/${pathPart}`, {
     method,
     headers: {
       'Authorization': `Bearer ${TOKEN}`,
@@ -76,4 +99,4 @@ async function igGet(pathPart) {
   return igGraph('GET', pathPart);
 }
 
-module.exports = { sendPrivateReply, sendDirectMessage, sendMediaMessage, sendButtonMessage, replyToComment, getUserProfile, igGet };
+module.exports = { sendPrivateReply, sendDirectMessage, sendMediaMessage, sendButtonMessage, replyToComment, getUserProfile, igGet, invalidateTokenCache };

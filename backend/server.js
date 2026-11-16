@@ -626,6 +626,39 @@ app.get('/api/webhook/meta', (req, res) => {
   res.sendStatus(403);
 });
 
+// ─── Renovação do token do Instagram (login unificado / SUAT, não expira) ───
+// Fluxo: abrir https://www.facebook.com/v23.0/dialog/oauth?client_id=<FB_APP_ID>&redirect_uri=<esta rota>&config_id=<CONFIG_ID>&response_type=code
+// logado como o dono → Meta redireciona pra cá com ?code= → trocamos pelo token e gravamos
+// em chat_settings.meta_ig_token (api.js lê de lá com fallback pro env META_IG_TOKEN).
+app.get('/api/ig/oauth/callback', async (req, res) => {
+  try {
+    const code = req.query.code;
+    if (!code) return res.status(400).send('Faltou o ?code= da Meta.');
+    const appId = process.env.META_FB_APP_ID || '2133094180871187';
+    const secret = process.env.META_FB_APP_SECRET;
+    if (!secret) return res.status(500).send('META_FB_APP_SECRET não configurado no Railway.');
+    const redirectUri = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/api/ig/oauth/callback`;
+    const params = new URLSearchParams({ client_id: appId, client_secret: secret, redirect_uri: redirectUri, code });
+    const r = await fetch(`https://graph.facebook.com/v23.0/oauth/access_token?${params}`);
+    const json = await r.json().catch(() => ({}));
+    if (!json.access_token) {
+      console.error('[ig-oauth] troca falhou:', JSON.stringify(json?.error || json));
+      return res.status(502).send('Meta recusou a troca do código: ' + (json?.error?.message || 'erro desconhecido') + ' — gere um código novo abrindo o diálogo de login de novo.');
+    }
+    await queryRun(
+      "INSERT INTO chat_settings (key, value) VALUES ('meta_ig_token', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+      [json.access_token]
+    );
+    igApi.invalidateTokenCache();
+    const tipo = json.expires_in ? `expira em ${Math.round(json.expires_in / 86400)} dias` : 'não expira';
+    console.log(`✅ [ig-oauth] token do Instagram renovado e salvo no banco (${tipo})`);
+    res.send(`✅ Token do Instagram renovado e salvo (${tipo})! As respostas do painel já devem funcionar. Pode fechar esta aba.`);
+  } catch (e) {
+    console.error('[ig-oauth]', e);
+    res.status(500).send('Erro: ' + e.message);
+  }
+});
+
 // ─── Black (assistente pessoal do dono) ───
 // Mensagens vindas dos números do dono NÃO entram no painel/fluxo de clientes:
 // o payload da Meta é repassado inteiro pro serviço da Black, que responde
